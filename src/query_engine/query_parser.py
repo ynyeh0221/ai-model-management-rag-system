@@ -64,7 +64,7 @@ class QueryParser:
         self.use_langchain = use_langchain
         if use_langchain:
             try:
-                from langchain.llms import OpenAI
+                from langchain.llms import Ollama
                 from langchain.chains import LLMChain
                 from langchain.prompts import PromptTemplate
                 
@@ -89,7 +89,7 @@ class QueryParser:
                     template=intent_template
                 )
                 
-                self.langchain_llm = OpenAI(temperature=0)
+                self.langchain_llm = Ollama(model="llama3", temperature=0)
                 self.intent_chain = LLMChain(
                     llm=self.langchain_llm,
                     prompt=self.intent_prompt
