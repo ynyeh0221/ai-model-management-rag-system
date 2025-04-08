@@ -1,8 +1,3 @@
-Absolutely! Here's the **emoji-free version of the `README.md`**, keeping the tone professional and clean:
-
----
-
-```markdown
 # AI Model Management RAG System
 
 This repository contains a modular Retrieval-Augmented Generation (RAG) system for managing AI model scripts, associated metadata, and generated images. The system supports schema-based validation, vector-based retrieval, multi-modal querying, side-by-side model comparison, and Colab notebook generation.
@@ -169,7 +164,3 @@ This project is licensed under the MIT License.
 
 For questions, issues, or feature requests, please open an issue or contact the maintainers at [your-email@domain.com](mailto:your-email@domain.com).
 ```
-
----
-
-Would you like me to generate a `CONTRIBUTING.md` or a `LICENSE` file next?
