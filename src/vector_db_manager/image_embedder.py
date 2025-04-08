@@ -27,7 +27,7 @@ class ImageEmbedder:
         """
         self.model_name = model_name
         self.pretrained = pretrained
-        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.device = device or ("mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu"))
         self._initialize_model()
         
     def _initialize_model(self):
