@@ -47,7 +47,7 @@ class TextEmbedder:
             
             # Detect device if not specified
             if self.device is None:
-                self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+                self.device = device or ("mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu"))
             
             # Load the model
             self.model = SentenceTransformer(self.model_name, device=self.device)
