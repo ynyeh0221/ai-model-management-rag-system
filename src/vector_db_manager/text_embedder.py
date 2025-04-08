@@ -1,21 +1,403 @@
 # src/vector_db_manager/text_embedder.py
+
+import os
+import logging
+import numpy as np
+from typing import List, Union, Optional, Dict, Any
+from sklearn.decomposition import PCA
+import torch
+
 class TextEmbedder:
-    def __init__(self, model_name="all-MiniLM-L6-v2"):
+    """
+    Text embedding generator that creates vector representations
+    of text and code for semantic search and comparison.
+    """
+    
+    def __init__(self, model_name="all-MiniLM-L6-v2", device=None, cache_folder=None):
+        """
+        Initialize the TextEmbedder with a specific model.
+        
+        Args:
+            model_name: Name of the SentenceTransformer model to use
+            device: Device to run the model on ('cpu', 'cuda', or None for auto-detection)
+            cache_folder: Optional folder to cache downloaded models
+        """
         self.model_name = model_name
+        self.device = device
+        self.cache_folder = cache_folder
+        self.logger = logging.getLogger(__name__)
+        self.model = None
+        self.embedding_dim = None
+        self._pca_models = {}  # Cache for PCA models of different dimensions
         self._initialize_model()
     
     def _initialize_model(self):
-        """Initialize the embedding model."""
-        pass
+        """
+        Initialize the embedding model.
+        Downloads and loads the model from Hugging Face.
+        """
+        try:
+            # Import here for better error handling
+            from sentence_transformers import SentenceTransformer
+            
+            # Set cache folder if provided
+            if self.cache_folder:
+                os.makedirs(self.cache_folder, exist_ok=True)
+                os.environ['TRANSFORMERS_CACHE'] = self.cache_folder
+            
+            # Detect device if not specified
+            if self.device is None:
+                self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+            
+            # Load the model
+            self.model = SentenceTransformer(self.model_name, device=self.device)
+            
+            # Store embedding dimension
+            self.embedding_dim = self.model.get_sentence_embedding_dimension()
+            
+            self.logger.info(f"Initialized TextEmbedder with model {self.model_name} "
+                           f"(dimension: {self.embedding_dim}) on {self.device}")
+            
+        except ImportError:
+            self.logger.error("sentence-transformers package not found. Install with: "
+                            "pip install sentence-transformers")
+            raise
+        except Exception as e:
+            self.logger.error(f"Error initializing embedding model: {e}", exc_info=True)
+            raise
     
-    def embed_text(self, text):
-        """Generate embeddings for a text string."""
-        pass
+    def embed_text(self, text: str, normalize: bool = True) -> np.ndarray:
+        """
+        Generate embeddings for a text string.
+        
+        Args:
+            text: Text to embed
+            normalize: Whether to L2-normalize the embedding
+            
+        Returns:
+            numpy.ndarray: Embedding vector
+        """
+        if not text:
+            self.logger.warning("Received empty text for embedding")
+            # Return zero vector with correct dimension
+            return np.zeros(self.embedding_dim)
+        
+        try:
+            # Generate embedding
+            embedding = self.model.encode(text, normalize_embeddings=normalize)
+            return embedding
+            
+        except Exception as e:
+            self.logger.error(f"Error embedding text: {e}", exc_info=True)
+            # Return zero vector in case of error
+            return np.zeros(self.embedding_dim)
     
-    def embed_batch(self, texts):
-        """Generate embeddings for a batch of texts."""
-        pass
+    def embed_batch(self, texts: List[str], batch_size: int = 32, 
+                   normalize: bool = True, show_progress_bar: bool = False) -> np.ndarray:
+        """
+        Generate embeddings for a batch of texts.
+        
+        Args:
+            texts: List of texts to embed
+            batch_size: Batch size for processing
+            normalize: Whether to L2-normalize the embeddings
+            show_progress_bar: Whether to show a progress bar
+            
+        Returns:
+            numpy.ndarray: Array of embedding vectors
+        """
+        if not texts:
+            self.logger.warning("Received empty list for batch embedding")
+            return np.array([])
+        
+        try:
+            # Filter out empty texts and replace with single space
+            processed_texts = [text if text.strip() else " " for text in texts]
+            
+            # Generate embeddings in batch
+            embeddings = self.model.encode(
+                processed_texts, 
+                batch_size=batch_size,
+                normalize_embeddings=normalize,
+                show_progress_bar=show_progress_bar
+            )
+            
+            return embeddings
+            
+        except Exception as e:
+            self.logger.error(f"Error embedding batch of {len(texts)} texts: {e}", exc_info=True)
+            # Return empty array in case of error
+            return np.zeros((len(texts), self.embedding_dim))
     
-    def reduce_dimensions(self, embeddings, dim=256):
-        """Reduce dimensions of embeddings using PCA."""
-        pass
+    def reduce_dimensions(self, embeddings: np.ndarray, dim: int = 256, 
+                         fit: bool = False) -> np.ndarray:
+        """
+        Reduce dimensions of embeddings using PCA.
+        
+        Args:
+            embeddings: Embeddings to reduce
+            dim: Target dimensionality
+            fit: Whether to fit a new PCA model or use cached model
+            
+        Returns:
+            numpy.ndarray: Reduced embeddings
+        """
+        if embeddings.size == 0:
+            self.logger.warning("Received empty array for dimension reduction")
+            return embeddings
+        
+        # If target dim is higher than or equal to current dim, return as is
+        if dim >= embeddings.shape[1]:
+            self.logger.warning(f"Target dimension {dim} is not lower than current "
+                             f"dimension {embeddings.shape[1]}. No reduction performed.")
+            return embeddings
+        
+        try:
+            # Get or create PCA model
+            pca_model = self._get_pca_model(dim, fit, embeddings)
+            
+            # Transform embeddings
+            reduced_embeddings = pca_model.transform(embeddings)
+            
+            self.logger.debug(f"Reduced embeddings from {embeddings.shape[1]} to {dim} dimensions")
+            
+            return reduced_embeddings
+            
+        except Exception as e:
+            self.logger.error(f"Error reducing dimensions: {e}", exc_info=True)
+            # Return original embeddings in case of error
+            return embeddings
+    
+    def _get_pca_model(self, dim: int, fit: bool, embeddings: np.ndarray) -> PCA:
+        """
+        Get or create a PCA model for dimension reduction.
+        
+        Args:
+            dim: Target dimensionality
+            fit: Whether to fit a new model
+            embeddings: Embeddings to fit the model (if fit=True)
+            
+        Returns:
+            PCA: The PCA model
+        """
+        # If fitting is requested or no cached model exists, create a new one
+        if fit or dim not in self._pca_models:
+            pca = PCA(n_components=dim, random_state=42)
+            pca.fit(embeddings)
+            
+            # Cache the model
+            self._pca_models[dim] = pca
+            
+            self.logger.debug(f"Fitted new PCA model for dimension {dim}")
+            
+            return pca
+        
+        # Use cached model
+        return self._pca_models[dim]
+    
+    def embed_code(self, code: str, normalize: bool = True) -> np.ndarray:
+        """
+        Generate embeddings for code snippets with special handling.
+        
+        Args:
+            code: Code to embed
+            normalize: Whether to L2-normalize the embedding
+            
+        Returns:
+            numpy.ndarray: Embedding vector
+        """
+        # In a more sophisticated implementation, this could use code-specific
+        # preprocessing or a specialized model for code embeddings
+        return self.embed_text(code, normalize)
+    
+    def embed_mixed_content(self, content: Dict[str, Any], normalize: bool = True) -> np.ndarray:
+        """
+        Generate embeddings for mixed content with different sections.
+        
+        Args:
+            content: Dictionary with text sections
+            normalize: Whether to L2-normalize the embedding
+            
+        Returns:
+            numpy.ndarray: Embedding vector
+        """
+        if not content:
+            self.logger.warning("Received empty content for embedding")
+            return np.zeros(self.embedding_dim)
+        
+        try:
+            # Combine different content sections with weights
+            sections = []
+            
+            # Add title with higher weight
+            if 'title' in content and content['title']:
+                sections.append(content['title'] + " " + content['title'])  # Repeat for higher weight
+            
+            # Add description
+            if 'description' in content and content['description']:
+                sections.append(content['description'])
+            
+            # Add code with special handling
+            if 'code' in content and content['code']:
+                sections.append(content['code'])
+            
+            # Add comments or docstrings
+            if 'comments' in content and content['comments']:
+                sections.append(content['comments'])
+            
+            # Combine all sections
+            combined_text = " ".join(sections)
+            
+            # Generate embedding
+            return self.embed_text(combined_text, normalize)
+            
+        except Exception as e:
+            self.logger.error(f"Error embedding mixed content: {e}", exc_info=True)
+            # Return zero vector in case of error
+            return np.zeros(self.embedding_dim)
+    
+    def compute_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:
+        """
+        Compute cosine similarity between two embeddings.
+        
+        Args:
+            embedding1: First embedding
+            embedding2: Second embedding
+            
+        Returns:
+            float: Cosine similarity score (0-1)
+        """
+        try:
+            # Ensure embeddings are normalized
+            if embedding1.ndim == 1:
+                embedding1 = embedding1.reshape(1, -1)
+            if embedding2.ndim == 1:
+                embedding2 = embedding2.reshape(1, -1)
+                
+            # Normalize if needed
+            norm1 = np.linalg.norm(embedding1, axis=1, keepdims=True)
+            norm2 = np.linalg.norm(embedding2, axis=1, keepdims=True)
+            
+            if np.any(norm1 == 0) or np.any(norm2 == 0):
+                return 0.0
+                
+            embedding1_normalized = embedding1 / norm1
+            embedding2_normalized = embedding2 / norm2
+            
+            # Compute cosine similarity
+            similarity = np.dot(embedding1_normalized, embedding2_normalized.T)[0, 0]
+            
+            # Ensure the result is in the range [0, 1]
+            return max(0.0, min(1.0, float(similarity)))
+            
+        except Exception as e:
+            self.logger.error(f"Error computing similarity: {e}", exc_info=True)
+            return 0.0
+    
+    def find_most_similar(self, query_embedding: np.ndarray, 
+                         embeddings: np.ndarray, 
+                         top_k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Find the most similar embeddings to a query embedding.
+        
+        Args:
+            query_embedding: Query embedding
+            embeddings: Array of embeddings to search
+            top_k: Number of top matches to return
+            
+        Returns:
+            List of dicts with indices and similarity scores
+        """
+        try:
+            # Ensure query embedding is normalized
+            query_norm = np.linalg.norm(query_embedding)
+            if query_norm > 0:
+                query_embedding = query_embedding / query_norm
+            
+            # Ensure embeddings are normalized
+            norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+            valid_indices = np.where(norms.flatten() > 0)[0]
+            
+            if len(valid_indices) == 0:
+                return []
+                
+            valid_embeddings = embeddings[valid_indices] / norms[valid_indices]
+            
+            # Compute similarities
+            similarities = np.dot(valid_embeddings, query_embedding)
+            
+            # Get top k indices
+            if len(similarities) <= top_k:
+                top_indices = np.argsort(-similarities)
+            else:
+                top_indices = np.argpartition(-similarities, top_k)[:top_k]
+                top_indices = top_indices[np.argsort(-similarities[top_indices])]
+            
+            # Map back to original indices
+            original_indices = valid_indices[top_indices]
+            
+            # Create results
+            results = [
+                {
+                    'index': int(original_indices[i]),
+                    'score': float(similarities[top_indices[i]])
+                }
+                for i in range(len(top_indices))
+            ]
+            
+            return results
+            
+        except Exception as e:
+            self.logger.error(f"Error finding most similar embeddings: {e}", exc_info=True)
+            return []
+    
+    def save_embeddings(self, embeddings: np.ndarray, filepath: str) -> bool:
+        """
+        Save embeddings to a file.
+        
+        Args:
+            embeddings: Embeddings to save
+            filepath: Path to save to
+            
+        Returns:
+            bool: Success status
+        """
+        try:
+            directory = os.path.dirname(filepath)
+            if directory:
+                os.makedirs(directory, exist_ok=True)
+                
+            np.save(filepath, embeddings)
+            
+            self.logger.debug(f"Saved embeddings to {filepath}")
+            
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"Error saving embeddings to {filepath}: {e}", exc_info=True)
+            return False
+    
+    def load_embeddings(self, filepath: str) -> Optional[np.ndarray]:
+        """
+        Load embeddings from a file.
+        
+        Args:
+            filepath: Path to load from
+            
+        Returns:
+            numpy.ndarray or None: Loaded embeddings or None if error
+        """
+        try:
+            if not os.path.exists(filepath):
+                self.logger.warning(f"Embeddings file {filepath} not found")
+                return None
+                
+            embeddings = np.load(filepath)
+            
+            self.logger.debug(f"Loaded embeddings from {filepath}")
+            
+            return embeddings
+            
+        except Exception as e:
+            self.logger.error(f"Error loading embeddings from {filepath}: {e}", exc_info=True)
+            return None
