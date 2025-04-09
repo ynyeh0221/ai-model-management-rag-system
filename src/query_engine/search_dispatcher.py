@@ -127,52 +127,48 @@ class SearchDispatcher:
                     'execution_time_ms': (time.time() - start_time) * 1000
                 }
             }
-    
+
     async def handle_text_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle a text search query for model scripts and metadata.
-        
+
         Args:
             query: The processed query text
             parameters: Dictionary of extracted parameters
-            
+
         Returns:
             Dictionary containing search results for model scripts and metadata
         """
         self.logger.debug(f"Handling text search: {query}")
         start_time = time.time()
-        
+
         try:
             # Generate embedding for the query
             embedding_start = time.time()
             query_embedding = self.text_embedder.embed_text(query)
             embedding_time = (time.time() - embedding_start) * 1000
-            
+
             # Extract search parameters
             limit = parameters.get('limit', 10)
             filters = parameters.get('filters', {})
-            
-            # Prepare Chroma query
+
+            # Prepare Chroma query - Fix: Use the correct parameter structure
+            # The 'query' parameter needs to be a dict with an 'embedding' key
             search_params = {
-                'query': {'embedding': query_embedding},  # Wrap in query dict
-                'where': self._translate_filters_to_chroma(filters),  # 'where' not 'filters'
+                'query': {'embedding': query_embedding},  # This is the correct structure
+                'where': self._translate_filters_to_chroma(filters),
                 'limit': limit,
-                'include': ["metadatas", "documents"]  # Note plurals for Chroma API
+                'include': ["metadatas", "documents"]
             }
-            
+
             # Execute vector search
             search_start = time.time()
-            # Check which parameters your search method actually accepts
-            if 'embedding' in search_params:
-                # Rename the parameter to match what ChromaManager expects
-                search_params['query_embedding'] = search_params.pop('embedding')
-
             model_results = await self.chroma_manager.search(
                 collection_name="model_scripts",
                 **search_params
             )
             search_time = (time.time() - search_start) * 1000
-            
+
             # Process results
             items = []
             for idx, result in enumerate(model_results.get('results', [])):
@@ -183,7 +179,7 @@ class SearchDispatcher:
                     'content': result.get('document', ""),
                     'rank': idx + 1
                 })
-            
+
             # Log performance metrics if analytics available
             if self.analytics and 'query_id' in parameters:
                 self.analytics.log_performance_metrics(
@@ -192,7 +188,7 @@ class SearchDispatcher:
                     search_time_ms=int(search_time),
                     total_time_ms=int((time.time() - start_time) * 1000)
                 )
-            
+
             return {
                 'success': True,
                 'type': 'text_search',
@@ -204,7 +200,7 @@ class SearchDispatcher:
                     'total_time_ms': (time.time() - start_time) * 1000
                 }
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error in text search: {e}", exc_info=True)
             raise
@@ -903,36 +899,44 @@ class SearchDispatcher:
                 comparisons['efficiency'] = efficiency_metrics
         
         return comparisons
-    
+
     def _translate_filters_to_chroma(self, filters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Translate query filters to Chroma's filter format.
-        
+
         Args:
             filters: Filters in the query format
-            
+
         Returns:
             Filters in Chroma's format
         """
+        # Add defensive checks at the beginning
+        if filters is None:
+            return {}
+
+        if isinstance(filters, list):
+            self.logger.warning("Filters received as list instead of dictionary. Converting to empty dict.")
+            return {}
+
         chroma_filters = {}
-        
+
         # Handle direct mappings
         for key, value in filters.items():
             # Skip nested filters for separate handling
             if isinstance(value, dict) and any(op.startswith('$') for op in value.keys()):
                 continue
-            
+
             # Handle list values
             if isinstance(value, list):
                 chroma_filters[key] = {"$in": value}
             else:
                 chroma_filters[key] = {"$eq": value}
-        
+
         # Handle operator-based filters
         for key, operators in filters.items():
             if not isinstance(operators, dict):
                 continue
-            
+
             for op, value in operators.items():
                 if op == "$eq":
                     chroma_filters[key] = {"$eq": value}
@@ -953,9 +957,9 @@ class SearchDispatcher:
                 elif op == "$contains":
                     # Special handling for string contains
                     chroma_filters[key] = {"$contains": value}
-        
+
         return chroma_filters
-    
+
     def _sanitize_parameters(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Sanitize parameters for inclusion in response metadata.

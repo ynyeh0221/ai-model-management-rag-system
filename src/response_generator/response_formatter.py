@@ -51,16 +51,8 @@ class ResponseFormatter:
                         response_type: str = "text") -> Dict[str, Any]:
         """
         Format results into a response based on the query type and desired response format.
-
-        Args:
-            results: List of retrieved documents/results
-            query: Original query information including intent and parameters or query string
-            response_type: Desired response format (text, markdown, html)
-
-        Returns:
-            Formatted response with appropriate content and metadata
         """
-        # Convert string query to dict if needed
+        # Convert string query to dict if needed.
         if isinstance(query, str):
             query = {"intent": response_type, "type": response_type}
         elif isinstance(query, dict) and "type" not in query and "intent" in query:
@@ -69,7 +61,23 @@ class ResponseFormatter:
         self.logger.info(
             f"Formatting response of type: {response_type} for query intent: {query.get('intent', 'general')}")
 
-        # Get appropriate template based on query intent and response type
+        # Filter out fallback LLM responses (with id starting "llm_response")
+        filtered_results = [r for r in results if
+                            not (isinstance(r, dict) and r.get("id", "").startswith("llm_response"))]
+        if not filtered_results:
+            rendered_content = "No results found."
+            return {
+                'content': rendered_content,
+                'citations': [],
+                'metadata': {
+                    'timestamp': datetime.now().isoformat(),
+                    'result_count': 0
+                }
+            }
+        # Use the filtered results for further processing.
+        results = filtered_results
+
+        # Get appropriate template based on query intent and response type.
         template_key = f"{query.get('intent', 'general')}_{response_type}"
         template = self.template_manager.get_template(template_key)
 
@@ -77,7 +85,7 @@ class ResponseFormatter:
             self.logger.warning(f"No template found for {template_key}, using default")
             template = self._get_default_template(response_type)
 
-        # Process results based on query intent
+        # Process results based on query intent.
         if query.get('intent') == 'model_info':
             return self._format_model_info(results, template, response_type)
         elif query.get('intent') == 'model_comparison':
@@ -87,10 +95,10 @@ class ResponseFormatter:
         elif query.get('intent') == 'image_search':
             return self.format_image_gallery(results, template, response_type)
         else:
-            # General information response
+            # General information response.
             return self._format_general_info(results, template, response_type)
-    
-    def _format_general_info(self, results: List[Dict[str, Any]], 
+
+    def _format_general_info(self, results: List[Dict[str, Any]],
                             template: Template, response_type: str) -> Dict[str, Any]:
         """Format general information response."""
         # Extract relevant information from results

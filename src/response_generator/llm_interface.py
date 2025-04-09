@@ -12,7 +12,7 @@ class LLMInterface:
     
     def __init__(self, 
                  provider="ollama", 
-                 model_name="llama3", 
+                 model_name="llama3:latest", 
                  base_url="http://localhost:11434",
                  timeout=120,
                  max_retries=3,
@@ -298,7 +298,7 @@ if __name__ == "__main__":
     )
     
     # Initialize the interface
-    llm = LLMInterface(provider="ollama", model_name="llama3")
+    llm = LLMInterface(provider="ollama", model_name="llama3:latest")
     
     # Generate a simple response
     response = llm.generate_response(

@@ -36,7 +36,7 @@ from src.response_generator.prompt_visualizer import PromptVisualizer
 def initialize_components(config_path="./config"):
     """Initialize all components of the RAG system."""
     # Initialize document processor components
-    schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry"))
+    schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
     code_parser = CodeParser(schema_validator)
     metadata_extractor = MetadataExtractor()
     image_processor = ImageProcessor(schema_validator)
@@ -100,19 +100,11 @@ def initialize_components(config_path="./config"):
         # }
     }
 
+
 def process_model_scripts(components, directory_path):
-    """Process model scripts in a directory.
-    
-    This function walks through the directory to find model script files,
-    processes them using the document processor components, generates
-    embeddings, and stores them in the vector database.
-    
-    Args:
-        components: Dictionary containing initialized system components
-        directory_path: Path to directory containing model scripts
-    """
+    """Process model scripts in a directory."""
     print(f"Processing model scripts in {directory_path}...")
-    
+
     # Extract required components
     code_parser = components["document_processor"]["code_parser"]
     metadata_extractor = components["document_processor"]["metadata_extractor"]
@@ -120,32 +112,34 @@ def process_model_scripts(components, directory_path):
     text_embedder = components["vector_db_manager"]["text_embedder"]
     chroma_manager = components["vector_db_manager"]["chroma_manager"]
     access_control = components["vector_db_manager"]["access_control"]
-    
+
     # Set up logging
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("model_script_processor")
-    
+
     # Ensure directory exists
     if not os.path.isdir(directory_path):
         logger.error(f"Directory {directory_path} does not exist")
         return
-    
+
     # Supported file extensions for model scripts
     supported_extensions = ['.py', '.ipynb', '.json', '.yaml', '.yml']
-    
-    # Find all model script files
+
+    # Find all model script files recursively
     script_files = []
     for ext in supported_extensions:
         script_files.extend(glob.glob(os.path.join(directory_path, f"**/*{ext}"), recursive=True))
-    
-    logger.info(f"Found {len(script_files)} potential model script files")
-    
+
+    # Exclude files from the virtual environment folder, e.g., any path containing '/~/myenv/'
+    script_files = [f for f in script_files if '/~/myenv/' not in f]
+
+    logger.info(f"Found {len(script_files)} potential model script files after filtering")
+
     # Process files in parallel using a thread pool
     with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-        future_to_file = {executor.submit(process_single_script, 
-                                          file_path, 
-                                          components): file_path for file_path in script_files}
-        
+        future_to_file = {executor.submit(process_single_script, file_path, components): file_path
+                          for file_path in script_files}
+
         for future in concurrent.futures.as_completed(future_to_file):
             file_path = future_to_file[future]
             try:
@@ -157,7 +151,7 @@ def process_model_scripts(components, directory_path):
                     logger.warning(f"Skipped {file_path}: Not a model script")
             except Exception as e:
                 logger.error(f"Error processing {file_path}: {str(e)}")
-    
+
     logger.info("Model script processing completed")
 
 def process_single_script(file_path, components):
@@ -185,7 +179,7 @@ def process_single_script(file_path, components):
         return None
     
     # 2. Extract metadata
-    metadata = metadata_extractor.extract_metadata(file_path, parse_result)
+    metadata = metadata_extractor.extract_metadata(file_path)
     
     # 3. Split into chunks for processing
     chunks = code_parser.split_into_chunks(parse_result["content"], chunk_size=1000, overlap=200)
@@ -218,12 +212,12 @@ def process_single_script(file_path, components):
         document["metadata"]["access_control"] = access_metadata
         
         # 7. Store in Chroma
-        chroma_manager.add_document(
-            collection="model_scripts",
+        asyncio.run(chroma_manager.add_document(
+            collection_name="model_scripts",
             document_id=document["id"],
             document=document,
-            embedding=embedding
-        )
+            embed_content=embedding
+        ))
         
         documents.append(document)
     
@@ -341,12 +335,12 @@ def process_single_image(file_path, components):
     document["metadata"]["access_control"] = access_metadata
     
     # 6. Store in Chroma
-    chroma_manager.add_document(
-        collection="generated_images",
+    asyncio.run(chroma_manager.add_document(
+        collection_name="generated_images",
         document_id=document_id,
         document=document,
-        embedding=embedding
-    )
+        embed_content=embedding
+    ))
     
     # 7. Create and store thumbnail if it doesn't exist
     thumbnail_path = document["metadata"].get("thumbnail_path")

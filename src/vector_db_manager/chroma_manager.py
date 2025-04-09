@@ -47,7 +47,7 @@ class ChromaManager:
             self.client = chromadb.PersistentClient(
                 path=self.persist_directory,
                 settings=Settings(
-                    anonymized_telemetry=False,
+                    anonymized_telemetry=False,  # Explicitly disable telemetry
                     allow_reset=True
                 )
             )
@@ -189,41 +189,103 @@ class ChromaManager:
         
         # Get or create the collection
         return self._get_or_create_collection(name, embedding_function)
-    
-    async def add_document(self, document: Dict[str, Any], 
-                         collection_name: str = "model_scripts",
-                         embed_content: bool = True) -> str:
+
+    async def add_document(self,
+                           document: Dict[str, Any],
+                           document_id: Optional[str] = None,
+                           collection_name: str = "model_scripts",
+                           embed_content: bool = True) -> str:
         """
         Add a document to the specified collection.
-        
+
         Args:
-            document: Document to add
-            collection_name: Name of the collection to add to
-            embed_content: Whether to embed the content
-            
+            document: The document to add.
+            document_id: Optional document ID. If not provided, one is generated.
+            collection_name: Name of the collection to add to.
+            embed_content: Whether to generate an embedding using the document's content.
+
         Returns:
-            str: ID of the added document
+            str: The ID of the added document.
         """
         try:
-            # Extract document components
-            doc_id = document.get("id", f"{collection_name}_{hash(str(document))}")
+            # Convert embed_content to a simple boolean if it's a numpy array or other complex type
+            if not isinstance(embed_content, bool):
+                if isinstance(embed_content, np.ndarray):
+                    # If it's a numpy array, convert using any()
+                    should_embed = embed_content.any()
+                else:
+                    # For any other type, try simple boolean conversion
+                    try:
+                        should_embed = bool(embed_content)
+                    except Exception:
+                        # Default to True if conversion fails
+                        should_embed = True
+            else:
+                should_embed = embed_content
+
+            # Use the provided document_id if given, otherwise generate one.
+            if document_id is None:
+                doc_id = document.get("id", f"{collection_name}_{hash(str(document))}")
+            else:
+                doc_id = document_id
+
             content = document.get("content", "")
             metadata = document.get("metadata", {})
-            
-            # Validate metadata
+
+            # Ensure metadata is a dictionary.
             if not isinstance(metadata, dict):
                 metadata = {}
-            
-            # Select the appropriate collection
+
+            # Flatten nested dictionaries in metadata and handle all complex types
+            # ChromaDB only allows simple types (str, int, float, bool) as metadata values
+            flat_metadata = {}
+            for key, value in metadata.items():
+                # Handle different value types
+                if isinstance(value, dict):
+                    # Convert dict to JSON string
+                    flat_metadata[key] = json.dumps(value)
+                elif isinstance(value, list):
+                    # Convert any list to JSON string, empty or not
+                    flat_metadata[key] = json.dumps(value)
+                elif value is None:
+                    # Convert None to empty string
+                    flat_metadata[key] = ""
+                elif isinstance(value, (str, int, float, bool)):
+                    # Keep primitive types as is
+                    flat_metadata[key] = value
+                else:
+                    # Convert any other type to string representation
+                    flat_metadata[key] = str(value)
+
+            # Select the appropriate collection.
             collection = self.get_collection(collection_name)
-            
-            # Create embedding if required
-            # In an async context, this might need to be run in a thread pool
+
+            # Explicitly initialize has_content to False
+            has_content = False
+
+            # Determine if content is non-empty:
+            if isinstance(content, (str, bytes)):
+                has_content = bool(content.strip())
+            elif isinstance(content, np.ndarray):
+                # For NumPy arrays, explicitly check if size is greater than 0
+                has_content = content.size > 0
+            elif hasattr(content, '__len__'):
+                # For other sequence types
+                has_content = len(content) > 0
+            else:
+                # For other types, try direct boolean conversion
+                try:
+                    has_content = bool(content)
+                except Exception:
+                    has_content = False
+
+            # Initialize embeddings to None
             embeddings = None
-            if embed_content and content:
+
+            # Generate embeddings only if both conditions are explicitly True
+            # Avoid using embed_content directly in any boolean expression
+            if should_embed and has_content:
                 if collection_name == "generated_images":
-                    # For real implementation, this would use image embedding
-                    # Here we're using a placeholder approach
                     embeddings = await self._run_in_executor(
                         self.image_embedding_function,
                         ["Image embedding placeholder"]
@@ -233,26 +295,24 @@ class ChromaManager:
                         self.text_embedding_function,
                         [content]
                     )
-            
-            # Add the document to the collection
-            # Run in executor since ChromaDB operations are synchronous
+
+            # Add the document to the collection.
             await self._run_in_executor(
                 collection.add,
                 ids=[doc_id],
                 documents=[content] if content else None,
                 embeddings=embeddings,
-                metadatas=[metadata] if metadata else None
+                metadatas=[flat_metadata] if flat_metadata else None
             )
-            
+
             self.logger.debug(f"Added document {doc_id} to collection {collection_name}")
-            
             return doc_id
-            
+
         except Exception as e:
             self.logger.error(f"Error adding document to {collection_name}: {e}", exc_info=True)
             raise
-    
-    async def add_documents(self, documents: List[Dict[str, Any]], 
+
+    async def add_documents(self, documents: List[Dict[str, Any]],
                           collection_name: str = "model_scripts") -> List[str]:
         """
         Add multiple documents to the specified collection in batch.
@@ -731,58 +791,97 @@ class ChromaManager:
         return await asyncio.get_event_loop().run_in_executor(
             None, lambda: func(*args, **kwargs)
         )
-    
+
     def _process_search_results(self, results: Dict[str, Any], include: List[str]) -> Dict[str, Any]:
         """
         Process raw Chroma results into a more user-friendly format.
-        
+
         Args:
             results: Raw results from Chroma
             include: What was included in the results
-            
+
         Returns:
             Dict with processed results
         """
         processed = {
             "results": []
         }
-        
+
         # Check if there are any results
-        if not results or not results.get('ids'):
+        if not results:
             return processed
-        
+
+        if not results.get('ids'):
+            return processed
+
         # Get the components that were included
         ids = results.get('ids', [])
-        documents = results.get('documents', [[]] * len(ids))
-        metadatas = results.get('metadatas', [{}] * len(ids))
-        distances = results.get('distances', [[]] * len(ids))
-        embeddings = results.get('embeddings', [[]] * len(ids))
-        
+
+        # Handle empty ids list
+        if not ids or len(ids) == 0:
+            return processed
+
+        # Determine result count from ids
+        result_count = len(ids[0]) if isinstance(ids, list) and len(ids) > 0 and isinstance(ids[0], list) else 0
+
+        if result_count == 0:
+            return processed
+
+        # Safely get components with defensive checks
+        documents = results.get('documents', [])
+        metadatas = results.get('metadatas', [])
+        distances = results.get('distances', [])
+        embeddings = results.get('embeddings', [])
+
         # Process each result
-        for i in range(len(ids[0])):
+        for i in range(result_count):
             item = {
-                "id": ids[0][i] if ids else None
+                "id": ids[0][i] if isinstance(ids, list) and len(ids) > 0 and i < len(ids[0]) else None
             }
-            
-            # Add included components
-            if "documents" in include and documents[0]:
-                item["document"] = documents[0][i] if i < len(documents[0]) else None
-                
-            if "metadatas" in include and metadatas[0]:
-                item["metadata"] = metadatas[0][i] if i < len(metadatas[0]) else {}
-                
-            if "distances" in include and distances[0]:
-                # Convert distance to score (1.0 - distance)
-                distance = distances[0][i] if i < len(distances[0]) else 1.0
-                item["score"] = 1.0 - min(1.0, max(0.0, distance))
-                
-            if "embeddings" in include and embeddings[0]:
-                item["embedding"] = embeddings[0][i] if i < len(embeddings[0]) else []
-            
+
+            # Add included components with thorough checks
+            if "documents" in include:
+                # Check if documents has the expected structure
+                if isinstance(documents, list) and len(documents) > 0 and isinstance(documents[0], list) and i < len(
+                        documents[0]):
+                    item["document"] = documents[0][i]
+                elif isinstance(documents, dict) and 0 in documents and i < len(documents[0]):
+                    item["document"] = documents[0][i]
+                else:
+                    item["document"] = None
+
+            if "metadatas" in include or "metadata" in include:
+                # Check if metadatas has the expected structure
+                if isinstance(metadatas, list) and len(metadatas) > 0 and isinstance(metadatas[0], list) and i < len(
+                        metadatas[0]):
+                    item["metadata"] = metadatas[0][i] if metadatas[0][i] is not None else {}
+                elif isinstance(metadatas, dict) and 0 in metadatas and i < len(metadatas[0]):
+                    item["metadata"] = metadatas[0][i] if metadatas[0][i] is not None else {}
+                else:
+                    item["metadata"] = {}
+
+            if "distances" in include:
+                # Check if distances has the expected structure
+                if isinstance(distances, list) and len(distances) > 0 and isinstance(distances[0], list) and i < len(
+                        distances[0]):
+                    distance = distances[0][i]
+                    item["score"] = 1.0 - min(1.0, max(0.0, distance))
+                elif isinstance(distances, dict) and 0 in distances and i < len(distances[0]):
+                    distance = distances[0][i]
+                    item["score"] = 1.0 - min(1.0, max(0.0, distance))
+
+            if "embeddings" in include:
+                # Check if embeddings has the expected structure
+                if isinstance(embeddings, list) and len(embeddings) > 0 and isinstance(embeddings[0], list) and i < len(
+                        embeddings[0]):
+                    item["embedding"] = embeddings[0][i]
+                elif isinstance(embeddings, dict) and 0 in embeddings and i < len(embeddings[0]):
+                    item["embedding"] = embeddings[0][i]
+
             processed["results"].append(item)
-        
+
         return processed
-    
+
     def _apply_access_control(self, where: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         """
         Apply access control filters based on user ID.

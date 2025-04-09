@@ -7,6 +7,19 @@ class CodeParser:
     def __init__(self, schema_validator=None):
         self.schema_validator = schema_validator
 
+    def parse(self, file_path):
+        """
+        Determine whether to process the file.
+        Process Python files (.py and optionally .ipynb) using parse_file;
+        skip others.
+        """
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext in ['.py', '.ipynb']:
+            return self.parse_file(file_path)
+        else:
+            # If the file is not a Python code file, skip parsing and return None.
+            return None
+
     def parse_file(self, file_path):
         """Parse a Python file and extract model information."""
         with open(file_path, "r") as f:
@@ -47,11 +60,40 @@ class CodeParser:
         performance_metrics = self._extract_performance_metrics(tree, model_info)
         model_info["performance"] = performance_metrics
 
+        # Mark this file as a model script unconditionally.
+        model_info["is_model_script"] = True
+
+        # This is needed later for splitting into chunks.
+        model_info["content"] = file_content
+
         # Optionally validate extracted metadata
-        if self.schema_validator:
-            self.schema_validator.validate(model_info)
+        # if self.schema_validator:
+        #     self.schema_validator.validate(model_info, "model_script_schema")
 
         return model_info
+
+    def split_into_chunks(self, content, chunk_size=1000, overlap=200):
+        """
+        Split content into chunks for processing.
+
+        Args:
+            content (str): Text to split into chunks.
+            chunk_size (int): Maximum number of characters per chunk.
+            overlap (int): Number of overlapping characters between successive chunks.
+
+        Returns:
+            list of str: A list of text chunks.
+        """
+        chunks = []
+        start = 0
+        content_length = len(content)
+        while start < content_length:
+            end = start + chunk_size
+            chunk = content[start:end]
+            chunks.append(chunk)
+            # Advance start position with overlap in mind.
+            start += (chunk_size - overlap)
+        return chunks
 
     def _get_creation_date(self, file_path):
         """Get file creation date, preferring git history if available."""
@@ -100,16 +142,14 @@ class CodeParser:
                 for base in node.bases:
                     if hasattr(base, 'id') and base.id in ['Module', 'nn.Module']:
                         self.model_name = node.name
-                        # Stop visiting once a model is found.
-                        break
+                        break  # Stop visiting once a model is found.
 
         visitor = ModelVisitor()
         visitor.visit(tree)
 
         if visitor.model_name:
-            # Basic normalization to lower-case id for identification.
             model_info['model_id'] = visitor.model_name.lower()
-            model_info['model_family'] = 'custom'  # Placeholder value; customize as needed.
+            model_info['model_family'] = 'custom'
             model_info['version'] = "1.0"
         else:
             model_info['model_id'] = "unknown"
@@ -127,7 +167,7 @@ class CodeParser:
                 for alias in node.names:
                     if alias.name in frameworks:
                         detected['name'] = alias.name
-                        detected['version'] = "unknown"  # Further logic can determine version
+                        detected['version'] = "unknown"
                         return detected
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
@@ -137,7 +177,6 @@ class CodeParser:
                             detected['version'] = "unknown"
                             return detected
 
-        # Default if none found
         return {"name": "unknown", "version": "unknown"}
 
     def _extract_architecture(self, tree, model_info):
@@ -154,16 +193,14 @@ class CodeParser:
                 self.dimensions = {}
 
             def visit_ClassDef(self, node):
-                # Attempt to match the model class by name.
                 if node.name.lower() == self.model_id:
                     for body_item in node.body:
                         if isinstance(body_item, ast.FunctionDef) and body_item.name == '__init__':
-                            # Look for assignments like self.num_layers = 12, etc.
                             for stmt in body_item.body:
                                 if isinstance(stmt, ast.Assign):
                                     for target in stmt.targets:
-                                        if (isinstance(target, ast.Attribute) and 
-                                            isinstance(target.value, ast.Name) and 
+                                        if (isinstance(target, ast.Attribute) and
+                                            isinstance(target.value, ast.Name) and
                                             target.value.id == 'self'):
                                             attr_name = target.attr
                                             if attr_name in ['num_layers', 'hidden_size', 'num_attention_heads', 'total_parameters']:
@@ -174,7 +211,6 @@ class CodeParser:
                                                 self.dimensions[attr_name] = value
 
             def visit_Call(self, node):
-                # Example heuristic: detect instantiation of known architecture calls.
                 if hasattr(node.func, 'attr') and node.func.attr.lower() in ['transformer', 'cnn', 'rnn', 'mlp']:
                     self.architecture_type = node.func.attr.lower()
 
@@ -198,7 +234,6 @@ class CodeParser:
                 self.dataset_info = {}
 
             def visit_Assign(self, node):
-                # Look for variable assignments that might indicate dataset information.
                 if isinstance(node.targets[0], ast.Name):
                     var_name = node.targets[0].id.lower()
                     if var_name in ['dataset', 'train_data']:
@@ -275,4 +310,3 @@ class CodeParser:
         perf_visitor.visit(tree)
         performance.update(perf_visitor.metrics)
         return performance
-

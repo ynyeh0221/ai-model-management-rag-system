@@ -43,7 +43,7 @@ class SchemaValidator:
         """
         self.schema_registry_path = schema_registry_path
         self.schemas = {}
-        # self._load_schemas()
+        self._load_schemas()
     
     def _load_schemas(self):
         """
@@ -113,26 +113,28 @@ class SchemaValidator:
             logger.info(f"Loaded schema: {schema_id} (version {schema_version})")
         
         logger.info(f"Loaded {len(self.schemas)} schema types from registry")
-    
+
     def validate(self, document: Dict[str, Any], schema_id: str) -> Dict[str, Any]:
         """
         Validate a document against a schema.
-        
+
         Args:
-            document: The document to validate
-            schema_id: The ID of the schema to validate against
-            
+            document: The document to validate.
+            schema_id: The ID of the schema to validate against.
+
         Returns:
-            The validated document (possibly with defaults applied)
-            
+            A dictionary with keys:
+                - "valid": True if the document is valid, False otherwise.
+                - "document": The validated document (or the document as modified).
+                - "errors": An error message if validation fails, otherwise None.
+
         Raises:
-            ValueError: If the schema ID is not found or if the document doesn't specify a schema version
-            ValidationError: If the document fails validation
+            ValueError: If the schema ID is not found or if the document doesn't specify a schema version.
         """
         if schema_id not in self.schemas:
             raise ValueError(f"Schema ID '{schema_id}' not found in registry")
-        
-        # Determine which schema version to use
+
+        # Determine which schema version to use.
         if "$schema_version" in document:
             requested_version = document["$schema_version"]
             if requested_version not in self.schemas[schema_id]:
@@ -141,31 +143,25 @@ class SchemaValidator:
         else:
             # Default to latest version if not specified
             schema_version = self._get_latest_version(schema_id)
-            
-            # Add schema version to document for future reference
             document = document.copy()  # Don't modify the original
             document["$schema_version"] = schema_version
-            
             logger.debug(f"No schema version specified, using latest version: {schema_version}")
-        
+
         # Get schema definition
         schema_def = self.schemas[schema_id][schema_version]["definition"]
-        
-        # Validate document against schema
+
         try:
             validate(instance=document, schema=schema_def)
         except ValidationError as e:
-            # Add context to the error message
             error_msg = f"Document validation failed for schema '{schema_id}' version '{schema_version}': {e.message}"
             if e.path:
                 error_msg += f" at path: {'.'.join(str(p) for p in e.path)}"
-            
             logger.error(error_msg)
-            raise ValidationError(error_msg)
-        
-        # Return the validated document
-        return document
-    
+            return {"valid": False, "errors": error_msg, "document": document}
+
+        # If validation passed, return a dictionary indicating success.
+        return {"valid": True, "errors": None, "document": document}
+
     def get_schema(self, schema_id: str, version: Optional[str] = None) -> Dict[str, Any]:
         """
         Get a schema by ID and optionally version.
