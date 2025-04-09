@@ -179,40 +179,45 @@ class QueryParser:
             "stable diffusion", "dalle", "cnn", "resnet", "vit", 
             "swin", "yolo", "diffusion", "vae", "gan"
         ]
-    
+
     def parse_query(self, query_text: str) -> Dict[str, Any]:
         """
         Parse a query to determine intent and parameters.
-        
+
         Args:
             query_text: The raw query text from the user
-            
+
         Returns:
             A dictionary containing:
-                - intent: The classified intent (QueryIntent)
+                - intent: The classified intent as a string (not enum)
+                - type: Same as intent for backward compatibility
                 - parameters: Dictionary of extracted parameters
                 - processed_query: The preprocessed query text
         """
         self.logger.debug(f"Parsing query: {query_text}")
-        
+
         # Preprocess the query
         processed_query = self.preprocess_query(query_text)
-        
+
         # Classify intent
         intent = self.classify_intent(query_text)
-        
+
         # Extract parameters
         parameters = self.extract_parameters(query_text, intent)
-        
+
+        # Convert intent enum to string value for serialization
+        intent_str = intent.value if hasattr(intent, 'value') else str(intent)
+
         result = {
-            "intent": intent,
+            "intent": intent_str,
+            "type": intent_str,  # Add type for backward compatibility
             "parameters": parameters,
             "processed_query": processed_query
         }
-        
-        self.logger.info(f"Query parsed: {intent.value} with {len(parameters)} parameters")
+
+        self.logger.info(f"Query parsed: {intent_str} with {len(parameters)} parameters")
         self.logger.debug(f"Parsed result: {result}")
-        
+
         return result
     
     def classify_intent(self, query_text: str) -> QueryIntent:

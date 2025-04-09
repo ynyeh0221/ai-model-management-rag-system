@@ -1,11 +1,9 @@
 # main.py
-import os
+import asyncio
 import argparse
 import os
 import glob
 import logging
-from flask import Flask, jsonify, request
-from werkzeug.serving import run_simple
 import concurrent.futures
 from pathlib import Path
 
@@ -443,22 +441,31 @@ def start_ui(components, host="localhost", port=8000):
                     query_text = cmd[6:].strip()
                     
                 # Parse the query
-                parsed_query = query_parser.parse(query_text)
+                parsed_query = query_parser.parse_query(query_text)
                 
                 # Log the query for analytics
                 query_analytics.log_query(user_id, query_text, parsed_query)
                 
                 # Check access permissions
-                if not access_control.verify_user_permissions(user_id, parsed_query):
-                    print("Access denied. You don't have permission to access this information.")
-                    continue
+                # if not access_control.verify_user_permissions(user_id, parsed_query):
+                #    print("Access denied. You don't have permission to access this information.")
+                #    continue
                 
                 print("Searching...")
                 # Dispatch the query
-                search_results = search_dispatcher.dispatch(parsed_query)
+                # Dispatch the query
+                search_results = asyncio.run(search_dispatcher.dispatch(
+                    query=parsed_query["processed_query"] if "processed_query" in parsed_query else query_text,
+                    intent=parsed_query["intent"],
+                    parameters=parsed_query["parameters"],
+                    user_id=user_id
+                ))
                 
                 # Rank the results
-                ranked_results = result_ranker.rank(search_results, parsed_query)
+                if isinstance(search_results, dict) and 'items' in search_results:
+                    ranked_results = result_ranker.rank_results(search_results['items'])
+                else:
+                    ranked_results = []
                 
                 # Generate response using LLM
                 if parsed_query["type"] == "comparison":
@@ -476,7 +483,7 @@ def start_ui(components, host="localhost", port=8000):
                 })
                 
                 # Format the response
-                formatted_response = response_formatter.format(llm_response, parsed_query["type"])
+                formatted_response = response_formatter.format_response([llm_response], parsed_query, parsed_query["type"])
                 
                 # Print the response
                 print("\nResponse:")

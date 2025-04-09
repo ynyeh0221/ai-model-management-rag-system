@@ -145,7 +145,7 @@ class SearchDispatcher:
         try:
             # Generate embedding for the query
             embedding_start = time.time()
-            query_embedding = await self.text_embedder.generate_embedding(query)
+            query_embedding = self.text_embedder.embed_text(query)
             embedding_time = (time.time() - embedding_start) * 1000
             
             # Extract search parameters
@@ -154,14 +154,19 @@ class SearchDispatcher:
             
             # Prepare Chroma query
             search_params = {
-                'embedding': query_embedding,
+                'query': {'embedding': query_embedding},  # Wrap in query dict
+                'where': self._translate_filters_to_chroma(filters),  # 'where' not 'filters'
                 'limit': limit,
-                'filters': self._translate_filters_to_chroma(filters),
-                'include': ["metadata", "document"]
+                'include': ["metadatas", "documents"]  # Note plurals for Chroma API
             }
             
             # Execute vector search
             search_start = time.time()
+            # Check which parameters your search method actually accepts
+            if 'embedding' in search_params:
+                # Rename the parameter to match what ChromaManager expects
+                search_params['query_embedding'] = search_params.pop('embedding')
+
             model_results = await self.chroma_manager.search(
                 collection_name="model_scripts",
                 **search_params
@@ -453,39 +458,39 @@ class SearchDispatcher:
         except Exception as e:
             self.logger.error(f"Error in notebook request: {e}", exc_info=True)
             raise
-    
+
     async def handle_metadata_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle a metadata-specific search query.
-        
+
         Args:
             query: The processed query text
             parameters: Dictionary of extracted parameters
-            
+
         Returns:
             Dictionary containing metadata search results
         """
         self.logger.debug(f"Handling metadata search: {query}")
         start_time = time.time()
-        
+
         try:
             # Extract search parameters
             filters = parameters.get('filters', {})
             limit = parameters.get('limit', 20)
-            
+
             # Convert filters to Chroma format
             chroma_filters = self._translate_filters_to_chroma(filters)
-            
+
             # Execute metadata search (no embedding needed)
             search_start = time.time()
             metadata_results = await self.chroma_manager.get(
                 collection_name="model_scripts",
                 limit=limit,
                 where=chroma_filters,
-                include=["metadata"]
+                include=["metadatas"]  # Changed from "metadata" to "metadatas"
             )
             search_time = (time.time() - search_start) * 1000
-            
+
             # Process results
             items = []
             for idx, result in enumerate(metadata_results.get('results', [])):
@@ -494,7 +499,7 @@ class SearchDispatcher:
                     'metadata': result.get('metadata', {}),
                     'rank': idx + 1
                 })
-            
+
             return {
                 'success': True,
                 'type': 'metadata_search',
@@ -505,40 +510,43 @@ class SearchDispatcher:
                     'total_time_ms': (time.time() - start_time) * 1000
                 }
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error in metadata search: {e}", exc_info=True)
             raise
-    
+
     async def handle_fallback_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle queries with unknown intent with a best-effort approach.
-        
+
         Args:
             query: The processed query text
             parameters: Dictionary of extracted parameters
-            
+
         Returns:
             Dictionary containing search results
         """
         self.logger.warning(f"Using fallback search for query: {query}")
-        
+
         # Try a combination of text search and metadata search
         try:
             # Run text search
             text_results = await self.handle_text_search(query, parameters)
-            
+
             # If text search yielded results, return them
             if text_results.get('success', False) and text_results.get('total_found', 0) > 0:
                 return text_results
-            
+
             # If no results from text search, try metadata search
-            metadata_results = await self.handle_metadata_search(query, parameters)
-            
-            if metadata_results.get('success', False) and metadata_results.get('total_found', 0) > 0:
-                return metadata_results
-            
-            # If still no results, return empty results
+            try:
+                metadata_results = await self.handle_metadata_search(query, parameters)
+
+                if metadata_results.get('success', False) and metadata_results.get('total_found', 0) > 0:
+                    return metadata_results
+            except Exception as e:
+                self.logger.error(f"Error in metadata search during fallback: {e}", exc_info=True)
+
+            # If still no results, return empty results with proper structure
             return {
                 'success': True,
                 'type': 'fallback_search',
@@ -546,16 +554,17 @@ class SearchDispatcher:
                 'total_found': 0,
                 'message': "No results found using various search strategies"
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error in fallback search: {e}", exc_info=True)
-            
-            # Return a generic error response
+
+            # Return a properly structured error response
             return {
                 'success': False,
                 'error': "An error occurred during the search",
                 'type': 'fallback_search',
-                'items': []
+                'items': [],
+                'total_found': 0
             }
     
     async def _fetch_model_data(self, model_id: str, dimensions: List[str]) -> Dict[str, Any]:

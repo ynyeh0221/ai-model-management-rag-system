@@ -319,41 +319,41 @@ class ChromaManager:
         except Exception as e:
             self.logger.error(f"Error adding documents to {collection_name}: {e}", exc_info=True)
             raise
-    
-    async def search(self, query: Union[str, Dict[str, Any]], 
-                   collection_name: str = "model_scripts",
-                   where: Optional[Dict[str, Any]] = None,
-                   limit: int = 10,
-                   offset: int = 0,
-                   include: Optional[List[str]] = None,
-                   user_id: Optional[str] = None) -> Dict[str, Any]:
+
+    async def search(self, query: Union[str, Dict[str, Any]],
+                     collection_name: str = "model_scripts",
+                     where: Optional[Dict[str, Any]] = None,
+                     limit: int = 10,
+                     offset: int = 0,
+                     include: Optional[List[str]] = None,
+                     user_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Search for documents in the specified collection.
-        
+
         Args:
             query: Query text or dictionary with query parameters
             collection_name: Name of the collection to search
             where: Filter criteria
             limit: Maximum number of results
-            offset: Number of results to skip
+            offset: Number of results to skip (only used for get() method, not query())
             include: What to include in results (metadata, document, embeddings)
             user_id: Optional user ID for access control
-            
+
         Returns:
             Dict containing search results
         """
         try:
             # Select the appropriate collection
             collection = self.get_collection(collection_name)
-            
+
             # If include is not specified, include both metadata and documents
             if include is None:
-                include = ["metadatas", "documents", "distances"]
-            
+                include = ["metadatas", "documents", "distances"]  # Correct plural forms
+
             # Apply access control if user_id is provided
             if user_id is not None and where is not None:
                 where = self._apply_access_control(where, user_id)
-            
+
             # Handle different query types
             if isinstance(query, str):
                 # Text query - generate embedding
@@ -368,62 +368,82 @@ class ChromaManager:
                         self.text_embedding_function,
                         [query]
                     )
-                
+
                 # Query by embedding
+                query_args = {
+                    "query_embeddings": query_embedding,
+                    "n_results": limit,
+                    "include": include
+                }
+
+                # Only add where filter if it's not empty
+                if where and len(where) > 0:
+                    query_args["where"] = where
+
                 results = await self._run_in_executor(
                     collection.query,
-                    query_embeddings=query_embedding,
-                    where=where,
-                    n_results=limit,
-                    offset=offset,
-                    include=include
+                    **query_args
                 )
-                
+
             elif isinstance(query, dict) and "embedding" in query:
                 # Direct embedding query
                 query_embedding = query["embedding"]
-                
+
                 # Query by embedding
+                query_args = {
+                    "query_embeddings": [query_embedding],
+                    "n_results": limit,
+                    "include": include
+                }
+
+                # Only add where filter if it's not empty
+                if where and len(where) > 0:
+                    query_args["where"] = where
+
                 results = await self._run_in_executor(
                     collection.query,
-                    query_embeddings=[query_embedding],
-                    where=where,
-                    n_results=limit,
-                    offset=offset,
-                    include=include
+                    **query_args
                 )
-                
+
             else:
                 # Metadata-only query with no embedding
+                get_args = {
+                    "limit": limit,
+                    "offset": offset,
+                    "include": include
+                }
+
+                # Only add where filter if it's not empty
+                if where and len(where) > 0:
+                    get_args["where"] = where
+
                 results = await self._run_in_executor(
                     collection.get,
-                    where=where,
-                    limit=limit,
-                    offset=offset,
-                    include=include
+                    **get_args
                 )
-            
+
             # Process results into a more user-friendly format
             processed_results = self._process_search_results(results, include)
-            
-            self.logger.debug(f"Search in {collection_name} returned {len(processed_results.get('results', []))} results")
-            
+
+            self.logger.debug(
+                f"Search in {collection_name} returned {len(processed_results.get('results', []))} results")
+
             return processed_results
-            
+
         except Exception as e:
             self.logger.error(f"Error searching in {collection_name}: {e}", exc_info=True)
             raise
-    
+
     async def get(self, collection_name: str = "model_scripts",
-                 ids: Optional[List[str]] = None,
-                 where: Optional[Dict[str, Any]] = None,
-                 limit: Optional[int] = None,
-                 offset: Optional[int] = None,
-                 include: Optional[List[str]] = None,
-                 user_id: Optional[str] = None) -> Dict[str, Any]:
+                  ids: Optional[List[str]] = None,
+                  where: Optional[Dict[str, Any]] = None,
+                  limit: Optional[int] = None,
+                  offset: Optional[int] = None,
+                  include: Optional[List[str]] = None,
+                  user_id: Optional[str] = None) -> Dict[str, Any]:
         """
         Get documents from the specified collection.
-        
+
         Args:
             collection_name: Name of the collection
             ids: List of document IDs to retrieve
@@ -432,44 +452,60 @@ class ChromaManager:
             offset: Number of results to skip
             include: What to include in results
             user_id: Optional user ID for access control
-            
+
         Returns:
             Dict containing the retrieved documents
         """
         try:
             # Select the appropriate collection
             collection = self.get_collection(collection_name)
-            
+
             # If include is not specified, include both metadata and documents
             if include is None:
-                include = ["metadatas", "documents"]
-            
+                include = ["metadatas", "documents"]  # Correct plural forms
+
             # Apply access control if user_id is provided
             if user_id is not None and where is not None:
                 where = self._apply_access_control(where, user_id)
-            
+
+            # Prepare arguments for get method
+            get_args = {}
+
+            if ids is not None:
+                get_args["ids"] = ids
+
+            if limit is not None:
+                get_args["limit"] = limit
+
+            if offset is not None:
+                get_args["offset"] = offset
+
+            if include is not None:
+                get_args["include"] = include
+
+            # Only add where filter if it's not empty
+            if where and len(where) > 0:
+                get_args["where"] = where
+
             # Get documents
             results = await self._run_in_executor(
                 collection.get,
-                ids=ids,
-                where=where,
-                limit=limit,
-                offset=offset,
-                include=include
+                **get_args
             )
-            
+
             # Process results into a more user-friendly format
             processed_results = self._process_search_results(results, include)
-            
-            self.logger.debug(f"Get from {collection_name} returned {len(processed_results.get('results', []))} documents")
-            
+
+            self.logger.debug(
+                f"Get from {collection_name} returned {len(processed_results.get('results', []))} documents")
+
             return processed_results
-            
+
         except Exception as e:
             self.logger.error(f"Error getting documents from {collection_name}: {e}", exc_info=True)
             raise
-    
-    async def get_document(self, doc_id: str, 
+
+    async def get_document(self, doc_id: str,
                          collection_name: str = "model_scripts",
                          include: Optional[List[str]] = None,
                          user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
@@ -782,18 +818,18 @@ class ChromaManager:
                 access_filter
             ]
         }
-    
+
     async def count_documents(self, collection_name: str = "model_scripts",
-                            where: Optional[Dict[str, Any]] = None,
-                            user_id: Optional[str] = None) -> int:
+                              where: Optional[Dict[str, Any]] = None,
+                              user_id: Optional[str] = None) -> int:
         """
         Count documents in a collection.
-        
+
         Args:
             collection_name: Name of the collection
             where: Filter criteria
             user_id: Optional user ID for access control
-            
+
         Returns:
             int: Document count
         """
@@ -801,20 +837,20 @@ class ChromaManager:
             # Apply access control if user_id is provided
             if user_id is not None and where is not None:
                 where = self._apply_access_control(where, user_id)
-            
+
             # Get results with just IDs to count them
             results = await self.get(
                 collection_name=collection_name,
                 where=where,
-                include=["ids"]
+                include=["ids"]  # This is correct as "ids" not "id"
             )
-            
+
             count = len(results.get('results', []))
-            
+
             self.logger.debug(f"Counted {count} documents in collection {collection_name}")
-            
+
             return count
-            
+
         except Exception as e:
             self.logger.error(f"Error counting documents in {collection_name}: {e}", exc_info=True)
             raise

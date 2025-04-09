@@ -1,7 +1,6 @@
 import json
 import markdown
 from typing import List, Dict, Any, Optional, Tuple, Union
-import pandas as pd
 from datetime import datetime
 import logging
 from jinja2 import Template, Environment, FileSystemLoader
@@ -29,30 +28,55 @@ class ResponseFormatter:
             loader=FileSystemLoader("templates/"),
             autoescape=True
         )
-        
-    def format_response(self, results: List[Dict[str, Any]], query: Dict[str, Any], 
+
+    def _get_default_template(self, response_type: str) -> Template:
+        """Get a default template for the given response type."""
+        template = self.template_manager.get_template(f"default_{response_type}")
+
+        if not template:
+            # Create a very basic default template if no default template is found
+            if response_type == "html":
+                template_str = '<div><p>{{ results|length }} results found</p>{% for result in results %}<div><h3>{{ result.id }}</h3><p>{{ result.content }}</p></div>{% endfor %}</div>'
+            elif response_type == "markdown":
+                template_str = '## Results\n\n{{ results|length }} results found\n\n{% for result in results %}### {{ result.id }}\n\n{{ result.content }}\n\n{% endfor %}'
+            else:  # text
+                template_str = 'Results:\n\n{{ results|length }} results found\n\n{% for result in results %}{{ result.id }}:\n{{ result.content }}\n\n{% endfor %}'
+
+            # Create a template from the string
+            template = self.env.from_string(template_str)
+
+        return template
+
+    def format_response(self, results: List[Dict[str, Any]], query: Union[Dict[str, Any], str],
                         response_type: str = "text") -> Dict[str, Any]:
         """
         Format results into a response based on the query type and desired response format.
-        
+
         Args:
             results: List of retrieved documents/results
-            query: Original query information including intent and parameters
+            query: Original query information including intent and parameters or query string
             response_type: Desired response format (text, markdown, html)
-            
+
         Returns:
             Formatted response with appropriate content and metadata
         """
-        self.logger.info(f"Formatting response of type: {response_type} for query intent: {query.get('intent', 'general')}")
-        
+        # Convert string query to dict if needed
+        if isinstance(query, str):
+            query = {"intent": response_type, "type": response_type}
+        elif isinstance(query, dict) and "type" not in query and "intent" in query:
+            query["type"] = query["intent"]
+
+        self.logger.info(
+            f"Formatting response of type: {response_type} for query intent: {query.get('intent', 'general')}")
+
         # Get appropriate template based on query intent and response type
         template_key = f"{query.get('intent', 'general')}_{response_type}"
         template = self.template_manager.get_template(template_key)
-        
+
         if not template:
             self.logger.warning(f"No template found for {template_key}, using default")
-            template = self.template_manager.get_template(f"default_{response_type}")
-        
+            template = self._get_default_template(response_type)
+
         # Process results based on query intent
         if query.get('intent') == 'model_info':
             return self._format_model_info(results, template, response_type)
