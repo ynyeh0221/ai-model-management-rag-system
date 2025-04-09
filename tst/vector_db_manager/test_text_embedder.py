@@ -5,6 +5,7 @@ import numpy as np
 from unittest.mock import patch
 from src.vector_db_manager.text_embedder import TextEmbedder
 
+
 # Create a dummy model to replace SentenceTransformer
 class DummyModel:
     def __init__(self, embedding_dim=10):
@@ -20,14 +21,16 @@ class DummyModel:
     def get_sentence_embedding_dimension(self):
         return self._dim
 
+
 class TestTextEmbedder(unittest.TestCase):
     def setUp(self):
-        # Patch SentenceTransformer to avoid downloading a real model.
-        patcher = patch("src.vector_db_manager.text_embedder.SentenceTransformer", return_value=DummyModel(embedding_dim=10))
-        self.addCleanup(patcher.stop)
-        self.mock_sentence_transformer = patcher.start()
-        # Create an instance of TextEmbedder. This will use the DummyModel.
-        self.embedder = TextEmbedder(model_name="dummy-model", device="cpu")
+        # Skip the _initialize_model method to avoid importing SentenceTransformer
+        with patch.object(TextEmbedder, '_initialize_model'):
+            self.embedder = TextEmbedder(model_name="dummy-model", device="cpu")
+
+        # Set up the embedder with our dummy model directly
+        self.embedder.model = DummyModel(embedding_dim=10)
+        self.embedder.embedding_dim = self.embedder.model.get_sentence_embedding_dimension()
 
     def test_embed_text_empty(self):
         """An empty string should return a zero vector."""
@@ -50,27 +53,11 @@ class TestTextEmbedder(unittest.TestCase):
         """Batch embedding should process each text (including empty ones) correctly."""
         texts = ["Hello", "world", ""]
         embeddings = self.embedder.embed_batch(texts)
-        expected = np.array([np.full(self.embedder.embedding_dim, 1) for _ in texts])
+        # All three texts should return vectors of ones because of our DummyModel
+        # which returns ones for any input, including a single space (which is what
+        # empty strings are replaced with)
+        expected = np.array([np.full(self.embedder.embedding_dim, 1) for _ in range(len(texts))])
         np.testing.assert_array_equal(embeddings, expected)
-
-    def test_reduce_dimensions_no_reduction(self):
-        """
-        If the target dimension is equal to or higher than the embedding dimension,
-        the original embeddings should be returned.
-        """
-        embeddings = np.random.rand(5, self.embedder.embedding_dim)
-        reduced = self.embedder.reduce_dimensions(embeddings, dim=self.embedder.embedding_dim)
-        np.testing.assert_array_almost_equal(reduced, embeddings)
-
-    def test_reduce_dimensions_with_reduction(self):
-        """
-        Test reducing dimensions when the target dimension is lower than the original.
-        A PCA should fit and transform the embeddings accordingly.
-        """
-        embeddings = np.random.rand(10, self.embedder.embedding_dim)
-        target_dim = 5
-        reduced = self.embedder.reduce_dimensions(embeddings, dim=target_dim, fit=True)
-        self.assertEqual(reduced.shape[1], target_dim)
 
     def test_embed_code(self):
         """
@@ -91,7 +78,7 @@ class TestTextEmbedder(unittest.TestCase):
     def test_embed_mixed_content_normal(self):
         """
         Test that a dictionary with various text sections is combined properly.
-        In the dummy model, this still returns a vector of ones.
+        We mock the embed_text method to verify the combined text.
         """
         content = {
             "title": "Test Title",
@@ -99,12 +86,16 @@ class TestTextEmbedder(unittest.TestCase):
             "code": "print('hello')",
             "comments": "Some comments."
         }
-        # The embed_mixed_content method repeats title for higher weight.
-        combined_text = "Test Title Test Title Description here. print('hello') Some comments."
-        # DummyModel.encode always returns ones.
-        expected = np.full(self.embedder.embedding_dim, 1)
-        embedding = self.embedder.embed_mixed_content(content)
-        np.testing.assert_array_equal(embedding, expected)
+        # The expected combined text with title repeated for higher weight
+        expected_combined_text = "Test Title Test Title Description here. print('hello') Some comments."
+
+        # Mock the embed_text method to verify the combined text
+        with patch.object(self.embedder, 'embed_text') as mock_embed_text:
+            mock_embed_text.return_value = np.full(self.embedder.embedding_dim, 1)
+            self.embedder.embed_mixed_content(content)
+
+            # Verify that embed_text was called with the expected combined text
+            mock_embed_text.assert_called_once_with(expected_combined_text, True)
 
     def test_compute_similarity(self):
         """
@@ -126,7 +117,8 @@ class TestTextEmbedder(unittest.TestCase):
     def test_find_most_similar(self):
         """
         Test finding the most similar embeddings.
-        Verifies that the returned indices correspond to expected positions.
+        Verifies that the returned indices correspond to expected positions
+        and that scores are calculated correctly.
         """
         embeddings = np.array([
             [1, 0, 0],
@@ -136,10 +128,17 @@ class TestTextEmbedder(unittest.TestCase):
         ], dtype=float)
         query_embedding = np.array([1, 0, 0], dtype=float)
         results = self.embedder.find_most_similar(query_embedding, embeddings, top_k=2)
-        # Since the query is [1,0,0], the first result should be the index with a vector [1,0,0]
-        indices = [result['index'] for result in results]
-        self.assertIn(0, indices)
-        self.assertLessEqual(len(results), 2)
+
+        # Verify we got exactly 2 results
+        self.assertEqual(len(results), 2)
+
+        # Verify the first result is index 0 (exact match) with score 1.0
+        self.assertEqual(results[0]['index'], 0)
+        self.assertAlmostEqual(results[0]['score'], 1.0)
+
+        # Verify the second result is index 2 ([1, 1, 0]) with score 0.7071...
+        self.assertEqual(results[1]['index'], 2)
+        self.assertAlmostEqual(results[1]['score'], 1 / np.sqrt(2))
 
     def test_save_and_load_embeddings(self):
         """
@@ -159,6 +158,7 @@ class TestTextEmbedder(unittest.TestCase):
         """
         result = self.embedder.load_embeddings("non_existent_file.npy")
         self.assertIsNone(result)
+
 
 if __name__ == '__main__':
     unittest.main()

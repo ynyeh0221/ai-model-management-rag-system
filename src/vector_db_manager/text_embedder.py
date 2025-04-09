@@ -3,7 +3,7 @@
 import os
 import logging
 import numpy as np
-from typing import List, Union, Optional, Dict, Any
+from typing import List, Optional, Dict, Any
 import torch
 
 
