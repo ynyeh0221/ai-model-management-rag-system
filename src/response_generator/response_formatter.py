@@ -78,11 +78,26 @@ class ResponseFormatter:
         results = filtered_results
 
         # Get appropriate template based on query intent and response type.
+        # Try specific template combinations first, then fall back to more general ones
+        template = None
+
+        # Try intent_response_type combination
         template_key = f"{query.get('intent', 'general')}_{response_type}"
         template = self.template_manager.get_template(template_key)
 
+        # If not found, try just the intent
         if not template:
-            self.logger.warning(f"No template found for {template_key}, using default")
+            template_key = f"{query.get('intent', 'general')}"
+            template = self.template_manager.get_template(template_key)
+
+        # If still not found, try information_retrieval for retrieval intents
+        if not template and query.get('intent') == 'retrieval':
+            template = self.template_manager.get_template("information_retrieval")
+
+        # Finally, fall back to default
+        if not template:
+            self.logger.warning(
+                f"No template found for {query.get('intent', 'general')}_{response_type}, using default")
             template = self._get_default_template(response_type)
 
         # Process results based on query intent.
