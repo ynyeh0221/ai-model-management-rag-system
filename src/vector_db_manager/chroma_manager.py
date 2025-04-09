@@ -125,18 +125,18 @@ class ChromaManager:
         except Exception as e:
             self.logger.error(f"Error initializing default collections: {e}", exc_info=True)
             raise
-    
-    def _get_or_create_collection(self, name: str, 
-                                embedding_function=None, 
-                                metadata: Optional[Dict[str, Any]] = None):
+
+    def _get_or_create_collection(self, name: str,
+                                  embedding_function=None,
+                                  metadata: Optional[Dict[str, Any]] = None):
         """
         Get or create a collection with the given name.
-        
+
         Args:
             name: Name of the collection
             embedding_function: Function for generating embeddings
             metadata: Optional metadata for the collection
-            
+
         Returns:
             The collection object
         """
@@ -148,21 +148,22 @@ class ChromaManager:
                     embedding_function=embedding_function
                 )
                 self.logger.debug(f"Retrieved existing collection: {name}")
-                
-            except ValueError:
+
+            except (ValueError, chromadb.errors.NotFoundError) as e:
                 # Collection doesn't exist, create it
+                # The specific error type is chromadb.errors.NotFoundError for newer versions
                 collection = self.client.create_collection(
                     name=name,
                     embedding_function=embedding_function,
                     metadata=metadata
                 )
                 self.logger.info(f"Created new collection: {name}")
-            
+
             # Cache the collection
             self.collections[name] = collection
-            
+
             return collection
-            
+
         except Exception as e:
             self.logger.error(f"Error getting or creating collection {name}: {e}", exc_info=True)
             raise

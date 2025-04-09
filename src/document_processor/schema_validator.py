@@ -43,7 +43,7 @@ class SchemaValidator:
         """
         self.schema_registry_path = schema_registry_path
         self.schemas = {}
-        self._load_schemas()
+        # self._load_schemas()
     
     def _load_schemas(self):
         """
