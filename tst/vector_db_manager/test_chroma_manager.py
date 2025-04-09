@@ -42,11 +42,11 @@ class DummyCollection:
         ids = update_args.get("ids", [])
         for idx, doc_id in enumerate(ids):
             if doc_id in self.docs:
-                if "documents" in update_args:
+                if "documents" in update_args and update_args["documents"]:
                     self.docs[doc_id]["content"] = update_args["documents"][idx]
-                if "metadatas" in update_args:
+                if "metadatas" in update_args and update_args["metadatas"]:
                     self.docs[doc_id]["metadata"] = update_args["metadatas"][idx]
-                if "embeddings" in update_args:
+                if "embeddings" in update_args and update_args["embeddings"]:
                     self.docs[doc_id]["embedding"] = update_args["embeddings"][idx]
 
     def delete(self, ids):
@@ -71,11 +71,11 @@ class DummyCollection:
             "embeddings": embeddings_list
         }
 
-    def query(self, query_embeddings, where, n_results, offset, include):
+    def query(self, query_embeddings, n_results, include, where=None):
         # For simplicity, use get() and simulate distances as zeros.
         result = self.get()
         # Create a distances array with zeros; same shape as ids list.
-        result["distances"] = [ [0.0 for _ in result["ids"][0]] ]
+        result["distances"] = [ [0.0 for _ in result["ids"][0]] ] if result["ids"][0] else [[]]
         return result
 
     def count(self):
@@ -137,7 +137,7 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
         # Clean up temporary directory if needed.
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
-    def test_initialize_default_collections(self):
+    async def test_initialize_default_collections(self):
         # Check that default collections were initialized.
         default_names = {"model_scripts", "generated_images", "relationships"}
         self.assertTrue(default_names.issubset(set(self.manager.collections.keys())))
@@ -263,21 +263,19 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
     async def test_delete_documents(self):
         # Add multiple documents.
         documents = [
-            {"id": "doc_d1", "content": "A", "metadata": {}},
-            {"id": "doc_d2", "content": "B", "metadata": {}}
+            {"id": "doc_d1", "content": "A", "metadata": {"test": "value1"}},
+            {"id": "doc_d2", "content": "B", "metadata": {"test": "value2"}}
         ]
         await self.manager.add_documents(documents, collection_name="model_scripts")
         # Delete documents matching a filter.
-        # In our dummy _apply_access_control, the filter is adjusted but not used in dummy get().
-        # So we simulate deletion by calling delete_documents.
-        deleted_count = await self.manager.delete_documents(where={"dummy_filter": True}, collection_name="model_scripts")
-        # In our dummy get(), we retrieve all docs.
-        # Since our dummy _apply_access_control is applied, our dummy get() returns all docs,
-        # and then delete_documents calls collection.delete with the collected ids.
-        self.assertGreaterEqual(deleted_count, 0)
+        # Note: In our dummy implementation, the where filter doesn't actually filter,
+        # but we're testing the API calls correctly flow through.
+        deleted_count = await self.manager.delete_documents(where={"test": {"$eq": "value1"}}, collection_name="model_scripts")
+        # Verify the count is as expected
+        self.assertEqual(deleted_count, 2)  # Our dummy implementation returns all docs
         # Verify that the collection is now empty.
-        results = await self.manager.get(collection_name="model_scripts", include=["ids"])
-        self.assertEqual(len(results.get("results", [])), 0)
+        count = await self.manager.count_documents(collection_name="model_scripts")
+        self.assertEqual(count, 0)
 
     async def test_count_documents(self):
         # Add documents and then count.
@@ -313,7 +311,7 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(controlled["$and"][0], where)
         # Check that the access filter contains conditions for the given user_id.
         access_filter = controlled["$and"][1]
-        self.assertIn("access_control.owner", access_filter["$or"][0])
+        self.assertIn("$or", access_filter)
         self.assertEqual(access_filter["$or"][0]["access_control.owner"]["$eq"], user_id)
 
 if __name__ == "__main__":
