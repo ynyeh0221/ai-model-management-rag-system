@@ -431,8 +431,8 @@ class ChromaManager:
 
                 # Query by embedding
                 query_args = {
-                    "query_embeddings": query_embedding,
-                    "n_results": limit,
+                    "query_embeddings": [query_embedding],
+                    "n_results": int(limit) if limit is not None else 10,  # Force conversion to int with fallback
                     "include": include
                 }
 
@@ -452,7 +452,7 @@ class ChromaManager:
                 # Query by embedding
                 query_args = {
                     "query_embeddings": [query_embedding],
-                    "n_results": limit,
+                    "n_results": int(limit) if limit is not None else 10,  # Force conversion to int with fallback
                     "include": include
                 }
 

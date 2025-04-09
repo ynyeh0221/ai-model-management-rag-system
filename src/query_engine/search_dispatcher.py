@@ -150,14 +150,16 @@ class SearchDispatcher:
 
             # Extract search parameters
             limit = parameters.get('limit', 10)
+            # Ensure limit is an integer
+            if limit is None or not isinstance(limit, int):
+                limit = 10
             filters = parameters.get('filters', {})
 
-            # Prepare Chroma query - Fix: Use the correct parameter structure
-            # The 'query' parameter needs to be a dict with an 'embedding' key
+            # Prepare Chroma query
             search_params = {
-                'query': {'embedding': query_embedding},  # This is the correct structure
+                'query': {'embedding': query_embedding},
                 'where': self._translate_filters_to_chroma(filters),
-                'limit': limit,
+                'limit': limit,  # Now guaranteed to be an integer
                 'include': ["metadatas", "documents"]
             }
 

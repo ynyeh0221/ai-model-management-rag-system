@@ -478,11 +478,12 @@ def start_ui(components, host="localhost", port=8000):
                 
                 # Format the response
                 formatted_response = response_formatter.format_response(ranked_results, parsed_query, parsed_query["type"])
-                
-                # Print the response
+
+                # Print the response - with proper JSON formatting
                 print("\nResponse:")
-                print(formatted_response)
-                
+                import json
+                print(json.dumps(formatted_response, indent=2))  # Pretty print with 2-space indentation
+
                 # Show top results
                 print("\nTop Results:")
                 for i, result in enumerate(ranked_results[:5]):
