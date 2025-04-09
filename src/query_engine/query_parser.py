@@ -230,20 +230,51 @@ class QueryParser:
                 # Use LangChain for intent classification
                 raw_result = self.intent_chain.invoke({"query": query_text}).strip().lower()
 
-                # Extract intent from before the colon if present
-                if ":" in raw_result:
-                    result = raw_result.split(":")[0].strip()
-                else:
-                    result = raw_result
+                # Use a more robust extraction method
+                # Look for specific intent keywords in the response
+                intents = [intent.value for intent in QueryIntent]
+                result = None
 
-                # Map the result to a QueryIntent
-                for intent in QueryIntent:
-                    if intent.value == result:
-                        return intent
+                # First try to find direct mentions with quotes
+                # This handles formats like: i would classify this query as "retrieval: basic..."
+                import re
+                quoted_pattern = re.compile(r'"([^"]*)"')
+                quoted_matches = quoted_pattern.findall(raw_result)
 
-                # Default to UNKNOWN if no match
+                for quoted_text in quoted_matches:
+                    # Check if any intent is at the start of the quoted text
+                    for intent in intents:
+                        if quoted_text.startswith(intent) or quoted_text.startswith(f"{intent}:"):
+                            result = intent
+                            break
+                    if result:
+                        break
+
+                # If no match found in quotes, try direct word matching
+                if result is None:
+                    for intent in intents:
+                        if intent in raw_result:
+                            result = intent
+                            break
+
+                # If still no match, try the original approach as fallback
+                if result is None and ":" in raw_result:
+                    possible_intent = raw_result.split(":")[0].strip()
+                    # Remove any extra text before the intent name
+                    for intent in intents:
+                        if intent in possible_intent:
+                            result = intent
+                            break
+
+                # If we found a matching intent, return it
+                if result:
+                    for intent in QueryIntent:
+                        if intent.value == result:
+                            return intent
+
+                # Default to RETRIEVAL if no match (safer default than UNKNOWN)
                 self.logger.warning(f"LangChain returned unrecognized intent: {raw_result}")
-                return QueryIntent.UNKNOWN
+                return QueryIntent.RETRIEVAL  # Change from UNKNOWN to RETRIEVAL
 
             except Exception as e:
                 self.logger.error(f"Error using LangChain for intent classification: {e}")

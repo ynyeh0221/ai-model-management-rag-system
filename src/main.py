@@ -477,7 +477,7 @@ def start_ui(components, host="localhost", port=8000):
                 })
                 
                 # Format the response
-                formatted_response = response_formatter.format_response([llm_response], parsed_query, parsed_query["type"])
+                formatted_response = response_formatter.format_response(ranked_results, parsed_query, parsed_query["type"])
                 
                 # Print the response
                 print("\nResponse:")
