@@ -92,16 +92,17 @@ class LLMInterface:
             max_tokens=max_tokens,
             streaming=streaming
         )
-    
-    def _generate_response(self, 
-                          prompt: str, 
-                          temperature: float = 0.7, 
-                          max_tokens: int = 1000,
-                          streaming: bool = False) -> Union[str, List[str]]:
-        """Internal implementation of generate_response with provider-specific logic."""
+
+    def _generate_response(self,
+                           prompt: str,
+                           temperature: float = 0.7,
+                           max_tokens: int = 1000,
+                           streaming: bool = False) -> Union[Dict[str, Any], List[Dict[str, Any]]]:
+        """Internal implementation of generate_response with provider-specific logic,
+           returning a structured dictionary instead of a plain string."""
         if self.provider == "ollama":
             endpoint = f"{self.base_url}/api/{'generate' if not streaming else 'chat'}"
-            
+
             payload = {
                 "model": self.model_name,
                 "prompt": prompt,
@@ -109,23 +110,27 @@ class LLMInterface:
                 "num_predict": max_tokens,
                 "stream": streaming
             }
-            
+
             if streaming:
-                # For the chat endpoint, format is slightly different
+                # For the chat endpoint, format is slightly different:
                 payload = {
                     "model": self.model_name,
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": temperature,
                     "stream": True
                 }
-                return self._stream_response(endpoint, payload)
+                # Get the list of chunks and then join them
+                chunks = self._stream_response(endpoint, payload)
+                full_response = "".join(chunks)
+                return {"id": "llm_response_0", "content": full_response, "metadata": {}}
             else:
                 response = requests.post(endpoint, json=payload, timeout=self.timeout)
                 response.raise_for_status()
-                return response.json().get("response", "")
+                generated_text = response.json().get("response", "")
+                return {"id": "llm_response_0", "content": generated_text, "metadata": {}}
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
-    
+
     def _stream_response(self, endpoint: str, payload: Dict[str, Any]) -> List[str]:
         """
         Stream a response from the LLM.
@@ -179,16 +184,17 @@ class LLMInterface:
             temperature=temperature,
             max_tokens=max_tokens
         )
-    
-    def _generate_structured_response(self, 
-                                     system_prompt: str, 
-                                     user_prompt: str, 
-                                     temperature: float = 0.7, 
-                                     max_tokens: int = 1000) -> str:
-        """Internal implementation of generate_structured_response with provider-specific logic."""
+
+    def _generate_structured_response(self,
+                                      system_prompt: str,
+                                      user_prompt: str,
+                                      temperature: float = 0.7,
+                                      max_tokens: int = 1000) -> Dict[str, Any]:
+        """Internal implementation of generate_structured_response with provider-specific logic,
+           returning a structured dictionary."""
         if self.provider == "ollama":
             endpoint = f"{self.base_url}/api/chat"
-            
+
             payload = {
                 "model": self.model_name,
                 "messages": [
@@ -197,23 +203,23 @@ class LLMInterface:
                 ],
                 "temperature": temperature,
                 # Note: Ollama's chat API doesn't have a direct max_tokens parameter
-                # But we can try to use a related parameter if available
                 "options": {
                     "num_predict": max_tokens
                 }
             }
-            
+
             response = requests.post(endpoint, json=payload, timeout=self.timeout)
             response.raise_for_status()
-            
+
             try:
-                return response.json().get("message", {}).get("content", "")
+                content = response.json().get("message", {}).get("content", "")
+                return {"id": "llm_structured_response_0", "content": content, "metadata": {}}
             except (KeyError, json.JSONDecodeError):
                 self.logger.error(f"Failed to parse response: {response.text}")
-                return ""
+                return {"id": "llm_structured_response_0", "content": "", "metadata": {}}
         else:
             raise ValueError(f"Unsupported provider: {self.provider}")
-    
+
     def handle_rate_limiting(self, func, *args, **kwargs):
         """
         Handle rate limiting by retrying with exponential backoff.
