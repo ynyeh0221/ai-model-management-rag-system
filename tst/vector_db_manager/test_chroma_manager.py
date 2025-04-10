@@ -1,10 +1,7 @@
-import os
-import json
 import shutil
-import asyncio
 import tempfile
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import numpy as np
 

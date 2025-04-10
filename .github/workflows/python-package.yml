@@ -20,11 +20,14 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
+      # Install dependencies
       run: |
         python -m pip install --upgrade pip
         python -m pip install flake8 pytest pytest-cov coverage
         # Install all required packages that tests depend on
         python -m pip install requests numpy chromadb torch
+        # Add dependencies for ImageEmbedder
+        python -m pip install open_clip_torch Pillow torchvision
         # Add Jinja2 and markdown packages needed for ResponseFormatter
         python -m pip install jinja2 markdown
         # Make this package installable in development mode
