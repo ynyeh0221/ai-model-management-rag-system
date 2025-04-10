@@ -22,7 +22,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        python -m pip install flake8 pytest
+        python -m pip install flake8 pytest pytest-cov coverage
         # Install all required packages that tests depend on
         python -m pip install requests numpy chromadb torch
         # Add Jinja2 and markdown packages needed for ResponseFormatter
@@ -43,4 +43,14 @@ jobs:
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v3
       with:
+        fail_ci_if_error: false
+    - name: Generate coverage report
+      run: |
+        coverage report
+    - name: Create coverage badge
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
         fail_ci_if_error: false
