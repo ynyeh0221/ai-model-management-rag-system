@@ -3,9 +3,8 @@ name = "ai-model-rag-system"
 version = "0.1.0"
 description = "AI Model RAG System"
 authors = ["Yi-Nung Yeh <ynyeh0221@gmail.com>"]
-# Point to your actual code location
 packages = [
-    { include = "code", from = "src" }
+    { include = "src" }
 ]
 
 [tool.poetry.dependencies]
