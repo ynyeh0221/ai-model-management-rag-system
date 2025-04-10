@@ -3,9 +3,9 @@ name = "ai-model-rag-system"
 version = "0.1.0"
 description = "AI Model RAG System"
 authors = ["Yi-Nung Yeh <ynyeh0221@gmail.com>"]
-# Update package path to match your actual structure
+# Point to your actual code location
 packages = [
-    { include = "ai_model_rag_system", from = "../src" }
+    { include = "code", from = "src" }
 ]
 
 [tool.poetry.dependencies]
