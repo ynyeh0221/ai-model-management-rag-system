@@ -24,8 +24,10 @@ jobs:
     - name: Install dependencies
       run: |
         poetry install --with dev --extras "embedder formatter" --no-interaction
-        # Install chromadb directly with pip
-        python -m pip install chromadb
+        # Install chromadb using pip directly into the system Python
+        python -m pip install chromadb --user
+        # Verify chromadb is installed
+        python -c "import chromadb; print(f'ChromaDB version: {chromadb.__version__}')"
     - name: Lint with flake8
       run: |
         poetry run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
