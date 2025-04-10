@@ -3,6 +3,9 @@ name = "ai-model-rag-system"
 version = "0.1.0"
 description = "AI Model RAG System"
 authors = ["Yi-Nung Yeh <ynyeh0221@gmail.com>"]
+packages = [
+    { include = "ai_model_rag_system", from = "src" }
+]
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.12"
