@@ -18,6 +18,11 @@ Pillow = { version = "*", optional = true }
 torchvision = { version = "*", optional = true }
 jinja2 = { version = "*", optional = true }
 markdown = { version = "*", optional = true }
+google-api-python-client = "*"
+google-auth = "*"
+google-auth-oauthlib = "*"
+google-auth-httplib2 = "*"
+nbformat = "*"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "*"
