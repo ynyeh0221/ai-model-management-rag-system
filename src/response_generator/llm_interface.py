@@ -3,7 +3,7 @@ import json
 import time
 import requests
 import logging
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, List, Union
 
 class LLMInterface:
     """

@@ -1,11 +1,9 @@
 import unittest
 from unittest.mock import patch, MagicMock, call
-import time
 import json
 import requests
 
 from src.response_generator.llm_interface import LLMInterface
-
 
 class TestLLMInterface(unittest.TestCase):
 
