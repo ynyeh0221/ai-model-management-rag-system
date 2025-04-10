@@ -27,10 +27,10 @@ from src.response_generator.template_manager import TemplateManager
 from src.response_generator.response_formatter import ResponseFormatter
 from src.response_generator.prompt_visualizer import PromptVisualizer
 
-# from src.colab_generator.template_engine import NotebookTemplateEngine
+from src.colab_generator.template_engine import NotebookTemplateEngine
 # from src.colab_generator.code_generator import CodeGenerator
 from src.colab_generator.colab_api_client import ColabAPIClient
-# from src.colab_generator.reproducibility_manager import ReproducibilityManager
+from src.colab_generator.reproducibility_manager import ReproducibilityManager
 from src.colab_generator.resource_quota_manager import ResourceQuotaManager
 
 def initialize_components(config_path="./config"):
@@ -60,10 +60,10 @@ def initialize_components(config_path="./config"):
     prompt_visualizer = PromptVisualizer(template_manager)
     
     # Initialize Colab notebook generator components
-    # notebook_template_engine = NotebookTemplateEngine("./notebook_templates")
+    notebook_template_engine = NotebookTemplateEngine("./notebook_templates")
     # code_generator = CodeGenerator()
     colab_api_client = ColabAPIClient()
-    # reproducibility_manager = ReproducibilityManager()
+    reproducibility_manager = ReproducibilityManager()
     resource_quota_manager = ResourceQuotaManager()
     
     return {
@@ -92,10 +92,10 @@ def initialize_components(config_path="./config"):
             "prompt_visualizer": prompt_visualizer
         },
         "colab_generator": {
-        #     "notebook_template_engine": notebook_template_engine,
+            "notebook_template_engine": notebook_template_engine,
         #     "code_generator": code_generator,
             "colab_api_client": colab_api_client,
-        #     "reproducibility_manager": reproducibility_manager,
+            "reproducibility_manager": reproducibility_manager,
             "resource_quota_manager": resource_quota_manager
         }
     }
