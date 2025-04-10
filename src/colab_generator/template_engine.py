@@ -26,7 +26,7 @@ class NotebookTemplateEngine:
             f for f in os.listdir(self.templates_dir)
             if f.endswith(".ipynb.j2")
         ]
-        return [os.path.splitext(t)[0] for t in templates]
+        return [os.path.splitext(os.path.splitext(t)[0])[0] for t in templates]
 
     def get_template(self, template_id):
         """Get a raw Jinja2 template object by ID (without .ipynb.j2)."""

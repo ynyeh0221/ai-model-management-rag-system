@@ -23,6 +23,7 @@ google-auth = "*"
 google-auth-oauthlib = "*"
 google-auth-httplib2 = "*"
 nbformat = "*"
+nbconvert = "*"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "*"
