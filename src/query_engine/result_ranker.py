@@ -1,7 +1,6 @@
 # src/query_engine/result_ranker.py
 from datetime import datetime
-import numpy as np
-from typing import List, Dict, Any, Optional, Union, Callable
+from typing import List, Dict, Any, Optional, Callable
 import logging
 
 class ResultRanker:
