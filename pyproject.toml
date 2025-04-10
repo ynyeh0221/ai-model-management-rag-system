@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "ai-model-rag-system"
+version = "0.1.0"
+description = "AI Model RAG System"
+authors = ["Your Name <your.email@example.com>"]
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.12"
+requests = "*"
+numpy = "*"
+chromadb = {optional = true}
+torch = {optional = true}
+open_clip_torch = {optional = true}
+Pillow = {optional = true}
+torchvision = {optional = true}
+jinja2 = {optional = true}
+markdown = {optional = true}
+
+[tool.poetry.group.dev.dependencies]
+flake8 = "*"
+pytest = "*"
+pytest-cov = "*"
+coverage = "*"
+
+[tool.poetry.extras]
+embedder = ["open_clip_torch", "Pillow", "torchvision", "torch"]
+formatter = ["jinja2", "markdown"]
+full = ["chromadb", "torch", "open_clip_torch", "Pillow", "torchvision", "jinja2", "markdown"]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
