@@ -11,8 +11,7 @@ import json
 import time
 import logging
 import tempfile
-from pathlib import Path
-from typing import Dict, Optional, Any, List, Tuple
+from typing import Dict, Optional, Any, List
 
 # Google API libraries
 from google.oauth2.service_account import Credentials
@@ -28,13 +27,11 @@ from googleapiclient.errors import HttpError
 import nbformat
 from nbformat.v4 import new_notebook, new_markdown_cell, new_code_cell
 
-# --- REPLACED utils.exceptions ---
 class AuthenticationError(Exception): pass
 class NotebookCreationError(Exception): pass
 class ExecutionError(Exception): pass
 class ResourceExceededError(Exception): pass
 
-# --- REPLACED get_logger ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
