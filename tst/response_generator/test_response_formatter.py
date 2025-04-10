@@ -1,9 +1,29 @@
 import unittest
 from unittest.mock import MagicMock, patch
+import json
+from datetime import datetime
 from jinja2 import Template
+import sys
+import os
 
-# Import the ResponseFormatter class
-from src.response_generator.response_formatter import ResponseFormatter
+# Try different import paths to find the ResponseFormatter class
+try:
+    # Try direct import first
+    from response_formatter import ResponseFormatter
+except ImportError:
+    try:
+        # Try from response_generator module
+        from response_generator.response_formatter import ResponseFormatter
+    except ImportError:
+        # Try from src directory structure
+        try:
+            from src.response_generator.response_formatter import ResponseFormatter
+        except ImportError:
+            # Last attempt - look at common project structures
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            parent_dir = os.path.dirname(current_dir)
+            sys.path.append(parent_dir)
+            from response_generator.response_formatter import ResponseFormatter
 
 
 class TestResponseFormatter(unittest.TestCase):
