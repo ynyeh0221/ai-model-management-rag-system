@@ -8,13 +8,13 @@ authors = ["Yi-Nung Yeh <ynyeh0221@gmail.com>"]
 python = ">=3.9,<3.12"
 requests = "*"
 numpy = "*"
-chromadb = {optional = true}
-torch = {optional = true}
-open_clip_torch = {optional = true}
-Pillow = {optional = true}
-torchvision = {optional = true}
-jinja2 = {optional = true}
-markdown = {optional = true}
+chromadb = { version = "*", optional = true }
+torch = { version = "*", optional = true }
+open_clip_torch = { version = "*", optional = true }
+Pillow = { version = "*", optional = true }
+torchvision = { version = "*", optional = true }
+jinja2 = { version = "*", optional = true }
+markdown = { version = "*", optional = true }
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "*"
