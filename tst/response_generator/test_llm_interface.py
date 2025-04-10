@@ -174,15 +174,36 @@ class TestLLMInterface(unittest.TestCase):
         mock_sleep.assert_has_calls(expected_calls, any_order=False)
 
     @patch('requests.get')
-    def test_get_model_info(self, mock_get):
+    @patch('requests.post')  # Add this to mock POST requests as well
+    def test_get_model_info(self, mock_post, mock_get):
         """
         Test that get_model_info returns the expected model information.
         """
+        # Mock for initialization GET to /api/tags
+        mock_tags_response = MagicMock()
+        mock_tags_response.json.return_value = {"models": [{"name": "llama3:latest"}]}
+        mock_tags_response.raise_for_status.return_value = None
+
+        # Mock for GET to /api/show in get_model_info
         dummy_info = {"name": "llama3:latest", "version": "1.0"}
-        mock_get_response = MagicMock()
-        mock_get_response.json.return_value = dummy_info
-        mock_get_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_get_response
+        mock_show_response = MagicMock()
+        mock_show_response.json.return_value = dummy_info
+        mock_show_response.raise_for_status.return_value = None
+
+        # Configure mock_get to return different responses based on URL
+        def mock_get_side_effect(url, **kwargs):
+            if "/api/tags" in url:
+                return mock_tags_response
+            elif "/api/show" in url:
+                return mock_show_response
+            return MagicMock()
+
+        mock_get.side_effect = mock_get_side_effect
+
+        # Mock POST response (shouldn't be called if tags include the model)
+        mock_post_response = MagicMock()
+        mock_post_response.raise_for_status.return_value = None
+        mock_post.return_value = mock_post_response
 
         llm = LLMInterface(provider="ollama", model_name="llama3:latest")
         info = llm.get_model_info()
