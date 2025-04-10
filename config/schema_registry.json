@@ -1,0 +1,31 @@
+{
+  "registry_name": "MySchemaRegistry",
+  "schemas": [
+    {
+      "schema_id": "model_script_schema",
+      "schema_version": "1.0.0",
+      "schema_definition": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "content": {"type": "string"}
+        },
+        "required": ["id", "content"]
+      },
+      "description": "Schema for model scripts",
+      "updated_date": "2025-04-09T00:00:00"
+    },
+    {
+      "schema_id": "generated_image_schema",
+      "schema_version": "1.0.0",
+      "schema_definition": {
+        "type": "object",
+        "properties": {
+        },
+        "required": []
+      },
+      "description": "Schema for model scripts",
+      "updated_date": "2025-04-09T00:00:00"
+    }
+  ]
+}

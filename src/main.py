@@ -71,7 +71,7 @@ def initialize_components(config_path="./config"):
             "schema_validator": schema_validator,
             "code_parser": code_parser,
             "metadata_extractor": metadata_extractor,
-            # "image_processor": image_processor
+            "image_processor": image_processor
         },
         "vector_db_manager": {
             "text_embedder": text_embedder,
@@ -301,7 +301,7 @@ def process_single_image(file_path, components):
     access_control = components["vector_db_manager"]["access_control"]
     
     # 1. Process the image and extract metadata
-    process_result = image_processor.process(file_path)
+    process_result = image_processor.process_image(file_path)
     if not process_result:
         # Not a valid image, skip it
         return None
@@ -325,9 +325,9 @@ def process_single_image(file_path, components):
     # Use global embedding by default, but can use tiled if specified in metadata
     embedding_type = document["metadata"].get("embedding_type", "global")
     if embedding_type == "global":
-        embedding = image_embedder.embed_image(process_result["image"])
+        embedding = image_embedder.embed_image(process_result["metadata"].get("image_path"))
     else:  # tiled embedding
-        embedding = image_embedder.embed_image_tiled(process_result["image"], 
+        embedding = image_embedder.embed_image_tiled(process_result["metadata"].get("image_path"),
                                                    process_result["metadata"].get("tile_config", {}))
     
     # 5. Apply access control
@@ -344,10 +344,16 @@ def process_single_image(file_path, components):
     
     # 7. Create and store thumbnail if it doesn't exist
     thumbnail_path = document["metadata"].get("thumbnail_path")
+    # If thumbnail_path is not a valid path type, derive a default thumbnail file path.
+    if not isinstance(thumbnail_path, (str, bytes, os.PathLike)):
+        thumb_dir = os.path.dirname(file_path)
+        thumbnail_path = os.path.join(thumb_dir, f"thumb_{Path(file_path).name}")
+        document["metadata"]["thumbnail_path"] = thumbnail_path
+
     if thumbnail_path and not os.path.exists(thumbnail_path):
-        thumb_dir = os.path.dirname(thumbnail_path)
-        os.makedirs(thumb_dir, exist_ok=True)
-        image_processor.create_thumbnail(process_result["image"], thumbnail_path)
+        os.makedirs(os.path.dirname(thumbnail_path), exist_ok=True)
+        # Pass the loaded image (a PIL Image) and the verified thumbnail_path.
+        image_processor.generate_thumbnail(process_result["metadata"].get("image_path"), thumbnail_path)
     
     return (document_id, True)
 

@@ -214,11 +214,9 @@ class ChromaManager:
                     # If it's a numpy array, convert using any()
                     should_embed = embed_content.any()
                 else:
-                    # For any other type, try simple boolean conversion
                     try:
                         should_embed = bool(embed_content)
                     except Exception:
-                        # Default to True if conversion fails
                         should_embed = True
             else:
                 should_embed = embed_content
@@ -237,43 +235,31 @@ class ChromaManager:
                 metadata = {}
 
             # Flatten nested dictionaries in metadata and handle all complex types
-            # ChromaDB only allows simple types (str, int, float, bool) as metadata values
             flat_metadata = {}
             for key, value in metadata.items():
-                # Handle different value types
                 if isinstance(value, dict):
-                    # Convert dict to JSON string
                     flat_metadata[key] = json.dumps(value)
                 elif isinstance(value, list):
-                    # Convert any list to JSON string, empty or not
                     flat_metadata[key] = json.dumps(value)
                 elif value is None:
-                    # Convert None to empty string
                     flat_metadata[key] = ""
                 elif isinstance(value, (str, int, float, bool)):
-                    # Keep primitive types as is
                     flat_metadata[key] = value
                 else:
-                    # Convert any other type to string representation
                     flat_metadata[key] = str(value)
 
             # Select the appropriate collection.
             collection = self.get_collection(collection_name)
 
-            # Explicitly initialize has_content to False
+            # Determine if content is non-empty
             has_content = False
-
-            # Determine if content is non-empty:
             if isinstance(content, (str, bytes)):
                 has_content = bool(content.strip())
             elif isinstance(content, np.ndarray):
-                # For NumPy arrays, explicitly check if size is greater than 0
                 has_content = content.size > 0
             elif hasattr(content, '__len__'):
-                # For other sequence types
                 has_content = len(content) > 0
             else:
-                # For other types, try direct boolean conversion
                 try:
                     has_content = bool(content)
                 except Exception:
@@ -282,9 +268,8 @@ class ChromaManager:
             # Initialize embeddings to None
             embeddings = None
 
-            # Generate embeddings only if both conditions are explicitly True
-            # Avoid using embed_content directly in any boolean expression
-            if should_embed and has_content:
+            # Generate embeddings if requested (or if we're in the images collection)
+            if should_embed and (has_content or collection_name == "generated_images"):
                 if collection_name == "generated_images":
                     embeddings = await self._run_in_executor(
                         self.image_embedding_function,
@@ -296,13 +281,38 @@ class ChromaManager:
                         [content]
                     )
 
-            # Add the document to the collection.
+            # Build keyword arguments for the add() method based on collection type.
+            if collection_name == "generated_images":
+                # For generated images, expect 'image_path' in metadata.
+                image_path = metadata.get("image_path")
+                if not image_path:
+                    raise ValueError("For 'generated_images' collection, an 'image_path' must be provided in metadata.")
+                # Load the image as a NumPy array.
+                try:
+                    from PIL import Image
+                    with Image.open(image_path) as img:
+                        # Convert the image to a numpy array.
+                        image_np = np.array(img)
+                except Exception as e:
+                    raise ValueError(f"Error loading image from '{image_path}': {e}")
+                add_kwargs = {
+                    "ids": [doc_id],
+                    "images": [image_np],
+                    "embeddings": embeddings,
+                    "metadatas": [flat_metadata] if flat_metadata else None
+                }
+            else:
+                add_kwargs = {
+                    "ids": [doc_id],
+                    "documents": [content] if content else None,
+                    "embeddings": embeddings,
+                    "metadatas": [flat_metadata] if flat_metadata else None
+                }
+
+            # Add the document using the appropriate field.
             await self._run_in_executor(
                 collection.add,
-                ids=[doc_id],
-                documents=[content] if content else None,
-                embeddings=embeddings,
-                metadatas=[flat_metadata] if flat_metadata else None
+                **add_kwargs
             )
 
             self.logger.debug(f"Added document {doc_id} to collection {collection_name}")

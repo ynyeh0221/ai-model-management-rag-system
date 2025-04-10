@@ -13,7 +13,8 @@ class ImageProcessor:
                 image_info = {
                     "format": img.format,
                     "mode": img.mode,
-                    "size": img.size  # (width, height)
+                    "size": img.size,  # (width, height)
+                    "metadata": {"image_path": image_path} if metadata is None else metadata
                 }
                 
                 # Extract EXIF data, if available
@@ -30,28 +31,51 @@ class ImageProcessor:
                 
                 # Optionally validate the extracted metadata against a schema
                 if self.schema_validator:
-                    self.schema_validator.validate(image_info)
+                    self.schema_validator.validate(image_info, "generated_image_schema")
                 
                 return image_info
         except Exception as e:
             raise ValueError(f"Error processing image {image_path}: {e}")
-    
-    def generate_thumbnail(self, image_path, output_path=None, size=(128, 128)):
-        """Generate a thumbnail for the image."""
-        try:
-            with Image.open(image_path) as img:
-                # Create a copy for generating thumbnail, preserving original image
-                thumbnail = img.copy()
-                thumbnail.thumbnail(size)
-                # Determine output path if not provided
-                if not output_path:
-                    base, ext = os.path.splitext(image_path)
-                    output_path = f"{base}_thumbnail{ext}"
-                thumbnail.save(output_path)
-                return output_path
-        except Exception as e:
-            raise ValueError(f"Error generating thumbnail for {image_path}: {e}")
-    
+
+    def generate_thumbnail(self, image_input, thumbnail_path, size=(128, 128)):
+        """
+        Generate and save a thumbnail for an image.
+
+        Args:
+            image_input (str or PIL.Image.Image): Either a file path to the image or a PIL Image object.
+            thumbnail_path (str): The destination file path where the thumbnail should be saved.
+            size (tuple): Desired thumbnail size (width, height). Defaults to (128, 128).
+
+        Returns:
+            str: The thumbnail_path if successful.
+
+        Raises:
+            ValueError: If the image_input is not a valid type.
+        """
+        # Check if image_input is already a PIL image; otherwise, try to open it as a file.
+        if isinstance(image_input, Image.Image):
+            image = image_input
+        elif isinstance(image_input, (str, os.PathLike)):
+            try:
+                image = Image.open(image_input)
+            except Exception as e:
+                raise ValueError(f"Cannot open image from path '{image_input}': {e}")
+        else:
+            raise ValueError("Invalid image_input type: must be a file path or PIL.Image.Image")
+
+        # Create a copy of the image and generate the thumbnail using LANCZOS resampling.
+        thumbnail = image.copy()
+        thumbnail.thumbnail(size, Image.Resampling.LANCZOS)
+
+        # Ensure that the directory for the thumbnail exists
+        thumb_dir = os.path.dirname(thumbnail_path)
+        if thumb_dir and not os.path.exists(thumb_dir):
+            os.makedirs(thumb_dir, exist_ok=True)
+
+        # Save the generated thumbnail to the provided thumbnail_path
+        thumbnail.save(thumbnail_path)
+        return thumbnail_path
+
     def assess_safety(self, image_path):
         """Perform safety assessment on image content."""
         # Placeholder implementation for safety assessment.
@@ -77,4 +101,3 @@ class ImageProcessor:
             # If no EXIF data is found or an error occurs, return an empty dict.
             pass
         return exif_data
-
