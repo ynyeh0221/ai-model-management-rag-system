@@ -28,16 +28,15 @@ from googleapiclient.errors import HttpError
 import nbformat
 from nbformat.v4 import new_notebook, new_markdown_cell, new_code_cell
 
-# Local imports
-from ..utils.exceptions import (
-    AuthenticationError,
-    NotebookCreationError,
-    ExecutionError,
-    ResourceExceededError,
-)
-from ..utils.logging_config import get_logger
+# --- REPLACED utils.exceptions ---
+class AuthenticationError(Exception): pass
+class NotebookCreationError(Exception): pass
+class ExecutionError(Exception): pass
+class ResourceExceededError(Exception): pass
 
-logger = get_logger(__name__)
+# --- REPLACED get_logger ---
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Constants
 SCOPES = [
@@ -50,7 +49,6 @@ DEFAULT_TIMEOUT = 300  # 5 minutes
 MAX_EXECUTION_WAIT_TIME = 7200  # 2 hours
 POLL_INTERVAL = 10  # 10 seconds
 TOKEN_PATH = 'token.json'
-
 
 class ColabAPIClient:
     """
