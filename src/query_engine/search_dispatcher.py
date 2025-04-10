@@ -206,25 +206,25 @@ class SearchDispatcher:
         except Exception as e:
             self.logger.error(f"Error in text search: {e}", exc_info=True)
             raise
-    
+
     async def handle_image_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle an image search query.
-        
+
         Args:
             query: The processed query text
             parameters: Dictionary of extracted parameters
-            
+
         Returns:
             Dictionary containing search results for images
         """
         self.logger.debug(f"Handling image search: {query}")
         start_time = time.time()
-        
+
         try:
             # Generate embedding for the query
             embedding_start = time.time()
-            
+
             # Check if we're doing a text-to-image search or image-to-image search
             if 'image_data' in parameters:
                 # Image-to-image search
@@ -234,40 +234,40 @@ class SearchDispatcher:
             else:
                 # Text-to-image search (using CLIP's multimodal capabilities)
                 query_embedding = await self.image_embedder.generate_text_embedding(query)
-                
+
             embedding_time = (time.time() - embedding_start) * 1000
-            
+
             # Extract search parameters
             limit = parameters.get('limit', 20)
             style_tags = parameters.get('style_tags', [])
             prompt_terms = parameters.get('prompt_terms', "")
             resolution = parameters.get('resolution', None)
-            
+
             # Build filters
             filters = {}
-            
+
             if style_tags:
                 filters['style_tags'] = {'$in': style_tags}
-                
+
             if prompt_terms:
                 filters['prompt'] = {'$contains': prompt_terms}
-                
+
             if resolution:
                 filters['resolution.width'] = {'$eq': resolution.get('width')}
                 filters['resolution.height'] = {'$eq': resolution.get('height')}
-            
+
             # Add any model-specific filters
             if 'model_ids' in parameters and parameters['model_ids']:
                 filters['source_model_id'] = {'$in': parameters['model_ids']}
-            
-            # Prepare Chroma query
+
+            # Prepare Chroma query - FIX: Use query parameter instead of embedding
             search_params = {
-                'embedding': query_embedding,
+                'query': {'embedding': query_embedding},  # Changed from 'embedding' to 'query' with a nested dict
+                'where': filters if filters else None,
                 'limit': limit,
-                'filters': filters,
-                'include': ["metadata"]
+                'include': ["metadatas"]  # Changed from "metadata" to "metadatas"
             }
-            
+
             # Execute vector search
             search_start = time.time()
             image_results = await self.chroma_manager.search(
@@ -275,16 +275,16 @@ class SearchDispatcher:
                 **search_params
             )
             search_time = (time.time() - search_start) * 1000
-            
+
             # Process results
             items = []
             for idx, result in enumerate(image_results.get('results', [])):
                 metadata = result.get('metadata', {})
-                
+
                 # Add the image URL/path
                 image_path = metadata.get('image_path', "")
                 thumbnail_path = metadata.get('thumbnail_path', "")
-                
+
                 items.append({
                     'id': result.get('id'),
                     'score': result.get('score', 0.0),
@@ -293,7 +293,7 @@ class SearchDispatcher:
                     'thumbnail_path': thumbnail_path,
                     'rank': idx + 1
                 })
-            
+
             # Log performance metrics if analytics available
             if self.analytics and 'query_id' in parameters:
                 self.analytics.log_performance_metrics(
@@ -302,7 +302,7 @@ class SearchDispatcher:
                     search_time_ms=int(search_time),
                     total_time_ms=int((time.time() - start_time) * 1000)
                 )
-            
+
             return {
                 'success': True,
                 'type': 'image_search',
@@ -314,7 +314,7 @@ class SearchDispatcher:
                     'total_time_ms': (time.time() - start_time) * 1000
                 }
             }
-            
+
         except Exception as e:
             self.logger.error(f"Error in image search: {e}", exc_info=True)
             raise
