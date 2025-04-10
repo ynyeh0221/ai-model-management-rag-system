@@ -2,7 +2,7 @@
 name = "ai-model-rag-system"
 version = "0.1.0"
 description = "AI Model RAG System"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["Yi-Nung Yeh <ynyeh0221@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.12"
