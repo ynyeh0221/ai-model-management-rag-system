@@ -23,7 +23,10 @@ jobs:
         echo "$HOME/.local/bin" >> $GITHUB_PATH
     - name: Install dependencies
       run: |
-        poetry install --with dev --extras "embedder formatter full"
+        poetry config experimental.new-installer false
+        poetry install --with dev --extras "embedder formatter" --no-interaction
+        poetry run pip install chromadb --no-deps
+        poetry run pip install onnxruntime
     - name: Lint with flake8
       run: |
         poetry run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
