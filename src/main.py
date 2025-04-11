@@ -520,11 +520,11 @@ def start_ui(components, host="localhost", port=8000):
                 
                 # Check access permissions for all models
                 all_accessible = True
-#                for model_id in models_to_compare:
-#                    if not access_control.verify_model_access(user_id, model_id):
-#                        print(f"Access denied for model: {model_id}")
-#                        all_accessible = False
-#                        break
+                # for model_id in models_to_compare:
+                    # if not access_control.verify_model_access(user_id, model_id):
+                        # print(f"Access denied for model: {model_id}")
+                        # all_accessible = False
+                        # break
                 
                 if not all_accessible:
                     continue
