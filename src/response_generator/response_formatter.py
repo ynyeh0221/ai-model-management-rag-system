@@ -61,7 +61,7 @@ class ResponseFormatter:
         self.logger.info(
             f"Formatting response of type: {response_type} for query intent: {query.get('intent', 'general')}")
 
-        # Filter out fallback LLM responses (with id starting "llm_response")
+        # Filter out fallback LLM responses
         filtered_results = [r for r in results if
                             not (isinstance(r, dict) and r.get("id", "").startswith("llm_response"))]
         if not filtered_results:
@@ -74,33 +74,59 @@ class ResponseFormatter:
                     'result_count': 0
                 }
             }
-        # Use the filtered results for further processing.
+
         results = filtered_results
 
-        # Get appropriate template based on query intent and response type.
-        # Try specific template combinations first, then fall back to more general ones
-        template = None
+        # Normalize flattened JSON strings in metadata
+        def normalize_metadata_fields(result: Dict[str, Any]) -> Dict[str, Any]:
+            metadata = result.get('metadata', {})
 
-        # Try intent_response_type combination
+            for key, val in metadata.items():
+                # Skip if already good
+                if isinstance(val, (dict, list, int, float)):
+                    continue
+
+                # Try to parse JSON-encoded strings
+                if isinstance(val, str):
+                    try:
+                        parsed = json.loads(val)
+                        # Accept if it's a structured value
+                        if isinstance(parsed, (dict, list, str, int, float)):
+                            metadata[key] = parsed
+                    except json.JSONDecodeError:
+                        # Fall back: string is just a normal string
+                        continue
+
+            # Special case: if model_id is still missing, try fallback keys
+            if not metadata.get("model_id"):
+                metadata["model_id"] = (
+                        metadata.get("source_model_id") or
+                        metadata.get("file", {}).get("absolute_path", "").split("/")[-2]  # fallback to folder name
+                )
+
+            result["metadata"] = metadata
+            return result
+
+        results = [normalize_metadata_fields(r) for r in results]
+
+        # Get appropriate template
+        template = None
         template_key = f"{query.get('intent', 'general')}_{response_type}"
         template = self.template_manager.get_template(template_key)
 
-        # If not found, try just the intent
         if not template:
             template_key = f"{query.get('intent', 'general')}"
             template = self.template_manager.get_template(template_key)
 
-        # If still not found, try information_retrieval for retrieval intents
         if not template and query.get('intent') == 'retrieval':
             template = self.template_manager.get_template("information_retrieval")
 
-        # Finally, fall back to default
         if not template:
             self.logger.warning(
                 f"No template found for {query.get('intent', 'general')}_{response_type}, using default")
             template = self._get_default_template(response_type)
 
-        # Process results based on query intent.
+        # Dispatch to specific formatter
         if query.get('intent') == 'model_info':
             return self._format_model_info(results, template, response_type)
         elif query.get('intent') == 'model_comparison':
@@ -110,7 +136,6 @@ class ResponseFormatter:
         elif query.get('intent') == 'image_search':
             return self.format_image_gallery(results, template, response_type)
         else:
-            # General information response.
             return self._format_general_info(results, template, response_type)
 
     def _format_general_info(self, results: List[Dict[str, Any]],

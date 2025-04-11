@@ -8,12 +8,30 @@
         "type": "object",
         "properties": {
           "id": {"type": "string"},
-          "content": {"type": "string"}
+          "content": {"type": "string"},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model_id": { "type": "string" },
+              "chunk_id": { "type": "integer" },
+              "total_chunks": { "type": "integer" },
+              "framework": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": "string" }
+                }
+              },
+              "access_control": {
+                "type": "object"
+              }
+            },
+            "required": ["model_id"]
+          }
         },
-        "required": ["id", "content"]
+        "required": ["id", "content", "metadata"]
       },
-      "description": "Schema for model scripts",
-      "updated_date": "2025-04-09T00:00:00"
+      "description": "Schema for model scripts including metadata",
+      "updated_date": "2025-04-11T00:00:00"
     },
     {
       "schema_id": "generated_image_schema",

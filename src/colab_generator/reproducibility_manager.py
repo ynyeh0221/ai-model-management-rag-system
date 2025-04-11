@@ -130,3 +130,21 @@ class ReproducibilityManager:
             f.write(pdf_data)
 
         return output_path
+
+    def add_reproducibility_info(self, notebook, model_id):
+        """
+        Embed reproducibility metadata into the notebook's metadata field.
+
+        Args:
+            notebook (nbformat.NotebookNode): The notebook object.
+            model_id (str): ID of the model for traceability.
+
+        Returns:
+            nbformat.NotebookNode: Updated notebook with reproducibility info.
+        """
+        log = self.generate_execution_log(notebook, parameters={"model_id": model_id})
+        notebook.metadata["reproducibility"] = {
+            "execution_log": log,
+            "environment": self.record_environment(log["execution_id"])
+        }
+        return notebook

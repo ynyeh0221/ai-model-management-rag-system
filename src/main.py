@@ -1,37 +1,36 @@
 # main.py
-import asyncio
 import argparse
-import os
+import asyncio
+import concurrent.futures
 import glob
 import logging
-import concurrent.futures
+import os
 from pathlib import Path
 
-from src.document_processor.code_parser import CodeParser
-from src.document_processor.metadata_extractor import MetadataExtractor
-from src.document_processor.image_processor import ImageProcessor
-from src.document_processor.schema_validator import SchemaValidator
+import nbformat
 
-from src.vector_db_manager.text_embedder import TextEmbedder
-from src.vector_db_manager.image_embedder import ImageEmbedder
-from src.vector_db_manager.chroma_manager import ChromaManager
-from src.vector_db_manager.access_control import AccessControlManager
-
-from src.query_engine.query_parser import QueryParser
-from src.query_engine.search_dispatcher import SearchDispatcher
-from src.query_engine.result_ranker import ResultRanker
-from src.query_engine.query_analytics import QueryAnalytics
-
-from src.response_generator.llm_interface import LLMInterface
-from src.response_generator.template_manager import TemplateManager
-from src.response_generator.response_formatter import ResponseFormatter
-from src.response_generator.prompt_visualizer import PromptVisualizer
-
-from src.colab_generator.template_engine import NotebookTemplateEngine
 from src.colab_generator.code_generator import CodeGenerator
 from src.colab_generator.colab_api_client import ColabAPIClient
 from src.colab_generator.reproducibility_manager import ReproducibilityManager
 from src.colab_generator.resource_quota_manager import ResourceQuotaManager
+from src.colab_generator.template_engine import NotebookTemplateEngine
+from src.document_processor.code_parser import CodeParser
+from src.document_processor.image_processor import ImageProcessor
+from src.document_processor.metadata_extractor import MetadataExtractor
+from src.document_processor.schema_validator import SchemaValidator
+from src.query_engine.query_analytics import QueryAnalytics
+from src.query_engine.query_parser import QueryParser
+from src.query_engine.result_ranker import ResultRanker
+from src.query_engine.search_dispatcher import SearchDispatcher
+from src.response_generator.llm_interface import LLMInterface
+from src.response_generator.prompt_visualizer import PromptVisualizer
+from src.response_generator.response_formatter import ResponseFormatter
+from src.response_generator.template_manager import TemplateManager
+from src.vector_db_manager.access_control import AccessControlManager
+from src.vector_db_manager.chroma_manager import ChromaManager
+from src.vector_db_manager.image_embedder import ImageEmbedder
+from src.vector_db_manager.text_embedder import TextEmbedder
+
 
 def initialize_components(config_path="./config"):
     """Initialize all components of the RAG system."""
@@ -183,7 +182,12 @@ def process_single_script(file_path, components):
     
     # 3. Split into chunks for processing
     chunks = code_parser.split_into_chunks(parse_result["content"], chunk_size=1000, overlap=200)
-    
+
+    file_path_obj = Path(file_path)
+    folder_name = file_path_obj.parent.name
+    file_stem = file_path_obj.stem
+    model_id = f"{folder_name}_{file_stem}"
+
     documents = []
     for i, chunk in enumerate(chunks):
         # Create document for each chunk
@@ -194,7 +198,8 @@ def process_single_script(file_path, components):
             "metadata": {
                 **metadata,
                 "chunk_id": i,
-                "total_chunks": len(chunks)
+                "total_chunks": len(chunks),
+                "model_id": model_id
             }
         }
         
@@ -210,7 +215,7 @@ def process_single_script(file_path, components):
         # 6. Apply access control
         access_metadata = access_control.get_document_permissions(document)
         document["metadata"]["access_control"] = access_metadata
-        
+
         # 7. Store in Chroma
         asyncio.run(chroma_manager.add_document(
             collection_name="model_scripts",
@@ -218,7 +223,13 @@ def process_single_script(file_path, components):
             document=document,
             embed_content=embedding
         ))
-        
+
+        result = asyncio.run(chroma_manager.get(
+            collection_name="model_scripts",
+            where={"model_id": {"$eq": "CatDog_scriptABC"}},
+            include=["metadatas", "documents"]
+        ))
+
         documents.append(document)
     
     # Return the first document ID and success status
@@ -454,7 +465,6 @@ def start_ui(components, host="localhost", port=8000):
                 
                 print("Searching...")
                 # Dispatch the query
-                # Dispatch the query
                 search_results = asyncio.run(search_dispatcher.dispatch(
                     query=parsed_query["processed_query"] if "processed_query" in parsed_query else query_text,
                     intent=parsed_query["intent"],
@@ -611,10 +621,22 @@ def generate_notebook(components, model_id, output_path, notebook_type="evaluati
 
     # Retrieve model information from database
     logger.info(f"Retrieving model information for {model_id}")
+
+    # Try doc ID directly first
     model_info = asyncio.run(chroma_manager.get_document(
         collection_name="model_scripts",
-        doc_id=f"{model_id}"  # Get the first chunk
+        doc_id=model_id  # could be full chunk ID
     ))
+
+    # If not found, treat input as model_id and search by metadata
+    if not model_info:
+        results = asyncio.run(chroma_manager.get(
+            collection_name="model_scripts",
+            where={"model_id": {"$eq": model_id}},
+            limit=1,
+            include=["metadatas", "documents"]
+        ))
+        model_info = results["results"][0] if results.get("results") else None
 
     if not model_info:
         logger.error(f"Model {model_id} not found")
@@ -680,10 +702,13 @@ def generate_notebook(components, model_id, output_path, notebook_type="evaluati
 
     # Generate notebook using template engine
     logger.info("Generating notebook from template")
-    notebook_content = notebook_template_engine.render_notebook(
-        template_name=f"{notebook_type}_template.ipynb",
-        code_sections=code_sections,
-        model_info=model_metadata
+    context = {
+        **model_metadata,  # flatten metadata directly into the context
+        **code_sections  # provide code snippets separately
+    }
+    notebook_content = notebook_template_engine.render_template(
+        template_id=f"{notebook_type}_template",
+        context=context
     )
 
     # Add reproducibility information
@@ -691,8 +716,8 @@ def generate_notebook(components, model_id, output_path, notebook_type="evaluati
 
     # Save notebook to output path
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, 'w') as f:
-        f.write(notebook_content)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        nbformat.write(notebook_content, f)
 
     logger.info(f"Notebook saved to {output_path}")
 

@@ -36,21 +36,19 @@ class NotebookTemplateEngine:
             raise FileNotFoundError(f"Template '{template_id}' not found in {self.templates_dir}")
 
     def render_template(self, template_id, context):
-        """
-        Render a template with the given context and return an nbformat notebook.
-
-        Args:
-            template_id (str): ID of the template (filename without extension)
-            context (dict): Context variables for rendering
-
-        Returns:
-            nbformat.NotebookNode: A parsed notebook object
-        """
         template = self.get_template(template_id)
         rendered_str = template.render(**context)
+
+        # TEMP DEBUG: save the raw rendered content to a file
+        # with open("./notebooks/debug_rendered_notebook.ipynb", "w", encoding="utf-8") as f:
+        #     f.write(rendered_str)
+        # print("[DEBUG] Saved raw rendered notebook to debug_rendered_notebook.ipynb")
 
         try:
             notebook = nbformat.reads(rendered_str, as_version=4)
             return notebook
         except Exception as e:
-            raise ValueError(f"Failed to parse rendered notebook: {e}")
+            raise ValueError(
+                f"Failed to parse rendered notebook: {e}\n\n"
+                "Check debug_rendered_notebook.ipynb for raw output."
+            )

@@ -33,7 +33,7 @@ class ChromaManager:
         self.logger = logging.getLogger(__name__)
         self.collections = {}
         self._initialize_client()
-    
+
     def _initialize_client(self):
         """
         Initialize the Chroma client and embedding functions.
@@ -188,7 +188,13 @@ class ChromaManager:
             embedding_function = self.text_embedding_function
         
         # Get or create the collection
-        return self._get_or_create_collection(name, embedding_function)
+        return self._get_or_create_collection(name, embedding_function,
+            metadata={
+                "model_id": "string",
+                "version": "string",
+                "framework": "string",
+                "architecture_type": "string"
+            })
 
     async def add_document(self,
                            document: Dict[str, Any],
@@ -237,9 +243,10 @@ class ChromaManager:
             # Flatten nested dictionaries in metadata and handle all complex types
             flat_metadata = {}
             for key, value in metadata.items():
-                if isinstance(value, dict):
-                    flat_metadata[key] = json.dumps(value)
-                elif isinstance(value, list):
+                if key == "model_id" and isinstance(value, str):
+                    flat_metadata[key] = value  # don't double stringify
+                # Safe flattening: only JSON-stringify complex structures
+                elif isinstance(value, dict) or isinstance(value, list):
                     flat_metadata[key] = json.dumps(value)
                 elif value is None:
                     flat_metadata[key] = ""
@@ -315,7 +322,15 @@ class ChromaManager:
                 **add_kwargs
             )
 
-            self.logger.debug(f"Added document {doc_id} to collection {collection_name}")
+            self.logger.debug(f"[DEBUG] Saving document {doc_id} with metadata: {flat_metadata}")
+
+            # Immediately fetch it back
+            result = await self.get(
+                collection_name=collection_name,
+                ids=[doc_id],
+                include=["metadatas"]
+            )
+
             return doc_id
 
         except Exception as e:
@@ -355,11 +370,27 @@ class ChromaManager:
                 # Validate metadata
                 if not isinstance(metadata, dict):
                     metadata = {}
+
+                # Flatten metadata like in add_document
+                flat_metadata = {}
+                for key, value in metadata.items():
+                    if isinstance(value, dict):
+                        flat_metadata[key] = json.dumps(value)
+                    elif isinstance(value, list):
+                        flat_metadata[key] = json.dumps(value)
+                    elif value is None:
+                        flat_metadata[key] = ""
+                    elif isinstance(value, (str, int, float, bool)):
+                        flat_metadata[key] = value
+                    else:
+                        flat_metadata[key] = str(value)
                 
                 ids.append(doc_id)
                 contents.append(content)
-                metadatas.append(metadata)
-            
+                metadatas.append(flat_metadata)
+
+                self.logger.debug(f"[DEBUG] Saving document {doc_id} with metadata: {flat_metadata}")
+
             # Generate embeddings in batch
             if collection_name == "generated_images":
                 # Placeholder for image embeddings
@@ -805,88 +836,39 @@ class ChromaManager:
     def _process_search_results(self, results: Dict[str, Any], include: List[str]) -> Dict[str, Any]:
         """
         Process raw Chroma results into a more user-friendly format.
-
-        Args:
-            results: Raw results from Chroma
-            include: What was included in the results
-
-        Returns:
-            Dict with processed results
         """
-        processed = {
-            "results": []
-        }
+        processed = {"results": []}
 
-        # Check if there are any results
-        if not results:
-            return processed
+        ids = results.get('ids') or []
+        documents = results.get('documents') or []
+        metadatas = results.get('metadatas') or []
+        embeddings = results.get('embeddings') or []
 
-        if not results.get('ids'):
-            return processed
+        # print(f"ids: {ids}")
+        # print(f"Documents: {documents}")
+        # print(f"Metadatas: {metadatas}")
+        # print(f"Embeddings: {embeddings}")
 
-        # Get the components that were included
-        ids = results.get('ids', [])
+        # Flatten structure if necessary
+        if isinstance(ids, list) and len(ids) > 0 and isinstance(ids[0], list):
+            ids = ids[0]
+        if isinstance(documents, list) and len(documents) > 0 and isinstance(documents[0], list):
+            documents = documents[0]
+        if isinstance(metadatas, list) and len(metadatas) > 0 and isinstance(metadatas[0], list):
+            metadatas = metadatas[0]
+        if isinstance(embeddings, list) and len(embeddings) > 0 and isinstance(embeddings[0], list):
+            embeddings = embeddings[0]
 
-        # Handle empty ids list
-        if not ids or len(ids) == 0:
-            return processed
-
-        # Determine result count from ids
-        result_count = len(ids[0]) if isinstance(ids, list) and len(ids) > 0 and isinstance(ids[0], list) else 0
-
-        if result_count == 0:
-            return processed
-
-        # Safely get components with defensive checks
-        documents = results.get('documents', [])
-        metadatas = results.get('metadatas', [])
-        distances = results.get('distances', [])
-        embeddings = results.get('embeddings', [])
-
-        # Process each result
+        result_count = len(ids)
         for i in range(result_count):
-            item = {
-                "id": ids[0][i] if isinstance(ids, list) and len(ids) > 0 and i < len(ids[0]) else None
-            }
+            item = {"id": ids[i]}
 
-            # Add included components with thorough checks
-            if "documents" in include:
-                # Check if documents has the expected structure
-                if isinstance(documents, list) and len(documents) > 0 and isinstance(documents[0], list) and i < len(
-                        documents[0]):
-                    item["document"] = documents[0][i]
-                elif isinstance(documents, dict) and 0 in documents and i < len(documents[0]):
-                    item["document"] = documents[0][i]
-                else:
-                    item["document"] = None
-
+            if "documents" in include and i < len(documents):
+                item["document"] = documents[i]
             if "metadatas" in include or "metadata" in include:
-                # Check if metadatas has the expected structure
-                if isinstance(metadatas, list) and len(metadatas) > 0 and isinstance(metadatas[0], list) and i < len(
-                        metadatas[0]):
-                    item["metadata"] = metadatas[0][i] if metadatas[0][i] is not None else {}
-                elif isinstance(metadatas, dict) and 0 in metadatas and i < len(metadatas[0]):
-                    item["metadata"] = metadatas[0][i] if metadatas[0][i] is not None else {}
-                else:
-                    item["metadata"] = {}
-
-            if "distances" in include:
-                # Check if distances has the expected structure
-                if isinstance(distances, list) and len(distances) > 0 and isinstance(distances[0], list) and i < len(
-                        distances[0]):
-                    distance = distances[0][i]
-                    item["score"] = 1.0 - min(1.0, max(0.0, distance))
-                elif isinstance(distances, dict) and 0 in distances and i < len(distances[0]):
-                    distance = distances[0][i]
-                    item["score"] = 1.0 - min(1.0, max(0.0, distance))
-
-            if "embeddings" in include:
-                # Check if embeddings has the expected structure
-                if isinstance(embeddings, list) and len(embeddings) > 0 and isinstance(embeddings[0], list) and i < len(
-                        embeddings[0]):
-                    item["embedding"] = embeddings[0][i]
-                elif isinstance(embeddings, dict) and 0 in embeddings and i < len(embeddings[0]):
-                    item["embedding"] = embeddings[0][i]
+                item["metadata"] = metadatas[i] if i < len(metadatas) and metadatas[i] else {}
+            if "embeddings" in include and i < len(embeddings):
+                item["embedding"] = embeddings[i]
 
             processed["results"].append(item)
 
