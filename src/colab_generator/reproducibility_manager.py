@@ -1,10 +1,11 @@
-import os
 import hashlib
-import nbformat
+import os
 import platform
 import socket
 import tempfile
 from datetime import datetime
+
+import nbformat
 from nbconvert import HTMLExporter, PDFExporter
 from traitlets.config import Config
 

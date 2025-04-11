@@ -1,13 +1,15 @@
 # src/query_engine/query_parser.py
 
+import logging
 import re
+from enum import Enum
+from typing import Dict, List, Any, Optional
+
 import nltk
+import spacy
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
-import spacy
-from enum import Enum
-import logging
-from typing import Dict, List, Any, Optional
+
 
 # Define intent types as an Enum for type safety
 class QueryIntent(Enum):

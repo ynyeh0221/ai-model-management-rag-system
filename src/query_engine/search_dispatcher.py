@@ -1,12 +1,11 @@
 # src/query_engine/search_dispatcher.py
 
+import asyncio
 import logging
 import time
-import json
-import asyncio
-from typing import Dict, List, Any, Optional, Union, Tuple
 from enum import Enum
-import numpy as np
+from typing import Dict, List, Any, Optional, Union
+
 
 class QueryIntent(Enum):
     RETRIEVAL = "retrieval"

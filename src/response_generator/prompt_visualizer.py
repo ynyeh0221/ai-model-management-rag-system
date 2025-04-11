@@ -1,10 +1,12 @@
 import difflib
-import logging
-from typing import Dict, Any, Optional, List, Tuple
 import html
 import json
-import markdown
+import logging
 from datetime import datetime
+from typing import Dict, Any, Optional, List
+
+import markdown
+
 
 class PromptVisualizer:
     """

@@ -1,14 +1,16 @@
 # src/vector_db_manager/chroma_manager.py
 
-import os
+import asyncio
 import json
 import logging
-import asyncio
-import numpy as np
-from typing import Dict, List, Any, Optional, Union, Tuple
+import os
+from typing import Dict, List, Any, Optional, Union
+
 import chromadb
+import numpy as np
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
+
 
 class ChromaManager:
     """

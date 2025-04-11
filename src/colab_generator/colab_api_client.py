@@ -6,26 +6,26 @@ through the Google API, supporting the notebook generation workflow described
 in the system design document.
 """
 
-import os
 import json
-import time
 import logging
+import os
 import tempfile
+import time
 from typing import Dict, Optional, Any, List
-
-# Google API libraries
-from google.oauth2.service_account import Credentials
-from google.oauth2 import credentials
-from google.auth.transport.requests import Request
-from google.auth.exceptions import RefreshError
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
-from googleapiclient.errors import HttpError
 
 # Notebook libraries
 import nbformat
-from nbformat.v4 import new_notebook, new_markdown_cell, new_code_cell
+from google.auth.exceptions import RefreshError
+from google.auth.transport.requests import Request
+from google.oauth2 import credentials
+# Google API libraries
+from google.oauth2.service_account import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
+from nbformat.v4 import new_notebook, new_markdown_cell
+
 
 class AuthenticationError(Exception): pass
 class NotebookCreationError(Exception): pass

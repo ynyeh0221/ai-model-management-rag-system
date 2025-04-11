@@ -1,9 +1,10 @@
 # src/vector_db_manager/text_embedder.py
 
-import os
 import logging
-import numpy as np
+import os
 from typing import List, Optional, Dict, Any
+
+import numpy as np
 import torch
 
 

@@ -1,7 +1,9 @@
 import ast
-import os
 import datetime
+import os
+
 from git import Repo
+
 
 class CodeParser:
     def __init__(self, schema_validator=None):

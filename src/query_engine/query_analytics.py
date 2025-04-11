@@ -1,15 +1,16 @@
 # src/query_engine/query_analytics.py
 
-import sqlite3
-import json
-import time
 import datetime
-import uuid
+import json
 import logging
-from typing import Dict, List, Any, Optional, Tuple, Union
-import pandas as pd
-import matplotlib.pyplot as plt
+import sqlite3
+import time
+import uuid
 from contextlib import contextmanager
+from typing import Dict, List, Any, Optional, Union
+
+import pandas as pd
+
 
 class QueryAnalytics:
     """

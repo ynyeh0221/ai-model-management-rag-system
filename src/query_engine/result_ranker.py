@@ -1,7 +1,8 @@
 # src/query_engine/result_ranker.py
+import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Callable
-import logging
+
 
 class ResultRanker:
     """

@@ -1,5 +1,7 @@
 import os
+
 from PIL import Image, ExifTags
+
 
 class ImageProcessor:
     def __init__(self, schema_validator=None):

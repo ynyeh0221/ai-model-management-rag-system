@@ -1,9 +1,11 @@
 import json
-import markdown
-from typing import List, Dict, Any, Optional, Tuple, Union
-from datetime import datetime
 import logging
+from datetime import datetime
+from typing import List, Dict, Any, Optional, Union
+
+import markdown
 from jinja2 import Template, Environment, FileSystemLoader
+
 
 class ResponseFormatter:
     """

@@ -1,7 +1,9 @@
+import datetime
 import os
 import re
-import datetime
+
 import jinja2
+
 
 class TemplateManager:
     def __init__(self, templates_dir="./templates"):

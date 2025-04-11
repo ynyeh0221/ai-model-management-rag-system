@@ -1,7 +1,9 @@
-import os
 import datetime
 import glob
+import os
+
 from git import Repo
+
 
 class MetadataExtractor:
     def __init__(self):

@@ -1,9 +1,11 @@
 # src/response_generator/llm_interface.py
 import json
-import time
-import requests
 import logging
+import time
 from typing import Dict, Any, List, Union
+
+import requests
+
 
 class LLMInterface:
     """

@@ -1,12 +1,13 @@
 # src/vector_db_manager/image_embedder.py
 
 import os
-import torch
+from typing import List, Tuple
+
 import numpy as np
-from PIL import Image
 import open_clip
+import torch
+from PIL import Image
 from torchvision import transforms
-from typing import List, Union, Tuple, Optional
 
 
 class ImageEmbedder:
