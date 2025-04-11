@@ -57,7 +57,7 @@ class ColabAPIClient:
     generation workflow described in the system design document.
     """
     
-    def __init__(self, credentials_path: Optional[str] = None):
+    def __init__(self, credentials_path: Optional[str] = None, test_mode: bool = True):
         """
         Initialize the Colab API Client.
         
@@ -71,8 +71,7 @@ class ColabAPIClient:
         self.colab_service = None
 
         # Skip authentication in test mode
-        self._test_mode = True
-
+        self._test_mode = test_mode
         if self._test_mode:
             logger.info("ColabAPIClient initialized in test mode")
         else:

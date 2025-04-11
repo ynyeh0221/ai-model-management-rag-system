@@ -15,7 +15,7 @@ class TestColabAPIClient(unittest.TestCase):
         mock_creds_instance = MagicMock()
         mock_credentials.from_service_account_file.return_value = mock_creds_instance
 
-        client = ColabAPIClient(credentials_path="fake/path/service_account.json")
+        client = ColabAPIClient(credentials_path="fake/path/service_account.json", test_mode=False)
 
         mock_credentials.from_service_account_file.assert_called_once()
         mock_build.assert_any_call("drive", "v3", credentials=mock_creds_instance)
@@ -41,7 +41,7 @@ class TestColabAPIClient(unittest.TestCase):
 
         mock_build.side_effect = [mock_drive_service, MagicMock()]  # drive and colab services
 
-        client = ColabAPIClient(credentials_path="fake/path/service.json")
+        client = ColabAPIClient(credentials_path="fake/path/service.json", test_mode=False)
         notebook_content = {"cells": [], "metadata": {}, "nbformat": 4, "nbformat_minor": 4}
 
         notebook_id = client.create_notebook(notebook_content, "test_notebook")
@@ -55,7 +55,7 @@ class TestColabAPIClient(unittest.TestCase):
         mock_credentials.from_service_account_file.side_effect = Exception("Invalid credentials")
 
         with self.assertRaises(AuthenticationError):
-            ColabAPIClient(credentials_path="invalid/path.json")
+            ColabAPIClient(credentials_path="invalid/path.json", test_mode=False)
 
     @patch("src.colab_generator.colab_api_client.build")
     @patch("src.colab_generator.colab_api_client.Credentials")
@@ -71,7 +71,7 @@ class TestColabAPIClient(unittest.TestCase):
         # First build is Drive, second is Colab
         mock_build.side_effect = [MagicMock(), mock_colab_service]
 
-        client = ColabAPIClient(credentials_path="fake/path.json")
+        client = ColabAPIClient(credentials_path="fake/path.json", test_mode=False)
         execution_id = client.execute_notebook(file_id="notebook123")
 
         self.assertEqual(execution_id, 'execution123')
