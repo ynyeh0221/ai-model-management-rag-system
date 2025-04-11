@@ -93,4 +93,3 @@ class MetadataExtractor:
                     associated_configs.append(os.path.abspath(config_path))
 
         return associated_configs
-
