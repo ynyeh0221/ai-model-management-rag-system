@@ -54,4 +54,3 @@ class NotebookTemplateEngine:
             return notebook
         except Exception as e:
             raise ValueError(f"Failed to parse rendered notebook: {e}")
-

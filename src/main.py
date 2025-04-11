@@ -28,7 +28,7 @@ from src.response_generator.response_formatter import ResponseFormatter
 from src.response_generator.prompt_visualizer import PromptVisualizer
 
 from src.colab_generator.template_engine import NotebookTemplateEngine
-# from src.colab_generator.code_generator import CodeGenerator
+from src.colab_generator.code_generator import CodeGenerator
 from src.colab_generator.colab_api_client import ColabAPIClient
 from src.colab_generator.reproducibility_manager import ReproducibilityManager
 from src.colab_generator.resource_quota_manager import ResourceQuotaManager
@@ -61,7 +61,7 @@ def initialize_components(config_path="./config"):
     
     # Initialize Colab notebook generator components
     notebook_template_engine = NotebookTemplateEngine("./notebook_templates")
-    # code_generator = CodeGenerator()
+    code_generator = CodeGenerator()
     colab_api_client = ColabAPIClient()
     reproducibility_manager = ReproducibilityManager()
     resource_quota_manager = ResourceQuotaManager()
@@ -93,7 +93,7 @@ def initialize_components(config_path="./config"):
         },
         "colab_generator": {
             "notebook_template_engine": notebook_template_engine,
-        #     "code_generator": code_generator,
+            "code_generator": code_generator,
             "colab_api_client": colab_api_client,
             "reproducibility_manager": reproducibility_manager,
             "resource_quota_manager": resource_quota_manager
@@ -386,6 +386,7 @@ def start_ui(components, host="localhost", port=8000):
         "list-models": "List available models",
         "list-images": "List available images",
         "compare-models": "Compare two or more models",
+        "generate-notebook": "Generate a Colab notebook for a model",
         "help": "Show available commands",
         "exit": "Exit the program"
     }
@@ -509,11 +510,11 @@ def start_ui(components, host="localhost", port=8000):
                 
                 # Check access permissions for all models
                 all_accessible = True
-                for model_id in models_to_compare:
-                    if not access_control.verify_model_access(user_id, model_id):
-                        print(f"Access denied for model: {model_id}")
-                        all_accessible = False
-                        break
+#                for model_id in models_to_compare:
+#                    if not access_control.verify_model_access(user_id, model_id):
+#                        print(f"Access denied for model: {model_id}")
+#                        all_accessible = False
+#                        break
                 
                 if not all_accessible:
                     continue
@@ -523,6 +524,46 @@ def start_ui(components, host="localhost", port=8000):
                 # Here you would implement the model comparison logic
                 # For now, just a placeholder
                 print("Model comparison functionality will be implemented in a future update.")
+
+            elif cmd.lower().startswith("generate-notebook"):
+                if cmd.lower() == "generate-notebook":
+                    model_id = input("Enter model ID: ")
+                    notebook_type = input(
+                        "Enter notebook type (evaluation, comparison, visualization) [default: evaluation]: ") or "evaluation"
+                    output_path = input(
+                        "Enter output path [default: ./notebooks/output.ipynb]: ") or "./notebooks/output.ipynb"
+                else:
+                    parts = cmd.split(maxsplit=3)
+                    model_id = parts[1] if len(parts) > 1 else input("Enter model ID: ")
+
+                    if len(parts) > 2:
+                        if parts[2].startswith("--type=") or parts[2].startswith("-t="):
+                            notebook_type = parts[2].split("=", 1)[1]
+                        else:
+                            notebook_type = parts[2]
+                    else:
+                        notebook_type = "evaluation"
+
+                    if len(parts) > 3:
+                        if parts[3].startswith("--output=") or parts[3].startswith("-o="):
+                            output_path = parts[3].split("=", 1)[1]
+                        else:
+                            output_path = parts[3]
+                    else:
+                        output_path = f"./notebooks/{model_id}_{notebook_type}.ipynb"
+
+                # Check access permissions
+                # if not access_control.verify_model_access(user_id, model_id):
+                #    print(f"Access denied for model: {model_id}")
+                #    continue
+
+                print(f"Generating {notebook_type} notebook for model {model_id}...")
+                result = generate_notebook(components, model_id, output_path, notebook_type)
+
+                if result:
+                    print(f"Notebook generated successfully: {result}")
+                else:
+                    print("Failed to generate notebook")
                 
             else:
                 print(f"Unknown command: {cmd}")
@@ -535,28 +576,163 @@ def start_ui(components, host="localhost", port=8000):
     
     print("UI session ended.")
 
+
+# Add new function for notebook generation
+def generate_notebook(components, model_id, output_path, notebook_type="evaluation"):
+    """Generate a Colab notebook for model analysis.
+
+    This function uses the CodeGenerator component to create a notebook
+    for analyzing an AI model, with appropriate code for loading, evaluating,
+    and visualizing the model based on its metadata.
+
+    Args:
+        components: Dictionary containing initialized system components
+        model_id: ID of the model to analyze
+        output_path: Path to save the generated notebook
+        notebook_type: Type of notebook to generate ("evaluation", "comparison", etc.)
+
+    Returns:
+        Path to the generated notebook
+    """
+    print(f"Generating {notebook_type} notebook for model {model_id}...")
+
+    # Extract required components
+    code_generator = components["colab_generator"]["code_generator"]
+    notebook_template_engine = components["colab_generator"]["notebook_template_engine"]
+    colab_api_client = components["colab_generator"]["colab_api_client"]
+    reproducibility_manager = components["colab_generator"]["reproducibility_manager"]
+    resource_quota_manager = components["colab_generator"]["resource_quota_manager"]
+    chroma_manager = components["vector_db_manager"]["chroma_manager"]
+    access_control = components["vector_db_manager"]["access_control"]
+
+    # Set up logging
+    logging.basicConfig(level=logging.INFO)
+    logger = logging.getLogger("notebook_generator")
+
+    # Retrieve model information from database
+    logger.info(f"Retrieving model information for {model_id}")
+    model_info = asyncio.run(chroma_manager.get_document(
+        collection_name="model_scripts",
+        doc_id=f"{model_id}"  # Get the first chunk
+    ))
+
+    if not model_info:
+        logger.error(f"Model {model_id} not found")
+        return None
+
+    # Extract model metadata
+    model_metadata = model_info.get("metadata", {})
+
+    # Find associated dataset if available
+    dataset_info = None
+    if "dataset" in model_metadata:
+        dataset_name = model_metadata["dataset"].get("name", {}).get("value")
+        if dataset_name:
+            logger.info(f"Looking for dataset {dataset_name}")
+            # This is a simplified representation - in a real system you'd have a more robust way to find the dataset
+            dataset_info = {
+                "name": {"value": dataset_name},
+                "split": model_metadata["dataset"].get("split", {"value": "test"}),
+                "num_samples": model_metadata["dataset"].get("num_samples", {"value": 10000})
+            }
+
+    # Generate code based on notebook type
+    logger.info(f"Generating code for {notebook_type} notebook")
+
+    # Determine framework and libraries
+    framework = model_metadata.get("framework", {}).get("name", "pytorch")
+    libraries = ["matplotlib", "numpy", "pandas", "tqdm"]
+
+    # Generate imports
+    imports_code = code_generator.generate_imports(framework, libraries)
+
+    # Generate model loading code
+    model_loading_code = code_generator.generate_model_loading(model_metadata)
+
+    # Generate dataset loading code if dataset info is available
+    dataset_loading_code = ""
+    if dataset_info:
+        dataset_loading_code = code_generator.generate_dataset_loading(dataset_info)
+
+    # Generate evaluation code if notebook type is evaluation
+    evaluation_code = ""
+    if notebook_type == "evaluation":
+        metrics = ["accuracy", "loss"]
+        if model_metadata.get("architecture_type", {}).get("value") == "transformer":
+            metrics.append("perplexity")
+        evaluation_code = code_generator.generate_evaluation_code(model_metadata, metrics)
+
+    # Generate visualization code
+    visualization_code = code_generator.generate_visualization_code("model_performance", {})
+
+    # Generate resource monitoring code
+    resource_monitoring_code = code_generator.generate_resource_monitoring()
+
+    # Combine all code sections
+    code_sections = {
+        "imports": imports_code,
+        "resource_monitoring": resource_monitoring_code,
+        "model_loading": model_loading_code,
+        "dataset_loading": dataset_loading_code,
+        "evaluation": evaluation_code,
+        "visualization": visualization_code
+    }
+
+    # Generate notebook using template engine
+    logger.info("Generating notebook from template")
+    notebook_content = notebook_template_engine.render_notebook(
+        template_name=f"{notebook_type}_template.ipynb",
+        code_sections=code_sections,
+        model_info=model_metadata
+    )
+
+    # Add reproducibility information
+    notebook_content = reproducibility_manager.add_reproducibility_info(notebook_content, model_id)
+
+    # Save notebook to output path
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with open(output_path, 'w') as f:
+        f.write(notebook_content)
+
+    logger.info(f"Notebook saved to {output_path}")
+
+    # Upload to Colab if requested
+    # This is a placeholder - actual implementation would depend on the ColabAPIClient's capabilities
+    # colab_url = colab_api_client.upload_notebook(output_path)
+
+    return output_path
+
 def main():
     parser = argparse.ArgumentParser(description="AI Model Management RAG System")
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
-    
+
     # Process model scripts command
     process_scripts_parser = subparsers.add_parser("process-scripts", help="Process model scripts")
     process_scripts_parser.add_argument("directory", help="Directory containing model scripts")
-    
+
     # Process images command
     process_images_parser = subparsers.add_parser("process-images", help="Process images")
     process_images_parser.add_argument("directory", help="Directory containing images")
-    
+
     # Start UI command
     ui_parser = subparsers.add_parser("start-ui", help="Start the user interface")
     ui_parser.add_argument("--host", default="localhost", help="Host to bind the UI to")
     ui_parser.add_argument("--port", type=int, default=8000, help="Port to bind the UI to")
-    
+
+    # Generate notebook command - NEW
+    notebook_parser = subparsers.add_parser("generate-notebook", help="Generate a Colab notebook for model analysis")
+    notebook_parser.add_argument("model_id", help="ID of the model to analyze")
+    notebook_parser.add_argument("--output", "-o", default="./notebooks/output.ipynb",
+                                 help="Path to save the generated notebook")
+    notebook_parser.add_argument("--type", "-t", default="evaluation",
+                                 choices=["evaluation", "comparison", "visualization"],
+                                 help="Type of notebook to generate")
+
     args = parser.parse_args()
-    
+
     # Initialize components
     components = initialize_components()
-    
+
     # Execute command
     if args.command == "process-scripts":
         process_model_scripts(components, args.directory)
@@ -564,6 +740,8 @@ def main():
         process_images(components, args.directory)
     elif args.command == "start-ui":
         start_ui(components, args.host, args.port)
+    elif args.command == "generate-notebook":  # NEW command handler
+        generate_notebook(components, args.model_id, args.output, args.type)
     else:
         parser.print_help()
 
