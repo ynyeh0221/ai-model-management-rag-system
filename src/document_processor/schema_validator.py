@@ -6,14 +6,13 @@ stored in a schema registry. It handles schema loading, validation, and manageme
 of schema versions.
 """
 
-import os
 import json
 import logging
-from typing import Dict, Any, List, Optional, Union
-from datetime import datetime
+import os
+from typing import Dict, Any, List, Optional
+
 import jsonschema
 from jsonschema import validate, ValidationError, SchemaError
-from pydantic import BaseModel, Field, validator, root_validator
 
 logger = logging.getLogger(__name__)
 
