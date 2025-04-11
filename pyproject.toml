@@ -24,6 +24,7 @@ google-auth-oauthlib = "*"
 google-auth-httplib2 = "*"
 nbformat = "*"
 nbconvert = "*"
+GitPython = "*"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "*"
