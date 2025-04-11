@@ -34,6 +34,7 @@ This repository contains a modular Retrieval-Augmented Generation (RAG) system f
   - Git-style diffing and template performance analytics
 
 - **User Interface**
+  - Start from command line interface 
   - Built with React and Tailwind CSS
   - Monaco-based editor for code and prompts
   - Access control via JWT and RBAC
