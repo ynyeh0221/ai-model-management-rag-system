@@ -8,7 +8,6 @@ import logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-# Adjust the import path as needed
 sys.path.append(os.path.abspath("../src"))
 from src.colab_generator.resource_quota_manager import ResourceQuotaManager
 

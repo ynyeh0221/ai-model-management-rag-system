@@ -1,8 +1,9 @@
-import unittest
 import os
 import tempfile
+import unittest
 from unittest.mock import patch, MagicMock
-from PIL import Image, ExifTags
+
+from PIL import Image
 
 # Import the class to test
 from src.document_processor.image_processor import ImageProcessor
