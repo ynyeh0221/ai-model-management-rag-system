@@ -453,35 +453,40 @@ class QueryParser:
             parameters.update(self._extract_image_parameters(query_text))
         
         return parameters
-    
+
     def _extract_model_mentions(self, query_text: str) -> List[str]:
         """
         Extract mentions of model IDs or names from query text.
-        
+
         Args:
             query_text: The query text to extract from
-            
+
         Returns:
             List of model identifiers
         """
         model_ids = []
-        
+
         # Try to extract explicit model_id mentions
         for match in re.finditer(self.model_id_pattern, query_text.lower()):
             model_ids.append(match.group(2))
-        
+
+        # NEW: Handle "X model" pattern (where X is the model name)
+        model_suffix_pattern = r'(\w+)\s+model\b'
+        for match in re.finditer(model_suffix_pattern, query_text.lower()):
+            model_ids.append(match.group(1))
+
         # Check for model family mentions
         doc = self.nlp(query_text)
         for ent in doc.ents:
             if ent.label_ in ["ORG", "PRODUCT"]:
                 model_ids.append(ent.text)
-        
+
         # Check for common model family keywords
         for family in self.model_families:
             matches = re.finditer(r'\b' + re.escape(family) + r'[-_]?(\d+|v\d+)?\b', query_text.lower())
             for match in matches:
                 model_ids.append(match.group(0))
-        
+
         # Deduplicate and clean
         return list(set(model_ids))
     
@@ -552,25 +557,25 @@ class QueryParser:
             params["resources"] = match.group(2).strip()
         
         return params
-    
+
     def _extract_image_parameters(self, query_text: str) -> Dict[str, Any]:
         """
         Extract image search specific parameters.
-        
+
         Args:
             query_text: The query text to extract from
-            
+
         Returns:
             Dictionary of image search parameters
         """
         params = {}
-        
+
         # Extract prompt terms
         prompt_pattern = r"(prompt|prompts|text)[:\s]+[\"']?([\w\s,]+)[\"']?"
         match = re.search(prompt_pattern, query_text.lower())
         if match:
             params["prompt_terms"] = match.group(2).strip()
-        
+
         # Extract style tags
         style_pattern = r"(style|type|category|look)[:\s]+[\"']?([\w\s,]+)[\"']?"
         match = re.search(style_pattern, query_text.lower())
@@ -578,7 +583,7 @@ class QueryParser:
             # Split by commas and clean up
             styles = re.split(r',|\sand\s', match.group(2))
             params["style_tags"] = [style.strip() for style in styles if style.strip()]
-        
+
         # Extract resolution preference
         resolution_pattern = r"(resolution|size|dimensions)[:\s]+(\d+)\s*[x×]\s*(\d+)"
         match = re.search(resolution_pattern, query_text.lower())
@@ -587,7 +592,11 @@ class QueryParser:
                 "width": int(match.group(2)),
                 "height": int(match.group(3))
             }
-        
+
+        # Flag to show model ID and image path
+        params["show_model_id"] = True
+        params["show_image_path"] = True
+
         return params
     
     def preprocess_query(self, query_text: str) -> str:

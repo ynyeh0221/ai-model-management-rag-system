@@ -567,6 +567,30 @@ def start_ui(components, host="localhost", port=8000):
                                                 for r in ranked_results]
                             }
                         }
+
+                        # Image search table display:
+                        if parsed_query["type"] == "image_search":
+                            print("\nDetailed Image Information:")
+                            separator_line = "-" * 120
+                            print(separator_line)
+                            print("| {:<30} | {:<85} |".format("Model ID", "Image Path"))
+                            print(separator_line)
+
+                            for result in ranked_results:
+                                model_id = result.get('model_id',
+                                                      result.get('metadata', {}).get('model_id',
+                                                                                     result.get('metadata', {}).get(
+                                                                                         'source_model_id',
+                                                                                         result.get('id', 'Unknown'))))
+
+                                image_path = result.get('metadata', {}).get('image_path', 'Not available')
+
+                                print("| {:<30} | {:<85} |".format(
+                                    model_id[:30] if model_id else "Unknown",
+                                    image_path[:85] if image_path else "Not available"))  # Show 85 characters of path
+
+                            print(separator_line)
+
                         # Pretty print the response
                         print("\nFormatted Response:")
                         print(json.dumps(final_response, indent=2))

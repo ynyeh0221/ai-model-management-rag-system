@@ -517,35 +517,40 @@ class ResponseFormatter:
         
         table_data['rows'] = rows
         return table_data
-    
-    def format_image_gallery(self, images: List[Dict[str, Any]], 
-                            template: Optional[Template] = None,
-                            response_type: str = "html") -> Dict[str, Any]:
+
+    def format_image_gallery(self, images: List[Dict[str, Any]],
+                             template: Optional[Template] = None,
+                             response_type: str = "html") -> Dict[str, Any]:
         """
         Format an image gallery response.
-        
+
         Args:
             images: List of image documents with metadata
             template: Optional template to use for formatting
             response_type: Response format type
-            
+
         Returns:
             Formatted image gallery response
         """
         self.logger.info(f"Formatting image gallery with {len(images)} images")
-        
+
         if not template:
             template = self.template_manager.get_template(f"image_gallery_{response_type}")
-        
+
         # Process image data
         formatted_images = []
         for image in images:
+            # Make sure to extract and show model_id and image_path
+            model_id = image.get('metadata', {}).get('source_model_id',
+                                                     image.get('metadata', {}).get('model_id', 'Unknown'))
+            image_path = image.get('metadata', {}).get('image_path', 'Unknown')
+
             formatted_image = {
                 'id': image.get('id'),
                 'thumbnail_path': image.get('metadata', {}).get('thumbnail_path'),
-                'image_path': image.get('metadata', {}).get('image_path'),
+                'image_path': image_path,  # Ensure image_path is included
                 'prompt': image.get('metadata', {}).get('prompt', {}).get('value', ''),
-                'model_id': image.get('metadata', {}).get('source_model_id', 'Unknown'),
+                'model_id': model_id,  # Ensure model_id is included
                 'resolution': image.get('metadata', {}).get('resolution', {}),
                 'style_tags': image.get('metadata', {}).get('style_tags', {}).get('value', []),
                 'creation_date': image.get('metadata', {}).get('creation_date'),
@@ -557,7 +562,16 @@ class ResponseFormatter:
                 }
             }
             formatted_images.append(formatted_image)
-        
+
+        # Create a simple table of model_id and image_path if template doesn't exist
+        model_image_paths = []
+        for image in formatted_images:
+            model_image_paths.append({
+                'model_id': image['model_id'],
+                'image_path': image['image_path'],
+                'id': image['id']
+            })
+
         # Group images by model
         images_by_model = {}
         for image in formatted_images:
@@ -565,24 +579,37 @@ class ResponseFormatter:
             if model_id not in images_by_model:
                 images_by_model[model_id] = []
             images_by_model[model_id].append(image)
-        
+
         # Render template with image data
         context = {
             'images': formatted_images,
             'images_by_model': images_by_model,
             'model_list': list(images_by_model.keys()),
             'total_images': len(formatted_images),
-            'timestamp': datetime.now().isoformat()
+            'timestamp': datetime.now().isoformat(),
+            'model_image_paths': model_image_paths  # Add this for simplified display
         }
-        
+
         rendered_content = template.render(**context)
-        
+
+        # If no template available, create a simple table format
+        if not rendered_content or rendered_content.strip() == '':
+            if response_type == "markdown":
+                rendered_content = "## Model Images\n\n| Model ID | Image Path | Image ID |\n|----------|------------|----------|\n"
+                for item in model_image_paths:
+                    rendered_content += f"| {item['model_id']} | {item['image_path']} | {item['id']} |\n"
+            else:  # html or text
+                rendered_content = "<h2>Model Images</h2><table><tr><th>Model ID</th><th>Image Path</th><th>Image ID</th></tr>"
+                for item in model_image_paths:
+                    rendered_content += f"<tr><td>{item['model_id']}</td><td>{item['image_path']}</td><td>{item['id']}</td></tr>"
+                rendered_content += "</table>"
+
         # Post-process based on response type
         if response_type == "markdown":
             rendered_content = self._format_markdown(rendered_content)
         elif response_type == "html":
             rendered_content = self._format_html(rendered_content)
-        
+
         # Include citations
         response = {
             'content': rendered_content,
@@ -593,7 +620,7 @@ class ResponseFormatter:
                 'model_count': len(images_by_model)
             }
         }
-        
+
         return response
     
     def include_citations(self, response: Dict[str, Any], 
