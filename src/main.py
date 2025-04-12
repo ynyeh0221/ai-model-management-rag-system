@@ -44,7 +44,7 @@ def initialize_components(config_path="./config"):
     text_embedder = TextEmbedder()
     image_embedder = ImageEmbedder()
     chroma_manager = ChromaManager("./chroma_db")
-    access_control = AccessControlManager()
+    access_control = AccessControlManager(chroma_manager)
     
     # Initialize query engine components
     query_parser = QueryParser()
