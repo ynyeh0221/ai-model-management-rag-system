@@ -130,13 +130,6 @@ class SearchDispatcher:
     async def handle_text_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle a text search query for model scripts and metadata.
-
-        Args:
-            query: The processed query text
-            parameters: Dictionary of extracted parameters
-
-        Returns:
-            Dictionary containing search results for model scripts and metadata
         """
         self.logger.debug(f"Handling text search: {query}")
         start_time = time.time()
@@ -147,18 +140,26 @@ class SearchDispatcher:
             query_embedding = self.text_embedder.embed_text(query)
             embedding_time = (time.time() - embedding_start) * 1000
 
-            # Extract search parameters
-            limit = parameters.get('limit', 10)
-            # Ensure limit is an integer
-            if limit is None or not isinstance(limit, int):
-                limit = 10
+            # Extract search parameters with more robust error handling
+            # Ensure requested_limit is a valid integer using try/except
+            try:
+                requested_limit = int(parameters.get('limit', 10))
+                if requested_limit <= 0:
+                    requested_limit = 10
+            except (TypeError, ValueError):
+                requested_limit = 10  # Default to 10 for any conversion errors
+
+            self.logger.debug(f"Using requested_limit: {requested_limit}")
+
+            # Use a higher limit for the initial search to account for multiple chunks per model
+            search_limit = requested_limit * 100  # Get 100x more results to find diverse models
             filters = parameters.get('filters', {})
 
             # Prepare Chroma query
             search_params = {
                 'query': {'embedding': query_embedding},
                 'where': self._translate_filters_to_chroma(filters),
-                'limit': limit,  # Now guaranteed to be an integer
+                'limit': search_limit,
                 'include': ["metadatas", "documents", "distances"]
             }
 
@@ -170,16 +171,66 @@ class SearchDispatcher:
             )
             search_time = (time.time() - search_start) * 1000
 
-            # Process results
-            items = []
+            # Group results by model_id
+            model_groups = {}
+
             for idx, result in enumerate(model_results.get('results', [])):
-                items.append({
+                # Extract model_id from metadata
+                model_id = result.get('metadata', {}).get('model_id', 'unknown')
+
+                # Initialize group if this is the first chunk from this model
+                if model_id not in model_groups:
+                    model_groups[model_id] = {
+                        'model_id': model_id,
+                        'chunks': [],
+                        'best_score': 0,
+                        'best_chunk_idx': -1
+                    }
+
+                # Add this chunk to the model's group
+                chunk_idx = len(model_groups[model_id]['chunks'])
+                model_groups[model_id]['chunks'].append({
                     'id': result.get('id'),
-                    'score': result.get('score'),
+                    'score': result.get('score', 0),
                     'metadata': result.get('metadata', {}),
                     'content': result.get('document', ""),
-                    'rank': idx + 1
+                    'chunk_idx': chunk_idx
                 })
+
+                # Update best score if this chunk has a higher score
+                if result.get('score', 0) > model_groups[model_id]['best_score']:
+                    model_groups[model_id]['best_score'] = result.get('score', 0)
+                    model_groups[model_id]['best_chunk_idx'] = chunk_idx
+
+            # Convert groups to a list and sort by best score
+            model_list = list(model_groups.values())
+            model_list.sort(key=lambda x: x['best_score'], reverse=True)
+
+            # Limit to requested number of models
+            model_list = model_list[:requested_limit]
+
+            # Prepare final deduplicated items list
+            items = []
+            for rank, model in enumerate(model_list):
+                # Get the best chunk from this model
+                best_chunk = None
+                if model['chunks'] and 0 <= model['best_chunk_idx'] < len(model['chunks']):
+                    best_chunk = model['chunks'][model['best_chunk_idx']]
+
+                if best_chunk:
+                    # Create the result item
+                    item = {
+                        'id': best_chunk['id'],
+                        'model_id': model['model_id'],
+                        'score': model['best_score'],
+                        'metadata': best_chunk['metadata'],
+                        'content': best_chunk['content'],
+                        'rank': rank + 1,
+                        'chunk_count': len(model['chunks']),  # Add count of available chunks
+                        # Optional: include references to all chunks
+                        'chunk_ids': [chunk['id'] for chunk in model['chunks']]
+                    }
+                    items.append(item)
 
             # Log performance metrics if analytics available
             if self.analytics and 'query_id' in parameters:
@@ -195,6 +246,7 @@ class SearchDispatcher:
                 'type': 'text_search',
                 'items': items,
                 'total_found': len(items),
+                'total_models': len(model_groups),  # Add count of unique models found
                 'performance': {
                     'embedding_time_ms': embedding_time,
                     'search_time_ms': search_time,

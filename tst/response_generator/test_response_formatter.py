@@ -266,12 +266,12 @@ class TestResponseFormatter(unittest.TestCase):
         citations = self.formatter._extract_citations(self.sample_results)
 
         self.assertEqual(len(citations), 2)
-        self.assertEqual(citations[0]["id"], "result1")
+        self.assertEqual(citations[0]["id"], "model_a")
         self.assertEqual(citations[0]["type"], "model_script")
         self.assertEqual(citations[0]["filepath"], "/path/to/file1.txt")
         self.assertEqual(citations[0]["model_id"], "model_a")
 
-        self.assertEqual(citations[1]["id"], "result2")
+        self.assertEqual(citations[1]["id"], "model_b")
         self.assertEqual(citations[1]["type"], "documentation")
         self.assertEqual(citations[1]["filepath"], "/path/to/file2.txt")
         self.assertEqual(citations[1]["model_id"], "model_b")

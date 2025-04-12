@@ -484,7 +484,6 @@ def start_ui(components, host="localhost", port=8000):
                     user_id=user_id
                 ))
 
-                print(f"Items: {search_results['items']}")
                 # Rank the results
                 if isinstance(search_results, dict) and 'items' in search_results:
                     ranked_results = result_ranker.rank_results(search_results['items'])
@@ -494,7 +493,9 @@ def start_ui(components, host="localhost", port=8000):
                 # Show top results
                 print("\nTop Results:")
                 for i, result in enumerate(ranked_results[:5]):
-                    print(f"  {i + 1}. {result.get('id', 'Unknown')} - {result.get('score', 0):.2f}")
+                    model_id = result.get('model_id',
+                                          result.get('metadata', {}).get('model_id', result.get('id', 'Unknown')))
+                    print(f"  {i + 1}. {model_id} - {result.get('score', 0):.2f}")
 
                 # Select template based on query type
                 template_id = None
@@ -516,6 +517,7 @@ def start_ui(components, host="localhost", port=8000):
                 print("Generating response...")
 
                 # Create simplified results to avoid token limits
+                # Simplified results to avoid token limits
                 simplified_results = []
                 for r in ranked_results[:5]:  # Limit to top 5 results
                     content = r.get('content', '')
@@ -523,8 +525,12 @@ def start_ui(components, host="localhost", port=8000):
                     if content and len(content) > 200:
                         content = content[:200] + "..."
 
+                    # Use model_id instead of chunk id
+                    model_id = r.get('model_id', r.get('metadata', {}).get('model_id', r.get('id', 'Unknown')))
+
                     simplified_result = {
-                        'id': r.get('id', 'Unknown'),
+                        'id': model_id,  # Use model_id as the primary identifier
+                        'original_id': r.get('id', 'Unknown'),  # Keep original ID as a reference
                         'content': content,
                         'score': r.get('score', 0)
                     }
@@ -557,7 +563,8 @@ def start_ui(components, host="localhost", port=8000):
                                 'model': llm_interface.model_name,
                                 'query_type': parsed_query["type"],
                                 'result_count': len(ranked_results),
-                                'top_results': [r.get('id') for r in ranked_results[:3]]
+                                'top_results': [r.get('model_id', r.get('metadata', {}).get('model_id', r.get('id')))
+                                                for r in ranked_results]
                             }
                         }
                         # Pretty print the response

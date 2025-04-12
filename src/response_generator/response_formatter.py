@@ -619,17 +619,23 @@ class ResponseFormatter:
         # This would depend on how citations are formatted in templates
         
         return response
-    
+
     def _extract_citations(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Extract citation information from results."""
         citations = []
         for result in results:
+            # Prioritize model_id over chunk id
+            display_id = result.get('model_id',  # First check if we have a dedicated model_id field
+                                    result.get('metadata', {}).get('model_id',  # Then check metadata
+                                                                   result.get('id')))  # Fallback to original id
+
             citation = {
-                'id': result.get('id'),
+                'id': display_id,  # Use model_id as primary identifier
+                'original_id': result.get('id'),  # Keep original ID for reference
                 'type': result.get('metadata', {}).get('type', 'Unknown'),
                 'filepath': result.get('metadata', {}).get('filepath', 'Unknown'),
-                'model_id': result.get('metadata', {}).get('model_id', 
-                                                         result.get('metadata', {}).get('source_model_id')),
+                'model_id': result.get('metadata', {}).get('model_id',
+                                                           result.get('metadata', {}).get('source_model_id')),
                 'timestamp': datetime.now().isoformat()
             }
             citations.append(citation)
