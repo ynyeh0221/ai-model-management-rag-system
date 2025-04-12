@@ -296,13 +296,14 @@ def process_images(components, directory_path):
     
     logger.info("Image processing completed")
 
+
 def process_single_image(file_path, components):
     """Process a single image file.
-    
+
     Args:
         file_path: Path to the image file
         components: Dictionary containing initialized system components
-        
+
     Returns:
         Tuple of (document_id, success) if processed, None if skipped
     """
@@ -312,50 +313,59 @@ def process_single_image(file_path, components):
     image_embedder = components["vector_db_manager"]["image_embedder"]
     chroma_manager = components["vector_db_manager"]["chroma_manager"]
     access_control = components["vector_db_manager"]["access_control"]
-    
+
     # 1. Process the image and extract metadata
     process_result = image_processor.process_image(file_path)
     if not process_result:
         # Not a valid image, skip it
         return None
-    
-    # 2. Create document
-    document_id = f"generated_image_{Path(file_path).stem}"
+
+    # 2. Generate model_id similar to process_single_script
+    file_path_obj = Path(file_path)
+    folder_name = file_path_obj.parent.name
+    file_stem = file_path_obj.stem
+    model_id = f"{folder_name}_{file_stem}"
+
+    # 3. Create document
+    document_id = f"generated_image_{model_id}"
     document = {
         "id": document_id,
         "$schema_version": "1.0.0",
         "content": None,  # No text content, just embedding
-        "metadata": process_result["metadata"]
+        "metadata": {
+            **process_result["metadata"],
+            "model_id": model_id  # Add model_id to metadata
+        }
     }
-    
-    # 3. Validate against schema
+
+    # 4. Validate against schema
     validation_result = schema_validator.validate(document, "generated_image_schema")
     if not validation_result["valid"]:
         logging.warning(f"Schema validation failed for {file_path}: {validation_result['errors']}")
         return (document_id, False)
-    
-    # 4. Generate image embeddings
+
+    # 5. Generate image embeddings
     # Use global embedding by default, but can use tiled if specified in metadata
     embedding_type = document["metadata"].get("embedding_type", "global")
     if embedding_type == "global":
         embedding = image_embedder.embed_image(process_result["metadata"].get("image_path"))
     else:  # tiled embedding
         embedding = image_embedder.embed_image_tiled(process_result["metadata"].get("image_path"),
-                                                   process_result["metadata"].get("tile_config", {}))
-    
-    # 5. Apply access control
+                                                     process_result["metadata"].get("tile_config", {}))
+
+    # 6. Apply access control
     access_metadata = access_control.get_document_permissions(document)
     document["metadata"]["access_control"] = access_metadata
-    
-    # 6. Store in Chroma
+
+    # 7. Store in Chroma
     asyncio.run(chroma_manager.add_document(
         collection_name="generated_images",
         document_id=document_id,
         document=document,
         embed_content=embedding
     ))
-    
-    # 7. Create and store thumbnail if it doesn't exist
+
+    # 8. Create and store thumbnail if it doesn't exist
     thumbnail_path = document["metadata"].get("thumbnail_path")
     # If thumbnail_path is not a valid path type, derive a default thumbnail file path.
     if not isinstance(thumbnail_path, (str, bytes, os.PathLike)):
@@ -367,7 +377,7 @@ def process_single_image(file_path, components):
         os.makedirs(os.path.dirname(thumbnail_path), exist_ok=True)
         # Pass the loaded image (a PIL Image) and the verified thumbnail_path.
         image_processor.generate_thumbnail(process_result["metadata"].get("image_path"), thumbnail_path)
-    
+
     return (document_id, True)
 
 def start_ui(components, host="localhost", port=8000):

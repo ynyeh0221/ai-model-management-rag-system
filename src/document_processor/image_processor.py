@@ -1,12 +1,13 @@
 import os
-
+import datetime
+from git import Repo
 from PIL import Image, ExifTags
 
 
 class ImageProcessor:
     def __init__(self, schema_validator=None):
         self.schema_validator = schema_validator
-    
+
     def process_image(self, image_path, metadata=None):
         """Process an image and extract metadata."""
         try:
@@ -16,12 +17,26 @@ class ImageProcessor:
                     "format": img.format,
                     "mode": img.mode,
                     "size": img.size,  # (width, height)
-                    "metadata": {"image_path": image_path} if metadata is None else metadata
+                    "metadata": {"image_path": image_path} if metadata is None else metadata,
+                    "creation_date": self._get_creation_date(image_path),
+                    "last_modified_date": self._get_last_modified_date(image_path)
                 }
-                
+
                 # Extract EXIF data, if available
                 exif_data = self.extract_exif_data(image_path)
                 image_info["exif"] = exif_data
+
+                # Try to get date taken from EXIF if available
+                if "DateTimeOriginal" in exif_data:
+                    try:
+                        # Parse the EXIF date format (typically "YYYY:MM:DD HH:MM:SS")
+                        date_str = exif_data["DateTimeOriginal"]
+                        # Convert to ISO format for consistency with other dates
+                        parsed_date = datetime.datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
+                        image_info["date_taken"] = parsed_date.isoformat()
+                    except Exception:
+                        # If date parsing fails, fall back to file creation date
+                        pass
 
                 # Perform safety assessment on the image content
                 safety = self.assess_safety(image_path)
@@ -30,14 +45,48 @@ class ImageProcessor:
                 # Merge additional metadata if provided
                 if metadata:
                     image_info.update(metadata)
-                
+
                 # Optionally validate the extracted metadata against a schema
                 if self.schema_validator:
                     self.schema_validator.validate(image_info, "generated_image_schema")
-                
+
                 return image_info
         except Exception as e:
             raise ValueError(f"Error processing image {image_path}: {e}")
+
+    def _get_creation_date(self, file_path):
+        """Get file creation date, preferring git history if available."""
+        try:
+            repo = Repo(os.path.dirname(file_path), search_parent_directories=True)
+            # Get the earliest commit for the file.
+            commits = list(repo.iter_commits(paths=file_path, max_count=1, reverse=True))
+            if commits:
+                return datetime.datetime.fromtimestamp(commits[0].committed_date).isoformat()
+        except Exception:
+            pass
+
+        # Fallback: use filesystem creation time
+        try:
+            stat = os.stat(file_path)
+            return datetime.datetime.fromtimestamp(stat.st_ctime).isoformat()
+        except Exception:
+            return None
+
+    def _get_last_modified_date(self, file_path):
+        """Get file last modified date, preferring git history if available."""
+        try:
+            repo = Repo(os.path.dirname(file_path), search_parent_directories=True)
+            commit = next(repo.iter_commits(paths=file_path, max_count=1))
+            return datetime.datetime.fromtimestamp(commit.committed_date).isoformat()
+        except Exception:
+            pass
+
+        # Fallback: use filesystem modification time
+        try:
+            stat = os.stat(file_path)
+            return datetime.datetime.fromtimestamp(stat.st_mtime).isoformat()
+        except Exception:
+            return None
 
     def generate_thumbnail(self, image_input, thumbnail_path, size=(128, 128)):
         """
