@@ -192,7 +192,7 @@ def process_single_script(file_path, components):
     for i, chunk in enumerate(chunks):
         # Create document for each chunk
         document = {
-            "id": f"model_script_{Path(file_path).stem}_{i}",
+            "id": f"model_script_{model_id}_{i}",
             "$schema_version": "1.0.0",
             "content": chunk,
             "metadata": {
@@ -224,11 +224,13 @@ def process_single_script(file_path, components):
             embed_content=embedding
         ))
 
+        # DEBUG
         result = asyncio.run(chroma_manager.get(
             collection_name="model_scripts",
-            where={"model_id": {"$eq": "CatDog_scriptABC"}},
-            include=["metadatas", "documents"]
+            ids=[document["id"]],
+            include=["metadatas"]
         ))
+        print(f"[DEBUG] Get result: {result}")
 
         documents.append(document)
     
