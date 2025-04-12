@@ -447,24 +447,24 @@ def start_ui(components, host="localhost", port=8000):
                 else:
                     for image in available_images:
                         print(f"  {image['id']} - {image.get('prompt', 'No prompt')} - {image.get('filepath', 'No path')}")
-                        
+
             elif cmd.lower().startswith("query"):
                 if cmd.lower() == "query":
                     query_text = input("Enter your query: ")
                 else:
                     query_text = cmd[6:].strip()
-                    
+
                 # Parse the query
                 parsed_query = query_parser.parse_query(query_text)
-                
+
                 # Log the query for analytics
                 query_analytics.log_query(user_id, query_text, parsed_query)
-                
+
                 # Check access permissions
                 # if not access_control.verify_user_permissions(user_id, parsed_query):
                 #    print("Access denied. You don't have permission to access this information.")
                 #    continue
-                
+
                 print("Searching...")
                 # Dispatch the query
                 search_results = asyncio.run(search_dispatcher.dispatch(
@@ -473,40 +473,112 @@ def start_ui(components, host="localhost", port=8000):
                     parameters=parsed_query["parameters"],
                     user_id=user_id
                 ))
-                
+
                 # Rank the results
                 if isinstance(search_results, dict) and 'items' in search_results:
                     ranked_results = result_ranker.rank_results(search_results['items'])
                 else:
                     ranked_results = []
-                
-                # Generate response using LLM
-                if parsed_query["type"] == "comparison":
-                    template = template_manager.get_template("model_comparison")
-                elif parsed_query["type"] == "retrieval":
-                    template = template_manager.get_template("information_retrieval")
-                else:
-                    template = template_manager.get_template("general_query")
-                    
-                print("Generating response...")
-                llm_response = llm_interface.generate_response(template, {
-                    "query": query_text,
-                    "results": ranked_results,
-                    "parsed_query": parsed_query
-                })
-                
-                # Format the response
-                formatted_response = response_formatter.format_response(ranked_results, parsed_query, parsed_query["type"])
-
-                # Print the response - with proper JSON formatting
-                print("\nResponse:")
-                import json
-                print(json.dumps(formatted_response, indent=2))  # Pretty print with 2-space indentation
 
                 # Show top results
                 print("\nTop Results:")
                 for i, result in enumerate(ranked_results[:5]):
-                    print(f"  {i+1}. {result.get('id', 'Unknown')} - {result.get('score', 0):.2f}")
+                    print(f"  {i + 1}. {result.get('id', 'Unknown')} - {result.get('score', 0):.2f}")
+
+                # Select template based on query type
+                template_id = None
+                if parsed_query["type"] == "comparison":
+                    template_id = "model_comparison"
+                elif parsed_query["type"] == "retrieval":
+                    template_id = "information_retrieval"
+                else:
+                    template_id = "general_query"
+
+                # Get the template content
+                template_content = template_manager.get_template(template_id)
+
+                # Check if template exists
+                if template_content is None:
+                    print(f"Warning: Template '{template_id}' not found. Using default prompt.")
+                    template_content = "Please analyze the following query and results to provide a helpful response."
+
+                print("Generating response...")
+
+                # Create simplified results to avoid token limits
+                simplified_results = []
+                for r in ranked_results[:5]:  # Limit to top 5 results
+                    content = r.get('content', '')
+                    # Truncate content if it's too long
+                    if content and len(content) > 200:
+                        content = content[:200] + "..."
+
+                    simplified_result = {
+                        'id': r.get('id', 'Unknown'),
+                        'content': content,
+                        'score': r.get('score', 0)
+                    }
+                    simplified_results.append(simplified_result)
+
+                # Prepare context for template rendering
+                context = {
+                    'query': query_text,
+                    'results': simplified_results,
+                    'parsed_query': parsed_query
+                }
+
+                try:
+                    # First, try to render the template with the context
+                    rendered_prompt = template_manager.render_template(template_id, context)
+
+                    # Generate response from LLM
+                    llm_response = llm_interface.generate_response(
+                        prompt=rendered_prompt,
+                        temperature=0.7,
+                        max_tokens=1500
+                    )
+
+                    # Format the final response
+                    import json
+                    if isinstance(llm_response, dict) and 'content' in llm_response:
+                        final_response = {
+                            'content': llm_response['content'],
+                            'metadata': {
+                                'model': llm_interface.model_name,
+                                'query_type': parsed_query["type"],
+                                'result_count': len(ranked_results),
+                                'top_results': [r.get('id') for r in ranked_results[:3]]
+                            }
+                        }
+                        # Pretty print the response
+                        print("\nFormatted Response:")
+                        print(json.dumps(final_response, indent=2))
+                    else:
+                        # If response is a string or unexpected format
+                        print("\nGenerated Response:")
+                        print(llm_response)
+
+                except Exception as e:
+                    print(f"Error generating response: {str(e)}")
+                    print("Falling back to direct LLM call...")
+
+                    # Fallback: Create a simple prompt without using the template system
+                    fallback_prompt = f"Query: {query_text}\n\nResults:\n"
+                    for i, r in enumerate(simplified_results):
+                        fallback_prompt += f"{i + 1}. {r['id']}: {r['content']}\n"
+                    fallback_prompt += "\nPlease provide a comprehensive response to the query based on these results."
+
+                    try:
+                        # Try again with the fallback prompt
+                        fallback_response = llm_interface.generate_response(
+                            prompt=fallback_prompt,
+                            temperature=0.7,
+                            max_tokens=1000
+                        )
+                        print("\nFallback Response:")
+                        print(fallback_response)
+                    except Exception as e2:
+                        print(f"Fallback also failed: {str(e2)}")
+                        print("Could not generate LLM response. Check your connection and service status.")
                     
             elif cmd.lower().startswith("compare-models"):
                 if cmd.lower() == "compare-models":
