@@ -159,7 +159,7 @@ class SearchDispatcher:
                 'query': {'embedding': query_embedding},
                 'where': self._translate_filters_to_chroma(filters),
                 'limit': limit,  # Now guaranteed to be an integer
-                'include': ["metadatas", "documents"]
+                'include': ["metadatas", "documents", "distances"]
             }
 
             # Execute vector search
@@ -175,7 +175,7 @@ class SearchDispatcher:
             for idx, result in enumerate(model_results.get('results', [])):
                 items.append({
                     'id': result.get('id'),
-                    'score': result.get('score', 0.0),
+                    'score': result.get('score'),
                     'metadata': result.get('metadata', {}),
                     'content': result.get('document', ""),
                     'rank': idx + 1
@@ -264,7 +264,7 @@ class SearchDispatcher:
                 'query': {'embedding': query_embedding},  # Changed from 'embedding' to 'query' with a nested dict
                 'where': filters if filters else None,
                 'limit': limit,
-                'include': ["metadatas"]  # Changed from "metadata" to "metadatas"
+                'include': ["metadatas", "distances"]
             }
 
             # Execute vector search

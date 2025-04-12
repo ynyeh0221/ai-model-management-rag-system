@@ -474,6 +474,7 @@ def start_ui(components, host="localhost", port=8000):
                     user_id=user_id
                 ))
 
+                print(f"Items: {search_results['items']}")
                 # Rank the results
                 if isinstance(search_results, dict) and 'items' in search_results:
                     ranked_results = result_ranker.rank_results(search_results['items'])
