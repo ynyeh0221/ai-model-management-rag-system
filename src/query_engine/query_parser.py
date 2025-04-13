@@ -44,15 +44,13 @@ class QueryParser:
     """
 
     def __init__(self, nlp_model: str = "en_core_web_sm", use_langchain: bool = True,
-                 use_sentence_transformer: bool = True, use_local_llm: bool = False,
-                 local_llm_path: str = None):
+                 use_local_llm: bool = False, local_llm_path: str = None):
         """
         Initialize the QueryParser with necessary NLP components.
 
         Args:
             nlp_model: The spaCy model to use for NLP tasks
             use_langchain: Whether to use LangChain for enhanced parsing
-            use_sentence_transformer: Whether to use sentence-transformer for semantic matching
             use_local_llm: Whether to use a local LLM for intent classification and parameter extraction
             local_llm_path: Path to local LLM model
         """
@@ -82,17 +80,6 @@ class QueryParser:
 
         self.lemmatizer = WordNetLemmatizer()
         self.stop_words = set(stopwords.words('english'))
-
-        # Initialize semantic matching components
-        self.use_sentence_transformer = use_sentence_transformer and SENTENCE_TRANSFORMERS_AVAILABLE
-        if self.use_sentence_transformer:
-            try:
-                # Use a small model suitable for local execution
-                self.sentence_model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
-                self.logger.info("Initialized sentence-transformer model")
-            except Exception as e:
-                self.logger.warning(f"Could not initialize sentence-transformer: {e}")
-                self.use_sentence_transformer = False
 
         # Initialize local LLM components
         self.use_local_llm = use_local_llm and TRANSFORMERS_AVAILABLE
@@ -284,12 +271,6 @@ class QueryParser:
             ]
         }
 
-        # Pre-compute example embeddings (if sentence-transformer is enabled)
-        if self.use_sentence_transformer:
-            self.intent_embeddings = {}
-            for intent, examples in self.intent_examples.items():
-                self.intent_embeddings[intent] = self.sentence_model.encode(examples)
-
     def parse_query(self, query_text: str) -> Dict[str, Any]:
         """
         Parse a query to determine intent and parameters.
@@ -332,29 +313,20 @@ class QueryParser:
 
     def classify_intent(self, query_text: str) -> QueryIntent:
         """
-        Classify the intent of a query.
+        Classify the intent of a query using LangChain, and rule-based logic.
         """
         query_lower = query_text.lower()
         model_mentions = self._extract_model_mentions(query_lower)
 
-        # Step 1: Try using semantic similarity (if available)
-        if self.use_sentence_transformer:
+        # Step 1: Try LangChain LLM classification
+        if self.use_langchain:
             try:
-                query_embedding = self.sentence_model.encode([query_text])[0]
-                best_score = -1
-                best_intent = None
-
-                for intent, embeddings in self.intent_embeddings.items():
-                    similarities = [1 - cosine(query_embedding, emb) for emb in embeddings]
-                    max_similarity = max(similarities)
-                    if max_similarity > best_score:
-                        best_score = max_similarity
-                        best_intent = intent
-
-                if best_score > 0.5:
-                    return best_intent
+                result = self.intent_chain.invoke({"query": query_text}).strip().lower()
+                for intent in QueryIntent:
+                    if intent.value in result:
+                        return intent
             except Exception as e:
-                self.logger.warning(f"Semantic matching failed: {e}")
+                self.logger.warning(f"LangChain classification failed: {e}")
 
         # Step 2: Rule-based pattern matching (ordered by priority)
         if len(model_mentions) > 1 and any(
@@ -376,82 +348,6 @@ class QueryParser:
         if model_mentions:
             return QueryIntent.RETRIEVAL
 
-        return QueryIntent.UNKNOWN
-
-    def _nlp_based_intent_classification(self, query_text: str) -> QueryIntent:
-        """
-        Use NLP techniques to classify intent when rule-based approach is inconclusive.
-
-        Args:
-            query_text: The query text to classify
-
-        Returns:
-            QueryIntent: The classified intent
-        """
-        # Parse with spaCy
-        doc = self.nlp(query_text)
-
-        # Extract verbs and nouns for intent analysis
-        verbs = [token.lemma_ for token in doc if token.pos_ == "VERB"]
-        nouns = [token.lemma_ for token in doc if token.pos_ == "NOUN"]
-
-        # Create vocabulary sets for different intents
-        comparison_verbs = ["compare", "contrast", "differ", "distinguish", "evaluate", "versus", "vs", "against"]
-        comparison_nouns = ["comparison", "difference", "similarity", "distinction", "differential"]
-
-        notebook_verbs = ["create", "generate", "make", "build", "develop", "code", "program", "script"]
-        notebook_nouns = ["notebook", "code", "script", "program", "analysis", "jupyter", "colab", "coding"]
-
-        image_verbs = ["show", "display", "find", "get", "generate", "create", "render", "visualize"]
-        image_nouns = ["image", "picture", "photo", "visualization", "render", "sample", "example"]
-
-        metadata_nouns = ["metadata", "schema", "field", "property", "attribute", "structure", "configuration",
-                          "parameter", "setup"]
-
-        model_nouns = ["model", "transformer", "neural", "network", "ai", "architecture", "system"]
-
-        # Optimized classification logic - weight different types of words
-        # Use a more sophisticated scoring mechanism
-        intent_scores = {intent: 0 for intent in QueryIntent}
-
-        # Score for comparison intent
-        if any(verb in comparison_verbs for verb in verbs):
-            intent_scores[QueryIntent.COMPARISON] += 2
-        if any(noun in comparison_nouns for noun in nouns):
-            intent_scores[QueryIntent.COMPARISON] += 1
-        if len(set(nouns)) > 1 and any(noun in model_nouns for noun in nouns):
-            intent_scores[QueryIntent.COMPARISON] += 1
-
-        # Score for notebook intent
-        if any(verb in notebook_verbs for verb in verbs):
-            intent_scores[QueryIntent.NOTEBOOK] += 2
-        if any(noun in notebook_nouns for noun in nouns):
-            intent_scores[QueryIntent.NOTEBOOK] += 2
-
-        # Score for image search intent
-        if any(verb in image_verbs for verb in verbs) and any(noun in image_nouns for noun in nouns):
-            intent_scores[QueryIntent.IMAGE_SEARCH] += 3
-        elif any(verb in image_verbs for verb in verbs):
-            intent_scores[QueryIntent.IMAGE_SEARCH] += 1
-        elif any(noun in image_nouns for noun in nouns):
-            intent_scores[QueryIntent.IMAGE_SEARCH] += 1
-
-        # Score for metadata intent
-        if any(noun in metadata_nouns for noun in nouns):
-            intent_scores[QueryIntent.METADATA] += 2
-
-        # Score for retrieval intent (default)
-        if any(noun in model_nouns for noun in nouns):
-            intent_scores[QueryIntent.RETRIEVAL] += 1
-
-        # Get the intent with the highest score
-        best_intent = max(intent_scores.items(), key=lambda x: x[1])
-
-        # If we have a clear winner with a score > 0, return it
-        if best_intent[1] > 0:
-            return best_intent[0]
-
-        # If still uncertain, default to UNKNOWN
         return QueryIntent.UNKNOWN
 
     def extract_parameters(self, query_text: str, intent: Optional[QueryIntent] = None) -> Dict[str, Any]:

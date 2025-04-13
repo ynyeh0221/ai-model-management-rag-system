@@ -51,17 +51,13 @@ class TestQueryParser(unittest.TestCase):
         retrieval_queries = [
             "Find information about GPT-4",
             "What is BERT?",
-            "Show details of Llama 2"
+            "Show details of Llama 2",
+            "Tell me about transformer models"
         ]
 
         for query in retrieval_queries:
             intent = self.parser.classify_intent(query)
             self.assertEqual(intent, QueryIntent.RETRIEVAL, f"Failed for query: {query}")
-
-        # Test specific case that gets classified as COMPARISON in current implementation
-        query = "Tell me about transformer models"
-        intent = self.parser.classify_intent(query)
-        self.assertEqual(intent, QueryIntent.COMPARISON, f"Failed for query: {query}")
 
     def test_classify_intent_comparison(self):
         """Test intent classification for comparison queries."""
@@ -108,8 +104,8 @@ class TestQueryParser(unittest.TestCase):
         """Test intent classification for metadata queries."""
         metadata_queries = [
             "What are the metadata fields for GPT-4?",
-            # "What properties does BERT have?",
-            # "Tell me about the structure of model data"
+            "What properties does BERT have?",
+            "Tell me about the structure of model data"
         ]
 
         for query in metadata_queries:
@@ -214,12 +210,6 @@ class TestQueryParser(unittest.TestCase):
         self.assertIn("limit", result["parameters"])
         self.assertEqual(result["parameters"]["limit"], 3)
         self.assertIn("sort_by", result["parameters"])
-
-    # Completely rewrite the test to avoid patching issues
-    def test_langchain_integration(self):
-        """Test LangChain integration when enabled."""
-        # Skip this test since it requires external dependencies
-        self.skipTest("Skipping LangChain test as it requires external dependencies")
 
 
 if __name__ == '__main__':
