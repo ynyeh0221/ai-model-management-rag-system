@@ -410,3 +410,26 @@ class ImageEmbedder:
             },
             "total_tiles": n_tiles_width * n_tiles_height
         }
+
+    def __call__(self, input: List[str]) -> List[List[float]]:
+        """
+        Make ImageEmbedder compatible with ChromaDB's embedding_function interface.
+
+        Args:
+            input: List of image paths to embed
+
+        Returns:
+            List of embedding vectors (List[List[float]])
+        """
+        if not input:
+            return []
+
+        try:
+            embeddings = self.embed_batch(input)
+            return embeddings.tolist() if isinstance(embeddings, np.ndarray) else embeddings
+        except Exception as e:
+            print(f"Error in ImageEmbedder __call__: {e}")
+            return [[0.0] * self.target_dim for _ in input]
+
+    def name(self) -> str:
+        return f"ImageEmbedder::{self.model_name}"

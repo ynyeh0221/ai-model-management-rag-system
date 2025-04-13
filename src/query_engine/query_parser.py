@@ -275,8 +275,6 @@ class QueryParser:
             "processed_query": processed_query
         }
 
-        print(f"Result: {result}")
-
         self.logger.info(f"Query parsed: {intent_str} with {len(parameters)} parameters")
         self.logger.debug(f"Parsed result: {result}")
 
@@ -388,7 +386,6 @@ class QueryParser:
                 import json
                 try:
                     raw_result = self.param_chain.invoke({"query": query_text})
-                    print(f"raw_result: {raw_result}")
 
                     # Find the first opening brace
                     json_start = raw_result.find('{')
@@ -397,8 +394,6 @@ class QueryParser:
                         return {}
 
                     json_str = raw_result[json_start:].strip()
-                    print(f"json_str: {json_str}")
-
                     decoder = json.JSONDecoder()
                     params, idx = decoder.raw_decode(json_str)
                     print(f"params: {params}")

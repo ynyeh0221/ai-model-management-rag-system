@@ -4,12 +4,14 @@ import asyncio
 import json
 import logging
 import os
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional
 
 import chromadb
 import numpy as np
 from chromadb.config import Settings
-from chromadb.utils import embedding_functions
+
+from src.vector_db_manager.image_embedder import ImageEmbedder
+from src.vector_db_manager.text_embedder import TextEmbedder
 
 
 class ChromaManager:
@@ -17,10 +19,9 @@ class ChromaManager:
     Manager for Chroma vector database operations.
     Handles collection management, document operations, and search functionality.
     """
-    
-    def __init__(self, persist_directory="./chroma_db",
-                 embedding_model_name="all-MiniLM-L6-v2",
-                 image_embedding_model_name="ViT-B/32"):
+
+    def __init__(self, text_embedder: TextEmbedder, image_embedder: ImageEmbedder,
+                 persist_directory: str = "./chroma_db"):
         """
         Initialize the ChromaManager with database and embedding configuration.
         
@@ -30,8 +31,8 @@ class ChromaManager:
             image_embedding_model_name: Name of the image embedding model
         """
         self.persist_directory = persist_directory
-        self.embedding_model_name = embedding_model_name
-        self.image_embedding_model_name = image_embedding_model_name
+        self.text_embedder = text_embedder
+        self.image_embedder = image_embedder
         self.logger = logging.getLogger(__name__)
         self.collections = {}
         self._initialize_client()
@@ -53,18 +54,11 @@ class ChromaManager:
                     allow_reset=True
                 )
             )
-            
+
             # Initialize text embedding function
-            self.text_embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=self.embedding_model_name
-            )
-            
+            self.text_embedding_function = self.text_embedder
             # Initialize image embedding function
-            # In a real implementation, this would use a proper image embedding model
-            # For this example, we'll use a placeholder
-            self.image_embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=self.embedding_model_name  # Replace with image model in real implementation
-            )
+            self.image_embedding_function = self.image_embedder
             
             # Initialize default collections
             self._initialize_default_collections()
@@ -427,7 +421,7 @@ class ChromaManager:
             self.logger.error(f"Error adding documents to {collection_name}: {e}", exc_info=True)
             raise
 
-    async def search(self, query: Union[str, Dict[str, Any]],
+    async def search(self, query: str,
                      collection_name: str = "model_scripts",
                      where: Optional[Dict[str, Any]] = None,
                      limit: int = 10,
@@ -478,27 +472,7 @@ class ChromaManager:
 
                 # Query by embedding
                 query_args = {
-                    "query_embeddings": [query_embedding],
-                    "n_results": int(limit) if limit is not None else 10,  # Force conversion to int with fallback
-                    "include": include
-                }
-
-                # Only add where filter if it's not empty
-                if where and len(where) > 0:
-                    query_args["where"] = where
-
-                results = await self._run_in_executor(
-                    collection.query,
-                    **query_args
-                )
-
-            elif isinstance(query, dict) and "embedding" in query:
-                # Direct embedding query
-                query_embedding = query["embedding"]
-
-                # Query by embedding
-                query_args = {
-                    "query_embeddings": [query_embedding],
+                    "query_embeddings": query_embedding,
                     "n_results": int(limit) if limit is not None else 10,  # Force conversion to int with fallback
                     "include": include
                 }

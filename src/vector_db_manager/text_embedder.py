@@ -321,3 +321,25 @@ class TextEmbedder:
         except Exception as e:
             self.logger.error(f"Error loading embeddings from {filepath}: {e}", exc_info=True)
             return None
+
+    def __call__(self, input: List[str]) -> List[List[float]]:
+        """
+        Make TextEmbedder compatible with ChromaDB's embedding_function interface.
+        Args:
+            input: List of strings to embed
+
+        Returns:
+            List of embedding vectors (List[List[float]])
+        """
+        if not input:
+            return []
+
+        try:
+            embeddings = self.embed_batch(input)
+            return embeddings.tolist() if isinstance(embeddings, np.ndarray) else embeddings
+        except Exception as e:
+            self.logger.error(f"__call__ failed in TextEmbedder: {e}", exc_info=True)
+            return [[0.0] * self.embedding_dim for _ in input]
+
+    def name(self) -> str:
+        return f"TextEmbedder::{self.model_name}"

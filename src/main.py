@@ -10,7 +10,6 @@ from pathlib import Path
 
 import nbformat
 from nbformat.v4 import new_notebook, new_code_cell
-from networkx.algorithms.threshold import creation_sequence
 from prettytable import PrettyTable
 
 from src.colab_generator.code_generator import CodeGenerator
@@ -45,7 +44,7 @@ def initialize_components(config_path="./config"):
     # Initialize vector database components
     text_embedder = TextEmbedder()
     image_embedder = ImageEmbedder()
-    chroma_manager = ChromaManager("./chroma_db")
+    chroma_manager = ChromaManager(text_embedder, image_embedder, "./chroma_db")
     access_control = AccessControlManager(chroma_manager)
     
     # Initialize query engine components
@@ -556,13 +555,6 @@ def start_ui(components, host="localhost", port=8000):
                     ranked_results = [r for r in ranked_results if r.get('score', 0) >= similarity_threshold]
                 else:
                     ranked_results = []
-
-                # Show top results
-                print("\nTop Results:")
-                for i, result in enumerate(ranked_results):
-                    model_id = result.get('model_id',
-                                          result.get('metadata', {}).get('model_id', result.get('id', 'Unknown')))
-                    print(f"  {i + 1}. {model_id} - {result.get('score', 0):.2f}")
 
                 # Select template based on query type
                 if parsed_query["type"] == "comparison":

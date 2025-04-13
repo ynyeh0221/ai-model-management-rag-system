@@ -137,7 +137,6 @@ class SearchDispatcher:
         try:
             # Generate embedding for the query
             embedding_start = time.time()
-            query_embedding = self.text_embedder.embed_text(query)
             embedding_time = (time.time() - embedding_start) * 1000
 
             # Extract search parameters with more robust error handling
@@ -153,12 +152,12 @@ class SearchDispatcher:
 
             # Use a higher limit for the initial search to account for multiple chunks per model
             search_limit = requested_limit * 100  # Get 100x more results to find diverse models
-            # filters = parameters.get('filters', {})
+            # Manually use empty filters for now
             filters = {}
 
             # Prepare Chroma query
             search_params = {
-                'query': {'embedding': query_embedding},
+                'query': query,
                 'where': self._translate_filters_to_chroma(filters),
                 'limit': search_limit,
                 'include': ["metadatas", "documents", "distances"]

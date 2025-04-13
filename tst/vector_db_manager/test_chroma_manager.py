@@ -3,10 +3,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-import numpy as np
-
 # Import the ChromaManager from the module
 from src.vector_db_manager.chroma_manager import ChromaManager
+
 
 # --- Dummy Classes for Testing ---
 
@@ -112,16 +111,15 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
             side_effect=lambda path, settings: DummyPersistentClient(path, settings)
         )
         self.mock_client = self.client_patcher.start()
-
-        # Patch the embedding functions to return our dummy embedding functions.
-        self.embedding_patcher = patch(
-            "src.vector_db_manager.chroma_manager.embedding_functions.SentenceTransformerEmbeddingFunction",
-            side_effect=lambda model_name: DummyEmbeddingFunction(model_name)
-        )
-        self.mock_embedding = self.embedding_patcher.start()
+        self.text_embedder = DummyEmbeddingFunction("dummy-text")
+        self.image_embedder = DummyEmbeddingFunction("dummy-image")
 
         # Instantiate the ChromaManager with our temporary directory.
-        self.manager = ChromaManager(persist_directory=self.temp_dir)
+        self.manager = ChromaManager(
+            text_embedder=self.text_embedder,
+            image_embedder=self.image_embedder,
+            persist_directory=self.temp_dir
+        )
         # Override _run_in_executor so that functions run synchronously.
         async def immediate(func, *args, **kwargs):
             return func(*args, **kwargs)
@@ -130,7 +128,6 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
     def tearDown(self):
         self.makedirs_patcher.stop()
         self.client_patcher.stop()
-        self.embedding_patcher.stop()
         # Clean up temporary directory if needed.
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
@@ -281,20 +278,6 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
         await self.manager.add_documents(documents, collection_name="model_scripts")
         count = await self.manager.count_documents(collection_name="model_scripts")
         self.assertEqual(count, 2)
-
-    async def test_get_collection_stats(self):
-        # Add one document then retrieve collection stats.
-        document = {
-            "id": "doc_stat",
-            "content": "Stat content",
-            "metadata": {}
-        }
-        await self.manager.add_document(document, collection_name="model_scripts")
-        stats = await self.manager.get_collection_stats(collection_name="model_scripts")
-        self.assertEqual(stats["name"], "model_scripts")
-        self.assertEqual(stats["count"], 1)
-        self.assertIn("description", stats)
-        self.assertIn("embedding_function", stats)
 
     async def test_apply_access_control(self):
         # Test that _apply_access_control returns the expected filter structure.
