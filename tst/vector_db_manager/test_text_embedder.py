@@ -59,15 +59,6 @@ class TestTextEmbedder(unittest.TestCase):
         expected = np.array([np.full(self.embedder.embedding_dim, 1) for _ in range(len(texts))])
         np.testing.assert_array_equal(embeddings, expected)
 
-    def test_embed_code(self):
-        """
-        The embed_code method should produce the same result as embed_text.
-        """
-        code = "print('hello')"
-        embedding_text = self.embedder.embed_text(code)
-        embedding_code = self.embedder.embed_code(code)
-        np.testing.assert_array_equal(embedding_text, embedding_code)
-
     def test_embed_mixed_content_empty(self):
         """
         Providing empty content (i.e. an empty dict) should result in a zero vector.

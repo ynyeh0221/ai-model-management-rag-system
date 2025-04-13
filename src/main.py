@@ -96,6 +96,13 @@ def initialize_components(config_path="./config"):
         }
     }
 
+def clean_iso_timestamp(ts: str) -> str:
+    """Remove microseconds from ISO format like 2025-03-02T10:53:24.620782 -> 2025-03-02T10:53:24"""
+    try:
+        dt = datetime.fromisoformat(ts)
+        return dt.replace(microsecond=0).isoformat()
+    except Exception:
+        return ts  # fallback to original if parsing fails
 
 def process_model_scripts(components, directory_path):
     """Process model scripts in a directory."""
@@ -204,7 +211,29 @@ def process_single_script(file_path, components):
             logging.warning(f"Schema validation failed for {file_path}, chunk {i}: {validation_result['errors']}")
             continue
 
-        embedding = text_embedder.embed_text(chunk_text)
+        creation_date_raw = clean_iso_timestamp(metadata.get("file", {}).get("creation_date", "N/A"))
+        last_modified_raw = clean_iso_timestamp(metadata.get("file", {}).get("last_modified_date", "N/A"))
+
+        def format_natural_date(iso_date: str):
+            try:
+                dt = datetime.fromisoformat(iso_date)
+                return dt.strftime("%B %Y")  # e.g. "April 2025"
+            except Exception:
+                return "Unknown"
+
+        natural_month = format_natural_date(creation_date_raw)
+        content = {
+            "title": model_id,
+            "code": chunk_text,
+            "comments": f"""
+                This model was created in {natural_month}.
+                Created on {creation_date_raw}.
+                Last modified on {last_modified_raw}.
+                Size: {metadata.get("file", {}).get('size_bytes', 'N/A')} bytes.
+            """
+        }
+        print(f"Content: {content}")
+        embedding = text_embedder.embed_mixed_content(content)
 
         access_metadata = access_control.get_document_permissions(document)
         document["metadata"]["access_control"] = access_metadata

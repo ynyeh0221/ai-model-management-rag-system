@@ -130,21 +130,6 @@ class TextEmbedder:
             # Return empty array in case of error
             return np.zeros((len(texts), self.embedding_dim))
 
-    def embed_code(self, code: str, normalize: bool = True) -> np.ndarray:
-        """
-        Generate embeddings for code snippets with special handling.
-
-        Args:
-            code: Code to embed
-            normalize: Whether to L2-normalize the embedding
-
-        Returns:
-            numpy.ndarray: Embedding vector
-        """
-        # In a more sophisticated implementation, this could use code-specific
-        # preprocessing or a specialized model for code embeddings
-        return self.embed_text(code, normalize)
-
     def embed_mixed_content(self, content: Dict[str, Any], normalize: bool = True) -> np.ndarray:
         """
         Generate embeddings for mixed content with different sections.
