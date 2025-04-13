@@ -1,4 +1,5 @@
 import asyncio
+import json
 
 
 class AccessControlManager:
@@ -469,10 +470,14 @@ class AccessControlManager:
             accessible_models = []
             if isinstance(all_models, dict) and 'results' in all_models:
                 for model in all_models['results']:
+                    file_info = json.loads(model['metadata']['file'])
                     if self.check_access(model, user_id, "view"):
                         model_info = {
-                            "model_id": model.get("id", ""),
-                            "description": model.get("metadata", {}).get("description", "No description")
+                            "model_id": model["metadata"].get("model_id"),
+                            "creation_date": file_info.get("creation_date"),
+                            "last_modified_date": file_info.get("last_modified_date"),
+                            "total_chunks": model["metadata"].get("total_chunks"),
+                            "description": model["metadata"].get("description", "No description")
                         }
                         # Add other metadata
                         if "metadata" in model and model["metadata"]:

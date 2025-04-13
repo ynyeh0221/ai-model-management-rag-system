@@ -9,6 +9,7 @@ from pathlib import Path
 
 import nbformat
 from nbformat.v4 import new_notebook, new_code_cell
+from prettytable import PrettyTable
 
 from src.colab_generator.code_generator import CodeGenerator
 from src.colab_generator.colab_api_client import ColabAPIClient
@@ -355,6 +356,26 @@ def process_single_image(file_path, components):
 
     return (document_id, True)
 
+def display_models_pretty(available_models):
+    table = PrettyTable()
+    table.field_names = ["Model ID", "Created", "Last Modified", "Description"]
+
+    for model in available_models:
+        model_id = model['model_id']
+        created = model['creation_date']
+        modified = model['last_modified_date']
+        desc = model.get('description', 'No description')
+
+        # Optional: truncate long model_id or desc for cleaner look
+        if len(model_id) > 40:
+            model_id = model_id[:37] + "..."
+        if len(desc) > 40:
+            desc = desc[:37] + "..."
+
+        table.add_row([model_id, created, modified, desc])
+
+    print(table)
+
 def start_ui(components, host="localhost", port=8000):
     """Start a command-line interface for the RAG system.
     
@@ -416,21 +437,32 @@ def start_ui(components, host="localhost", port=8000):
                 # Get models the user has access to
                 available_models = access_control.get_accessible_models(user_id)
                 print("\nAvailable models:")
-                if not available_models:
-                    print("  No models available")
-                else:
-                    for model in available_models:
-                        print(f"  {model['model_id']} - {model.get('description', 'No description')}")
+                display_models_pretty(available_models)
 
             elif cmd.lower() == "list-images":
                 # Get images the user has access to
                 available_images = access_control.get_accessible_images(user_id)
+
                 print("\nAvailable images:")
+
                 if not available_images:
                     print("  No images available")
                 else:
+                    table = PrettyTable()
+                    table.field_names = ["Image ID", "Prompt", "File Path"]
                     for image in available_images:
-                        print(f"  {image['id']} - {image.get('prompt', 'No prompt')} - {image.get('filepath', 'No path')}")
+                        image_id = image['id']
+                        prompt = image.get('prompt', 'No prompt')
+                        filepath = image.get('filepath', 'No path')
+
+                        # Optional: truncate long values
+                        if len(prompt) > 40:
+                            prompt = prompt[:37] + "..."
+                        if len(filepath) > 50:
+                            filepath = filepath[:47] + "..."
+
+                        table.add_row([image_id, prompt, filepath])
+                    print(table)
 
             elif cmd.lower().startswith("query"):
                 if cmd.lower() == "query":
@@ -476,21 +508,12 @@ def start_ui(components, host="localhost", port=8000):
                     print(f"  {i + 1}. {model_id} - {result.get('score', 0):.2f}")
 
                 # Select template based on query type
-                template_id = None
                 if parsed_query["type"] == "comparison":
                     template_id = "model_comparison"
                 elif parsed_query["type"] == "retrieval":
                     template_id = "information_retrieval"
                 else:
                     template_id = "general_query"
-
-                # Get the template content
-                template_content = template_manager.get_template(template_id)
-
-                # Check if template exists
-                if template_content is None:
-                    print(f"Warning: Template '{template_id}' not found. Using default prompt.")
-                    template_content = "Please analyze the following query and results to provide a helpful response."
 
                 print("Generating response...")
 
