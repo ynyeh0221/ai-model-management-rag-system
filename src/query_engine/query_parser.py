@@ -1,7 +1,7 @@
 import logging
 import re
 from enum import Enum
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple, Union
 
 import nltk
 import spacy
@@ -128,7 +128,11 @@ class QueryParser:
 
                 Query: {query}
 
-                Intent:
+                Respond in this JSON format:
+                {
+                  "intent": "<intent_name>",
+                  "reason": "<short explanation of why this intent was chosen>"
+                }
                 """
 
                 self.intent_prompt = PromptTemplate(
@@ -246,8 +250,8 @@ class QueryParser:
         # Preprocess the query
         processed_query = self.preprocess_query(query_text)
 
-        # Classify intent
-        intent = self.classify_intent(query_text)
+        # Classify intent and reason (if any)
+        intent, reason = self.classify_intent(query_text)
 
         # Extract parameters
         parameters = self.extract_parameters(query_text, intent)
@@ -257,6 +261,7 @@ class QueryParser:
 
         result = {
             "intent": intent_str,
+            "reason": reason,
             "type": intent_str,  # Add type for backward compatibility
             "parameters": parameters,
             "processed_query": processed_query
@@ -267,7 +272,7 @@ class QueryParser:
 
         return result
 
-    def classify_intent(self, query_text: str) -> QueryIntent:
+    def classify_intent(self, query_text: str) -> Union[QueryIntent, tuple[QueryIntent, str]]:
         """
         Classify the intent of a query using LangChain, and rule-based logic.
         """
@@ -277,34 +282,41 @@ class QueryParser:
         # Step 1: Try LangChain LLM classification
         if self.use_langchain:
             try:
-                result = self.intent_chain.invoke({"query": query_text}).strip().lower()
-                for intent in QueryIntent:
-                    if intent.value in result:
-                        return intent
+                raw_result = self.intent_chain.invoke({"query": query_text}).strip()
+                import json
+                result_json = re.search(r'{.*}', raw_result, re.DOTALL)
+                if result_json:
+                    parsed = json.loads(result_json.group(0))
+                    intent_str = parsed.get("intent", "").lower()
+                    reason = parsed.get("reason", "").strip()
+                    for intent in QueryIntent:
+                        if intent.value == intent_str:
+                            self.logger.info(f"Intent: {intent.value} | Reason: {reason}")
+                            return intent, reason
             except Exception as e:
                 self.logger.warning(f"LangChain classification failed: {e}")
 
         # Step 2: Rule-based pattern matching (ordered by priority)
         if len(model_mentions) > 1 and any(
                 re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.COMPARISON]):
-            return QueryIntent.COMPARISON
+            return QueryIntent.COMPARISON, "Multiple model mentions and comparison keywords detected."
 
         if any(re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.METADATA]):
-            return QueryIntent.METADATA
+            return QueryIntent.METADATA, "Metadata-related keywords found in query."
 
         if any(re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.NOTEBOOK]):
-            return QueryIntent.NOTEBOOK
+            return QueryIntent.NOTEBOOK, "Query suggests generating or working with a notebook."
 
         if any(re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.IMAGE_SEARCH]):
-            return QueryIntent.IMAGE_SEARCH
+            return QueryIntent.IMAGE_SEARCH, "Image-related terms found in the query."
 
         if any(re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.RETRIEVAL]):
-            return QueryIntent.RETRIEVAL
+            return QueryIntent.RETRIEVAL, "Query includes retrieval-related keywords."
 
         if model_mentions:
-            return QueryIntent.RETRIEVAL
+            return QueryIntent.RETRIEVAL, "Model mention found without clear comparison or metadata intent."
 
-        return QueryIntent.UNKNOWN
+        return QueryIntent.UNKNOWN, "Could not determine a clear intent from the query."
 
     def extract_parameters(self, query_text: str, intent: Optional[QueryIntent] = None) -> Dict[str, Any]:
         """
@@ -318,7 +330,7 @@ class QueryParser:
             Dictionary of extracted parameters
         """
         if intent is None:
-            intent = self.classify_intent(query_text)
+            intent, reason = self.classify_intent(query_text)
 
         # Try using local LLM for parameter extraction
         if self.use_local_llm:
@@ -645,103 +657,3 @@ class QueryParser:
 
         # Join all processed tokens
         return " ".join(processed_tokens)
-
-    def get_intent_explanation(self, intent: QueryIntent, query_text: str) -> str:
-        """
-        Generate an explanation for why a particular intent was classified.
-
-        Args:
-            intent: The classified intent
-            query_text: The original query text
-
-        Returns:
-            A human-readable explanation
-        """
-        explanation = f"I classified this as a {intent.value} query because "
-
-        if intent == QueryIntent.RETRIEVAL:
-            model_mentions = self._extract_model_mentions(query_text)
-            if model_mentions:
-                explanation += f"it mentions the model(s) {', '.join(model_mentions)}, "
-                explanation += "and appears to be asking for information about them."
-            else:
-                explanation += "it uses retrieval-related terms and doesn't match other intent patterns."
-
-        elif intent == QueryIntent.COMPARISON:
-            model_mentions = self._extract_model_mentions(query_text)
-            if len(model_mentions) > 1:
-                explanation += f"it mentions multiple models ({', '.join(model_mentions)}) "
-                explanation += "and uses comparison-related language."
-            else:
-                explanation += "it uses comparison terms like 'versus', 'better than', or 'difference between'."
-
-        elif intent == QueryIntent.NOTEBOOK:
-            explanation += "it requests the creation of code, a notebook, or an analysis script."
-
-        elif intent == QueryIntent.IMAGE_SEARCH:
-            explanation += "it asks for images, pictures, or visual examples generated by models."
-
-        elif intent == QueryIntent.METADATA:
-            explanation += "it's asking about the structure, fields, or properties of models rather than their function."
-
-        else:  # UNKNOWN
-            explanation += "it doesn't clearly match any of the known intent patterns."
-
-        return explanation
-
-    def format_result(self, parse_result: Dict[str, Any], include_explanation: bool = False) -> str:
-        """
-        Format the parse result into a human-readable string.
-
-        Args:
-            parse_result: The result from parse_query
-            include_explanation: Whether to include an explanation of the classification
-
-        Returns:
-            A formatted string representation of the parse result
-        """
-        formatted = f"Intent: {parse_result['intent'].upper()}\n\n"
-
-        if include_explanation:
-            intent_enum = next(i for i in QueryIntent if i.value == parse_result['intent'])
-            explanation = self.get_intent_explanation(intent_enum, parse_result.get('processed_query', ''))
-            formatted += f"{explanation}\n\n"
-
-        formatted += "Parameters:\n"
-
-        params = parse_result['parameters']
-        if not params:
-            formatted += "  No specific parameters extracted.\n"
-        else:
-            for key, value in params.items():
-                if key == 'model_ids' and value:
-                    formatted += f"  Models: {', '.join(value)}\n"
-                elif key == 'metrics' and value:
-                    formatted += f"  Metrics: {', '.join(value)}\n"
-                elif key == 'filters' and value:
-                    formatted += "  Filters:\n"
-                    for filter_key, filter_val in value.items():
-                        if isinstance(filter_val, dict):
-                            filter_desc = f"{filter_val.get('operator', '')} {filter_val.get('value', '')}"
-                            formatted += f"    {filter_key}: {filter_desc}\n"
-                        else:
-                            formatted += f"    {filter_key}: {filter_val}\n"
-                elif key == 'limit':
-                    formatted += f"  Limit: {value}\n"
-                elif key == 'sort_by' and value:
-                    order = value.get('order', 'descending')
-                    formatted += f"  Sort by: {value.get('field', '')} ({order})\n"
-                elif key == 'comparison_dimensions' and value:
-                    formatted += f"  Comparison dimensions: {', '.join(value)}\n"
-                elif key == 'analysis_types' and value:
-                    formatted += f"  Analysis types: {', '.join(value)}\n"
-                elif key == 'dataset' and value:
-                    formatted += f"  Dataset: {value}\n"
-                elif key == 'prompt_terms' and value:
-                    formatted += f"  Prompt terms: {value}\n"
-                elif key == 'style_tags' and value:
-                    formatted += f"  Style tags: {', '.join(value)}\n"
-                elif key == 'resolution' and value:
-                    formatted += f"  Resolution: {value.get('width', '')}x{value.get('height', '')}\n"
-
-        return formatted

@@ -528,6 +528,7 @@ def start_ui(components, host="localhost", port=8000):
 
                 # Parse the query
                 parsed_query = query_parser.parse_query(query_text)
+                print(f"\nQuery intent is classified to : {parsed_query['intent']}, with reason : {parsed_query['reason']}")
 
                 # Log the query for analytics
                 query_analytics.log_query(user_id, query_text, parsed_query)

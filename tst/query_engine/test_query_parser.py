@@ -56,7 +56,7 @@ class TestQueryParser(unittest.TestCase):
         ]
 
         for query in retrieval_queries:
-            intent = self.parser.classify_intent(query)
+            intent, reason = self.parser.classify_intent(query)
             self.assertEqual(intent, QueryIntent.RETRIEVAL, f"Failed for query: {query}")
 
     def test_classify_intent_comparison(self):
@@ -68,12 +68,12 @@ class TestQueryParser(unittest.TestCase):
         ]
 
         for query in comparison_queries:
-            intent = self.parser.classify_intent(query)
+            intent, reason = self.parser.classify_intent(query)
             self.assertEqual(intent, QueryIntent.COMPARISON, f"Failed for query: {query}")
 
         # Test the problematic query separately
         query = "What's the difference between BERT and RoBERTa?"
-        intent = self.parser.classify_intent(query)
+        intent, reason = self.parser.classify_intent(query)
         self.assertEqual(intent, QueryIntent.RETRIEVAL, f"Failed for query: {query}")
 
     def test_classify_intent_notebook(self):
@@ -84,7 +84,7 @@ class TestQueryParser(unittest.TestCase):
         ]
 
         for query in notebook_queries:
-            intent = self.parser.classify_intent(query)
+            intent, reason = self.parser.classify_intent(query)
             self.assertEqual(intent, QueryIntent.NOTEBOOK, f"Failed for query: {query}")
 
     def test_classify_intent_image_search(self):
@@ -97,7 +97,7 @@ class TestQueryParser(unittest.TestCase):
         ]
 
         for query in image_queries:
-            intent = self.parser.classify_intent(query)
+            intent, reason = self.parser.classify_intent(query)
             self.assertEqual(intent, QueryIntent.IMAGE_SEARCH, f"Failed for query: {query}")
 
     def test_classify_intent_metadata(self):
@@ -109,12 +109,12 @@ class TestQueryParser(unittest.TestCase):
         ]
 
         for query in metadata_queries:
-            intent = self.parser.classify_intent(query)
+            intent, reason = self.parser.classify_intent(query)
             self.assertEqual(intent, QueryIntent.METADATA, f"Failed for query: {query}")
 
         # Optional: This one might be COMPARISON depending on your classifier
         query = "Show me the schema of transformer models"
-        intent = self.parser.classify_intent(query)
+        intent, reason = self.parser.classify_intent(query)
         self.assertIn(intent, [QueryIntent.METADATA, QueryIntent.COMPARISON], f"Failed for query: {query}")
 
     def test_classify_intent_unknown(self):
@@ -127,7 +127,7 @@ class TestQueryParser(unittest.TestCase):
         ]
 
         for query in unknown_queries:
-            intent = self.parser.classify_intent(query)
+            intent, reason = self.parser.classify_intent(query)
             # We expect either UNKNOWN or RETRIEVAL (default fallback)
             self.assertIn(intent, [QueryIntent.UNKNOWN, QueryIntent.RETRIEVAL],
                           f"Failed for query: {query}")
