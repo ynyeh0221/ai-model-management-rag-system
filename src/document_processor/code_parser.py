@@ -1,6 +1,7 @@
 import ast
 import datetime
 import os
+import textwrap
 
 from git import Repo
 
@@ -74,27 +75,81 @@ class CodeParser:
 
         return model_info
 
-    def split_into_chunks(self, content, chunk_size=1000, overlap=200):
-        """
-        Split content into chunks for processing.
+    def split_code_by_ast_structures(self, code: str):
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return [code]  # fallback to whole script
 
-        Args:
-            content (str): Text to split into chunks.
-            chunk_size (int): Maximum number of characters per chunk.
-            overlap (int): Number of overlapping characters between successive chunks.
-
-        Returns:
-            list of str: A list of text chunks.
-        """
+        lines = code.splitlines()
         chunks = []
-        start = 0
-        content_length = len(content)
-        while start < content_length:
-            end = start + chunk_size
-            chunk = content[start:end]
-            chunks.append(chunk)
-            # Advance start position with overlap in mind.
-            start += (chunk_size - overlap)
+
+        # Sort nodes by line number
+        nodes = sorted(tree.body, key=lambda n: getattr(n, "lineno", 0))
+
+        for i, node in enumerate(nodes):
+            start = getattr(node, "lineno", None)
+            end = getattr(node, "end_lineno", None)
+
+            if start is None:
+                continue
+
+            start_idx = start - 1
+
+            if end is not None:
+                end_idx = end
+            else:
+                # Estimate end using next node
+                if i + 1 < len(nodes):
+                    end_idx = nodes[i + 1].lineno - 1
+                else:
+                    end_idx = len(lines)
+
+            chunk = "\n".join(lines[start_idx:end_idx])
+            chunks.append(textwrap.dedent(chunk))
+
+        return chunks
+
+    def split_ast_and_subsplit_chunks(self, code: str, chunk_size: int = 500, overlap: int = 100):
+        """
+        Split code by AST structures, then subchunk each block with proper character offsets.
+
+        Returns a list of dicts: [{ "text": str, "source_block": str, "offset": int }]
+        """
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return [{"text": code, "source_block": code, "offset": 0}]  # fallback
+
+        lines = code.splitlines(keepends=True)
+        chunks = []
+
+        # Track absolute character offset in the full source
+        for node in sorted(tree.body, key=lambda n: getattr(n, "lineno", 0)):
+            start_line = getattr(node, "lineno", None)
+            end_line = getattr(node, "end_lineno", None)
+
+            if start_line is None:
+                continue
+
+            # Line indices are 1-based in AST, 0-based in list
+            start_idx = start_line - 1
+            end_idx = end_line if end_line else (start_idx + 1)
+
+            block_lines = lines[start_idx:end_idx]
+            block_code = "".join(block_lines)
+            block_start_char_offset = sum(len(l) for l in lines[:start_idx])
+
+            # Sub-split block with overlap, tracking correct char offset
+            for j in range(0, len(block_code), chunk_size - overlap):
+                chunk_text = block_code[j:j + chunk_size]
+                if chunk_text.strip():
+                    chunks.append({
+                        "text": chunk_text,
+                        "source_block": block_code,
+                        "offset": block_start_char_offset + j
+                    })
+
         return chunks
 
     def _get_creation_date(self, file_path):

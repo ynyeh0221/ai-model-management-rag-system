@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 
 import nbformat
+from nbformat.v4 import new_notebook, new_code_cell
 
 from src.colab_generator.code_generator import CodeGenerator
 from src.colab_generator.colab_api_client import ColabAPIClient
@@ -64,7 +65,7 @@ def initialize_components(config_path="./config"):
     colab_api_client = ColabAPIClient()
     reproducibility_manager = ReproducibilityManager()
     resource_quota_manager = ResourceQuotaManager()
-    
+
     return {
         "document_processor": {
             "schema_validator": schema_validator,
@@ -181,7 +182,7 @@ def process_single_script(file_path, components):
     metadata = metadata_extractor.extract_metadata(file_path)
     
     # 3. Split into chunks for processing
-    chunks = code_parser.split_into_chunks(parse_result["content"], chunk_size=1000, overlap=200)
+    chunks = code_parser.split_ast_and_subsplit_chunks(parse_result["content"], chunk_size=500, overlap=100)
 
     file_path_obj = Path(file_path)
     folder_name = file_path_obj.parent.name
@@ -189,34 +190,37 @@ def process_single_script(file_path, components):
     model_id = f"{folder_name}_{file_stem}"
 
     documents = []
-    for i, chunk in enumerate(chunks):
-        # Create document for each chunk
+    for i, chunk_obj in enumerate(chunks):
+        if isinstance(chunk_obj, dict):
+            chunk_text = chunk_obj.get("text", "")
+            chunk_metadata = {k: v for k, v in chunk_obj.items() if k != "text"}
+        else:
+            chunk_text = chunk_obj
+            chunk_metadata = {}
+
         document = {
             "id": f"model_script_{model_id}_{i}",
             "$schema_version": "1.0.0",
-            "content": chunk,
+            "content": chunk_text,
             "metadata": {
                 **metadata,
+                **chunk_metadata,  # <- store offset, type, etc.
                 "chunk_id": i,
                 "total_chunks": len(chunks),
                 "model_id": model_id
             }
         }
-        
-        # 4. Validate against schema
+
         validation_result = schema_validator.validate(document, "model_script_schema")
         if not validation_result["valid"]:
             logging.warning(f"Schema validation failed for {file_path}, chunk {i}: {validation_result['errors']}")
             continue
-        
-        # 5. Generate embeddings
-        embedding = text_embedder.embed_text(chunk)
-        
-        # 6. Apply access control
+
+        embedding = text_embedder.embed_text(chunk_text)
+
         access_metadata = access_control.get_document_permissions(document)
         document["metadata"]["access_control"] = access_metadata
 
-        # 7. Store in Chroma
         asyncio.run(chroma_manager.add_document(
             collection_name="model_scripts",
             document_id=document["id"],
@@ -224,16 +228,8 @@ def process_single_script(file_path, components):
             embed_content=embedding
         ))
 
-        # DEBUG
-        result = asyncio.run(chroma_manager.get(
-            collection_name="model_scripts",
-            ids=[document["id"]],
-            include=["metadatas"]
-        ))
-        print(f"[DEBUG] Get result: {result}")
-
         documents.append(document)
-    
+
     # Return the first document ID and success status
     return (documents[0]["id"], True) if documents else (None, False)
 
@@ -437,7 +433,7 @@ def start_ui(components, host="localhost", port=8000):
                 print("\nAvailable commands:")
                 for cmd_name, cmd_desc in commands.items():
                     print(f"  {cmd_name:<15} - {cmd_desc}")
-                    
+
             elif cmd.lower() == "list-models":
                 # Get models the user has access to
                 available_models = access_control.get_accessible_models(user_id)
@@ -447,7 +443,7 @@ def start_ui(components, host="localhost", port=8000):
                 else:
                     for model in available_models:
                         print(f"  {model['model_id']} - {model.get('description', 'No description')}")
-                        
+
             elif cmd.lower() == "list-images":
                 # Get images the user has access to
                 available_images = access_control.get_accessible_images(user_id)
@@ -487,12 +483,16 @@ def start_ui(components, host="localhost", port=8000):
                 # Rank the results
                 if isinstance(search_results, dict) and 'items' in search_results:
                     ranked_results = result_ranker.rank_results(search_results['items'])
+
+                    # Filter out low-score results (e.g., score < 0.3)
+                    similarity_threshold = 0.45
+                    ranked_results = [r for r in ranked_results if r.get('score', 0) >= similarity_threshold]
                 else:
                     ranked_results = []
 
                 # Show top results
                 print("\nTop Results:")
-                for i, result in enumerate(ranked_results[:5]):
+                for i, result in enumerate(ranked_results):
                     model_id = result.get('model_id',
                                           result.get('metadata', {}).get('model_id', result.get('id', 'Unknown')))
                     print(f"  {i + 1}. {model_id} - {result.get('score', 0):.2f}")
@@ -519,7 +519,7 @@ def start_ui(components, host="localhost", port=8000):
                 # Create simplified results to avoid token limits
                 # Simplified results to avoid token limits
                 simplified_results = []
-                for r in ranked_results[:5]:  # Limit to top 5 results
+                for r in ranked_results:
                     content = r.get('content', '')
                     # Truncate content if it's too long
                     if content and len(content) > 200:
@@ -654,10 +654,8 @@ def start_ui(components, host="localhost", port=8000):
             elif cmd.lower().startswith("generate-notebook"):
                 if cmd.lower() == "generate-notebook":
                     model_id = input("Enter model ID: ")
-                    notebook_type = input(
-                        "Enter notebook type (evaluation, comparison, visualization) [default: evaluation]: ") or "evaluation"
                     output_path = input(
-                        "Enter output path [default: ./notebooks/output.ipynb]: ") or "./notebooks/output.ipynb"
+                        f"Enter output path [default: ./notebooks/{model_id}.ipynb]: ") or f"./notebooks/{model_id}.ipynb"
                 else:
                     parts = cmd.split(maxsplit=3)
                     model_id = parts[1] if len(parts) > 1 else input("Enter model ID: ")
@@ -683,8 +681,7 @@ def start_ui(components, host="localhost", port=8000):
                 #    print(f"Access denied for model: {model_id}")
                 #    continue
 
-                print(f"Generating {notebook_type} notebook for model {model_id}...")
-                result = generate_notebook(components, model_id, output_path, notebook_type)
+                result = generate_notebook(components, model_id, output_path)
 
                 if result:
                     print(f"Notebook generated successfully: {result}")
@@ -702,145 +699,83 @@ def start_ui(components, host="localhost", port=8000):
     
     print("UI session ended.")
 
+def generate_notebook(components, model_id, output_path):
+    """Generate a Colab notebook for model analysis using full script reconstruction."""
+    print(f"Generating notebook for model {model_id}...")
 
-# Add new function for notebook generation
-def generate_notebook(components, model_id, output_path, notebook_type="evaluation"):
-    """Generate a Colab notebook for model analysis.
-
-    This function uses the CodeGenerator component to create a notebook
-    for analyzing an AI model, with appropriate code for loading, evaluating,
-    and visualizing the model based on its metadata.
-
-    Args:
-        components: Dictionary containing initialized system components
-        model_id: ID of the model to analyze
-        output_path: Path to save the generated notebook
-        notebook_type: Type of notebook to generate ("evaluation", "comparison", etc.)
-
-    Returns:
-        Path to the generated notebook
-    """
-    print(f"Generating {notebook_type} notebook for model {model_id}...")
-
-    # Extract required components
+    # Extract components
     code_generator = components["colab_generator"]["code_generator"]
-    notebook_template_engine = components["colab_generator"]["notebook_template_engine"]
-    colab_api_client = components["colab_generator"]["colab_api_client"]
     reproducibility_manager = components["colab_generator"]["reproducibility_manager"]
-    resource_quota_manager = components["colab_generator"]["resource_quota_manager"]
     chroma_manager = components["vector_db_manager"]["chroma_manager"]
-    access_control = components["vector_db_manager"]["access_control"]
 
     # Set up logging
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("notebook_generator")
 
-    # Retrieve model information from database
-    logger.info(f"Retrieving model information for {model_id}")
-
-    # Try doc ID directly first
-    model_info = asyncio.run(chroma_manager.get_document(
+    # Retrieve all chunks for the given model_id
+    logger.info(f"Retrieving all code chunks for model {model_id}")
+    results = asyncio.run(chroma_manager.get(
         collection_name="model_scripts",
-        doc_id=model_id  # could be full chunk ID
+        where={"model_id": {"$eq": model_id}},
+        include=["documents", "metadatas"],
+        limit=200  # increase if needed
     ))
 
-    # If not found, treat input as model_id and search by metadata
-    if not model_info:
-        results = asyncio.run(chroma_manager.get(
-            collection_name="model_scripts",
-            where={"model_id": {"$eq": model_id}},
-            limit=1,
-            include=["metadatas", "documents"]
-        ))
-        model_info = results["results"][0] if results.get("results") else None
-
-    if not model_info:
-        logger.error(f"Model {model_id} not found")
+    if not results or "results" not in results or not results["results"]:
+        logger.error(f"No code chunks found for model {model_id}")
         return None
 
-    # Extract model metadata
-    model_metadata = model_info.get("metadata", {})
-
-    # Find associated dataset if available
-    dataset_info = None
-    if "dataset" in model_metadata:
-        dataset_name = model_metadata["dataset"].get("name", {}).get("value")
-        if dataset_name:
-            logger.info(f"Looking for dataset {dataset_name}")
-            # This is a simplified representation - in a real system you'd have a more robust way to find the dataset
-            dataset_info = {
-                "name": {"value": dataset_name},
-                "split": model_metadata["dataset"].get("split", {"value": "test"}),
-                "num_samples": model_metadata["dataset"].get("num_samples", {"value": 10000})
-            }
-
-    # Generate code based on notebook type
-    logger.info(f"Generating code for {notebook_type} notebook")
-
-    # Determine framework and libraries
-    framework = model_metadata.get("framework", {}).get("name", "pytorch")
-    libraries = ["matplotlib", "numpy", "pandas", "tqdm"]
-
-    # Generate imports
-    imports_code = code_generator.generate_imports(framework, libraries)
-
-    # Generate model loading code
-    model_loading_code = code_generator.generate_model_loading(model_metadata)
-
-    # Generate dataset loading code if dataset info is available
-    dataset_loading_code = ""
-    if dataset_info:
-        dataset_loading_code = code_generator.generate_dataset_loading(dataset_info)
-
-    # Generate evaluation code if notebook type is evaluation
-    evaluation_code = ""
-    if notebook_type == "evaluation":
-        metrics = ["accuracy", "loss"]
-        if model_metadata.get("architecture_type", {}).get("value") == "transformer":
-            metrics.append("perplexity")
-        evaluation_code = code_generator.generate_evaluation_code(model_metadata, metrics)
-
-    # Generate visualization code
-    visualization_code = code_generator.generate_visualization_code("model_performance", {})
-
-    # Generate resource monitoring code
-    resource_monitoring_code = code_generator.generate_resource_monitoring()
-
-    # Combine all code sections
-    code_sections = {
-        "imports": imports_code,
-        "resource_monitoring": resource_monitoring_code,
-        "model_loading": model_loading_code,
-        "dataset_loading": dataset_loading_code,
-        "evaluation": evaluation_code,
-        "visualization": visualization_code
-    }
-
-    # Generate notebook using template engine
-    logger.info("Generating notebook from template")
-    context = {
-        **model_metadata,  # flatten metadata directly into the context
-        **code_sections  # provide code snippets separately
-    }
-    notebook_content = notebook_template_engine.render_template(
-        template_id=f"{notebook_type}_template",
-        context=context
+    # Sort chunks by chunk_id
+    chunks = sorted(
+        results["results"],
+        key=lambda x: x["metadata"].get("chunk_id", 0)
     )
 
-    # Add reproducibility information
-    notebook_content = reproducibility_manager.add_reproducibility_info(notebook_content, model_id)
+    print(f"Chunks: {chunks[:5]}")
 
-    # Save notebook to output path
+    # Prepare structured chunks
+    chunk_contents = []
+    for doc in chunks:
+        content = doc.get("document", "")
+        metadata = doc.get("metadata", {})
+
+        # If document is a string, wrap it into a structured format
+        if isinstance(content, str):
+            chunk_contents.append({
+                "text": content,
+                "offset": metadata.get("offset", 0)  # default to 0 if offset not present
+            })
+        elif isinstance(content, dict):
+            chunk_contents.append({
+                "text": content.get("content", ""),  # fallback if structure exists
+                "offset": metadata.get("offset", 0)
+            })
+        else:
+            # Just in case it's malformed
+            chunk_contents.append({
+                "text": str(content),
+                "offset": metadata.get("offset", 0)
+            })
+
+    # Reconstruct full code
+    full_script = code_generator.generate_full_script(chunk_contents, overlap=100, use_offset=True)
+
+    logger.info(f"Found {len(chunk_contents)} chunks. Reconstructing full script...")
+
+    # Create notebook with reconstructed code
+    notebook = new_notebook(cells=[
+        new_code_cell(full_script)
+    ])
+
+    # Add reproducibility metadata
+    notebook = reproducibility_manager.add_reproducibility_info(notebook, model_id)
+
+    # Save notebook
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
-    with open(output_path, 'w', encoding='utf-8') as f:
-        nbformat.write(notebook_content, f)
+    with open(output_path, "w", encoding="utf-8") as f:
+        nbformat.write(notebook, f)
 
     logger.info(f"Notebook saved to {output_path}")
-
-    # Upload to Colab if requested
-    # This is a placeholder - actual implementation would depend on the ColabAPIClient's capabilities
-    # colab_url = colab_api_client.upload_notebook(output_path)
-
     return output_path
 
 def main():
@@ -860,15 +795,6 @@ def main():
     ui_parser.add_argument("--host", default="localhost", help="Host to bind the UI to")
     ui_parser.add_argument("--port", type=int, default=8000, help="Port to bind the UI to")
 
-    # Generate notebook command - NEW
-    notebook_parser = subparsers.add_parser("generate-notebook", help="Generate a Colab notebook for model analysis")
-    notebook_parser.add_argument("model_id", help="ID of the model to analyze")
-    notebook_parser.add_argument("--output", "-o", default="./notebooks/output.ipynb",
-                                 help="Path to save the generated notebook")
-    notebook_parser.add_argument("--type", "-t", default="evaluation",
-                                 choices=["evaluation", "comparison", "visualization"],
-                                 help="Type of notebook to generate")
-
     args = parser.parse_args()
 
     # Initialize components
@@ -881,8 +807,6 @@ def main():
         process_images(components, args.directory)
     elif args.command == "start-ui":
         start_ui(components, args.host, args.port)
-    elif args.command == "generate-notebook":  # NEW command handler
-        generate_notebook(components, args.model_id, args.output, args.type)
     else:
         parser.print_help()
 

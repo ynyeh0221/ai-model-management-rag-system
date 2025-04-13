@@ -1,8 +1,9 @@
-import unittest
-import os
-import tempfile
 import datetime
+import os
 import sys
+import tempfile
+import textwrap
+import unittest
 
 # Add the parent directory to sys.path if needed
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -144,22 +145,105 @@ eval_dataset = "CIFAR-10-test"
         self.assertIn("perplexity", performance)
         self.assertIn("eval_dataset", performance)
 
-    def test_split_into_chunks(self):
-        """Test the split_into_chunks method."""
-        content = "0123456789" * 30  # 300 characters
-        chunks = self.parser.split_into_chunks(content, chunk_size=100, overlap=20)
+    def test_split_code_by_ast_structures(self):
+        """Test that split_into_chunks returns meaningful code structure blocks."""
+        # A toy Python script with multiple structural blocks
+        structural_code = textwrap.dedent("""
+                import torch
 
-        # Check number of chunks
-        self.assertEqual(len(chunks), 4)
+                class MyModel(torch.nn.Module):
+                    def __init__(self):
+                        super().__init__()
+                        self.fc = torch.nn.Linear(10, 2)
 
-        # Check chunk sizes
-        self.assertEqual(len(chunks[0]), 100)
-        self.assertEqual(len(chunks[1]), 100)
-        self.assertEqual(len(chunks[2]), 100)
+                    def forward(self, x):
+                        return self.fc(x)
 
-        # Check overlap
-        self.assertEqual(chunks[0][80:100], chunks[1][0:20])
-        self.assertEqual(chunks[1][80:100], chunks[2][0:20])
+                def train():
+                    print("Training...")
+
+                def evaluate():
+                    print("Evaluating...")
+
+                learning_rate = 0.001
+            """)
+
+        chunks = self.parser.split_code_by_ast_structures(structural_code)
+
+        # At least 3 distinct chunks: class, train function, evaluate function
+        self.assertGreaterEqual(len(chunks), 3)
+
+        # Each chunk should contain at least one keyword: class or def or global var
+        joined_chunks = "\n".join(chunks)
+        self.assertIn("class MyModel", joined_chunks)
+        self.assertIn("def train", joined_chunks)
+        self.assertIn("def evaluate", joined_chunks)
+        self.assertIn("learning_rate", joined_chunks)
+
+        for chunk in chunks:
+            self.assertIsInstance(chunk, str)
+            self.assertGreater(len(chunk.strip()), 0)
+
+    def test_split_ast_and_subsplit_chunks(self):
+        """Test AST + character-based chunk splitting with structured input."""
+
+        structured_code = textwrap.dedent("""
+            import torch
+
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super(MyModel, self).__init__()
+                    self.fc1 = torch.nn.Linear(100, 256)
+                    self.fc2 = torch.nn.Linear(256, 10)
+                    self.dropout = torch.nn.Dropout(0.1)
+                    self.activation = torch.nn.ReLU()
+
+                def forward(self, x):
+                    x = self.activation(self.fc1(x))
+                    x = self.dropout(x)
+                    return self.fc2(x)
+
+            def train(model, data_loader, optimizer):
+                model.train()
+                for inputs, targets in data_loader:
+                    optimizer.zero_grad()
+                    output = model(inputs)
+                    loss = torch.nn.functional.cross_entropy(output, targets)
+                    loss.backward()
+                    optimizer.step()
+
+            def evaluate(model, val_loader):
+                model.eval()
+                correct = 0
+                total = 0
+                with torch.no_grad():
+                    for inputs, targets in val_loader:
+                        output = model(inputs)
+                        preds = torch.argmax(output, dim=1)
+                        correct += (preds == targets).sum().item()
+                        total += targets.size(0)
+                return correct / total
+
+            learning_rate = 0.001
+            batch_size = 64
+        """)
+
+        chunks = self.parser.split_ast_and_subsplit_chunks(structured_code, chunk_size=250, overlap=50)
+
+        # Assertions
+        self.assertGreaterEqual(len(chunks), 3)
+        for chunk in chunks:
+            self.assertIn("text", chunk)
+            self.assertIn("source_block", chunk)
+            self.assertIn("offset", chunk)
+            self.assertIsInstance(chunk["text"], str)
+            self.assertTrue(len(chunk["text"].strip()) > 0)
+
+        joined_code = "\n".join(chunk["text"] for chunk in chunks)
+        self.assertIn("class MyModel", joined_code)
+        self.assertIn("def train", joined_code)
+        self.assertIn("def evaluate", joined_code)
+        self.assertIn("learning_rate", joined_code)
 
     # Mocking the git module directly instead of trying to mock the import
     def test_git_date_extraction(self):

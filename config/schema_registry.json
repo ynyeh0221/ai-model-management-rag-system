@@ -21,11 +21,10 @@
                   "name": { "type": "string" }
                 }
               },
-              "access_control": {
-                "type": "object"
-              }
+              "access_control": { "type": "object" }
             },
-            "required": ["model_id"]
+            "required": ["model_id"],
+            "additionalProperties": true
           }
         },
         "required": ["id", "content", "metadata"]
