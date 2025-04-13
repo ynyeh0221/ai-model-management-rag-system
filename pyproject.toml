@@ -27,6 +27,7 @@ nbconvert = "*"
 GitPython = "*"
 psutil = "*"
 nltk = "*"
+spacy = "*"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "*"
