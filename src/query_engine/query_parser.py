@@ -1,7 +1,5 @@
-# src/query_engine/query_parser.py
-
 import logging
-import re
+import re  # Added explicit import for re module
 from enum import Enum
 from typing import Dict, List, Any, Optional
 
@@ -20,23 +18,24 @@ class QueryIntent(Enum):
     METADATA = "metadata"  # Metadata-specific queries
     UNKNOWN = "unknown"  # Unknown/ambiguous intent
 
+
 class QueryParser:
     """
     Parser for natural language queries related to AI models.
     Responsible for intent classification and parameter extraction.
     """
-    
+
     def __init__(self, nlp_model: str = "en_core_web_sm", use_langchain: bool = True):
         """
         Initialize the QueryParser with necessary NLP components.
-        
+
         Args:
             nlp_model: The spaCy model to use for NLP tasks
             use_langchain: Whether to use LangChain for enhanced parsing
         """
         # Set up logging
         self.logger = logging.getLogger(__name__)
-        
+
         # Initialize NLP components
         try:
             self.nlp = spacy.load(nlp_model)
@@ -46,7 +45,7 @@ class QueryParser:
             import subprocess
             subprocess.run(["python", "-m", "spacy", "download", nlp_model], check=True)
             self.nlp = spacy.load(nlp_model)
-        
+
         # Ensure NLTK resources are available
         try:
             nltk.data.find('tokenizers/punkt')
@@ -57,10 +56,10 @@ class QueryParser:
             nltk.download('punkt')
             nltk.download('stopwords')
             nltk.download('wordnet')
-        
+
         self.lemmatizer = WordNetLemmatizer()
         self.stop_words = set(stopwords.words('english'))
-        
+
         # Initialize LangChain components if enabled
         self.use_langchain = use_langchain
         if use_langchain:
@@ -127,7 +126,7 @@ class QueryParser:
 
         # Initialize pattern dictionaries for rule-based parsing
         self._init_patterns()
-    
+
     def _init_patterns(self):
         """Initialize regex patterns and keywords for rule-based parsing."""
         # Intent classification patterns
@@ -157,7 +156,7 @@ class QueryParser:
                 r"(structure|organization) of"
             ]
         }
-        
+
         # Parameter extraction patterns
         self.model_id_pattern = r"(model[_-]?id|model)[:\s]+([a-zA-Z0-9_-]+)"
         self.metric_pattern = r"(accuracy|loss|perplexity|clip[_-]?score|performance)"
@@ -169,11 +168,11 @@ class QueryParser:
         }
         self.limit_pattern = r"(limit|top|first)\s+(\d+)"
         self.sort_pattern = r"(sort|order)\s+(by|on)\s+([a-zA-Z_]+)\s+(ascending|descending|asc|desc)?"
-        
+
         # Model name detection - common model families
         self.model_families = [
-            "transformer", "gpt", "bert", "t5", "llama", "clip", 
-            "stable diffusion", "dalle", "cnn", "resnet", "vit", 
+            "transformer", "gpt", "bert", "t5", "llama", "clip",
+            "stable diffusion", "dalle", "cnn", "resnet", "vit",
             "swin", "yolo", "diffusion", "vae", "gan"
         ]
 
@@ -216,14 +215,14 @@ class QueryParser:
         self.logger.debug(f"Parsed result: {result}")
 
         return result
-    
+
     def classify_intent(self, query_text: str) -> QueryIntent:
         """
         Classify the intent of a query.
-        
+
         Args:
             query_text: The query text to classify
-            
+
         Returns:
             QueryIntent: The classified intent
         """
@@ -239,7 +238,6 @@ class QueryParser:
 
                 # First try to find direct mentions with quotes
                 # This handles formats like: i would classify this query as "retrieval: basic..."
-                import re
                 quoted_pattern = re.compile(r'"([^"]*)"')
                 quoted_matches = quoted_pattern.findall(raw_result)
 
@@ -281,87 +279,89 @@ class QueryParser:
             except Exception as e:
                 self.logger.error(f"Error using LangChain for intent classification: {e}")
                 # Fall back to rule-based approach
-        
+
         # Rule-based intent classification
         query_lower = query_text.lower()
-        
+
         # Check for multiple model mentions - strong indicator of comparison
         model_mentions = self._extract_model_mentions(query_lower)
-        if len(model_mentions) > 1 and any(re.search(pattern, query_lower) for pattern in self.intent_patterns[QueryIntent.COMPARISON]):
+        if len(model_mentions) > 1 and any(
+                re.search(pattern, query_lower) for pattern in self.intent_patterns[QueryIntent.COMPARISON]):
             return QueryIntent.COMPARISON
-        
+
         # Check for notebook generation indicators
         if any(re.search(pattern, query_lower) for pattern in self.intent_patterns[QueryIntent.NOTEBOOK]):
             return QueryIntent.NOTEBOOK
-        
+
         # Check for image search indicators
         if any(re.search(pattern, query_lower) for pattern in self.intent_patterns[QueryIntent.IMAGE_SEARCH]):
             return QueryIntent.IMAGE_SEARCH
-        
+
         # Check for metadata query indicators
         if any(re.search(pattern, query_lower) for pattern in self.intent_patterns[QueryIntent.METADATA]):
             return QueryIntent.METADATA
-        
+
         # Default to retrieval for any other query that doesn't match specific patterns
-        if any(re.search(pattern, query_lower) for pattern in self.intent_patterns[QueryIntent.RETRIEVAL]) or len(model_mentions) > 0:
+        if any(re.search(pattern, query_lower) for pattern in self.intent_patterns[QueryIntent.RETRIEVAL]) or len(
+                model_mentions) > 0:
             return QueryIntent.RETRIEVAL
-        
+
         # If no clear patterns match, use NLP-based classification
         return self._nlp_based_intent_classification(query_text)
-    
+
     def _nlp_based_intent_classification(self, query_text: str) -> QueryIntent:
         """
         Use NLP techniques to classify intent when rule-based approach is inconclusive.
-        
+
         Args:
             query_text: The query text to classify
-            
+
         Returns:
             QueryIntent: The classified intent
         """
         # Parse with spaCy
         doc = self.nlp(query_text)
-        
+
         # Extract verbs and nouns for intent analysis
         verbs = [token.lemma_ for token in doc if token.pos_ == "VERB"]
         nouns = [token.lemma_ for token in doc if token.pos_ == "NOUN"]
-        
+
         # Check for comparison-related verbs and multiple entity mentions
         comparison_verbs = ["compare", "contrast", "differ", "distinguish", "evaluate"]
         if any(verb in comparison_verbs for verb in verbs) and len(set(nouns)) > 1:
             return QueryIntent.COMPARISON
-        
+
         # Check for notebook-related nouns
         notebook_nouns = ["notebook", "colab", "code", "script", "analysis"]
         if any(noun in notebook_nouns for noun in nouns):
             return QueryIntent.NOTEBOOK
-        
+
         # Check for image-related nouns
         image_nouns = ["image", "picture", "photo", "visualization", "render", "sample"]
         if any(noun in image_nouns for noun in nouns):
             return QueryIntent.IMAGE_SEARCH
-        
+
         # Check for metadata-related nouns
         metadata_nouns = ["metadata", "schema", "field", "property", "attribute", "structure"]
         if any(noun in metadata_nouns for noun in nouns):
             return QueryIntent.METADATA
-        
+
         # Default to retrieval if we've found some model-related terms
         model_nouns = ["model", "transformer", "neural", "network", "ai", "architecture"]
         if any(noun in model_nouns for noun in nouns):
             return QueryIntent.RETRIEVAL
-        
+
         # If still uncertain, default to UNKNOWN
         return QueryIntent.UNKNOWN
-    
+
     def extract_parameters(self, query_text: str, intent: Optional[QueryIntent] = None) -> Dict[str, Any]:
         """
         Extract parameters from a query based on its intent.
-        
+
         Args:
             query_text: The query text to extract parameters from
             intent: The query intent, if already classified
-            
+
         Returns:
             Dictionary of extracted parameters
         """
@@ -372,7 +372,6 @@ class QueryParser:
             try:
                 # Use LangChain for parameter extraction
                 import json
-                import re
 
                 raw_result = self.param_chain.invoke({"query": query_text})
 
@@ -395,20 +394,20 @@ class QueryParser:
             except Exception as e:
                 self.logger.error(f"Error using LangChain for parameter extraction: {e}")
                 # Fall back to rule-based approach
-        
+
         # Rule-based parameter extraction
         parameters = {}
-        
+
         # Extract model IDs
         parameters["model_ids"] = self._extract_model_mentions(query_text)
-        
+
         # Extract metrics of interest
         metrics = []
         for match in re.finditer(self.metric_pattern, query_text.lower()):
             metrics.append(match.group(1))
         if metrics:
             parameters["metrics"] = metrics
-        
+
         # Extract filters
         filters = {}
         for filter_name, pattern in self.filter_patterns.items():
@@ -430,12 +429,12 @@ class QueryParser:
                     }
         if filters:
             parameters["filters"] = filters
-        
+
         # Extract result limit
         limit_match = re.search(self.limit_pattern, query_text.lower())
         if limit_match:
             parameters["limit"] = int(limit_match.group(2))
-        
+
         # Extract sorting criteria
         sort_match = re.search(self.sort_pattern, query_text.lower())
         if sort_match:
@@ -443,7 +442,7 @@ class QueryParser:
                 "field": sort_match.group(3),
                 "order": sort_match.group(4) if sort_match.group(4) else "descending"
             }
-        
+
         # Add intent-specific parameter extraction
         if intent == QueryIntent.COMPARISON:
             parameters.update(self._extract_comparison_parameters(query_text))
@@ -451,7 +450,7 @@ class QueryParser:
             parameters.update(self._extract_notebook_parameters(query_text))
         elif intent == QueryIntent.IMAGE_SEARCH:
             parameters.update(self._extract_image_parameters(query_text))
-        
+
         return parameters
 
     def _extract_model_mentions(self, query_text: str) -> List[str]:
@@ -489,19 +488,19 @@ class QueryParser:
 
         # Deduplicate and clean
         return list(set(model_ids))
-    
+
     def _extract_comparison_parameters(self, query_text: str) -> Dict[str, Any]:
         """
         Extract comparison-specific parameters.
-        
+
         Args:
             query_text: The query text to extract from
-            
+
         Returns:
             Dictionary of comparison parameters
         """
         params = {}
-        
+
         # Extract comparison dimensions
         dimensions = []
         dimension_pattern = r"(compare|comparing|comparison) (on|by|in terms of|regarding) ([\w\s,]+)"
@@ -510,28 +509,28 @@ class QueryParser:
             # Split by commas or 'and' and clean up
             dims = re.split(r',|\sand\s', match.group(3))
             dimensions = [dim.strip() for dim in dims if dim.strip()]
-        
+
         if dimensions:
             params["comparison_dimensions"] = dimensions
-        
+
         # Extract visualization preference
         if re.search(r'(show|display|visualize|plot|graph|chart)', query_text.lower()):
             params["visualize"] = True
-        
+
         return params
-    
+
     def _extract_notebook_parameters(self, query_text: str) -> Dict[str, Any]:
         """
         Extract notebook generation specific parameters.
-        
+
         Args:
             query_text: The query text to extract from
-            
+
         Returns:
             Dictionary of notebook parameters
         """
         params = {}
-        
+
         # Extract analysis type
         analysis_types = []
         analysis_pattern = r"(analyze|analysis|examine|study|investigate) ([\w\s,]+)"
@@ -540,22 +539,22 @@ class QueryParser:
             # Split by commas or 'and' and clean up
             types = re.split(r',|\sand\s', match.group(2))
             analysis_types = [t.strip() for t in types if t.strip()]
-        
+
         if analysis_types:
             params["analysis_types"] = analysis_types
-        
+
         # Check for dataset mention
         dataset_pattern = r"(dataset|data)[:\s]+([\w\s-]+)"
         match = re.search(dataset_pattern, query_text.lower())
         if match:
             params["dataset"] = match.group(2).strip()
-        
+
         # Check for resource constraints
         resource_pattern = r"(using|with) ([\w\s]+) (resources|gpu|memory|cpu)"
         match = re.search(resource_pattern, query_text.lower())
         if match:
             params["resources"] = match.group(2).strip()
-        
+
         return params
 
     def _extract_image_parameters(self, query_text: str) -> Dict[str, Any]:
@@ -598,48 +597,47 @@ class QueryParser:
         params["show_image_path"] = True
 
         return params
-    
+
     def preprocess_query(self, query_text: str) -> str:
         """
         Preprocess a query for searching.
-        
+
         Args:
             query_text: The raw query text
-            
+
         Returns:
             Preprocessed query text
         """
         # Basic cleaning
         query_text = query_text.strip()
-        
+
         # Use spaCy for tokenization and lemmatization
         doc = self.nlp(query_text)
-        
+
         # Keep relevant tokens (remove stopwords, punctuation)
         tokens = []
         for token in doc:
-            if (not token.is_stop and not token.is_punct and not token.is_space and 
-                len(token.text.strip()) > 1):
+            if (not token.is_stop and not token.is_punct and not token.is_space and
+                    len(token.text.strip()) > 1):
                 # Use lemma for standardization
                 tokens.append(token.lemma_.lower())
-        
+
         # Handling of technical terms and model names
         # Don't lemmatize technical terms or model names
         processed_text = []
         skip_indices = set()
-        
+
         # Identify spans that should be preserved as-is
         for ent in doc.ents:
             if ent.label_ in ["PRODUCT", "ORG", "GPE", "PERSON"]:
                 for i in range(ent.start, ent.end):
                     skip_indices.add(i)
                 processed_text.append(ent.text)
-        
+
         # Add tokens not part of preserved spans
         for i, token in enumerate(doc):
             if i not in skip_indices and not token.is_stop and not token.is_punct and not token.is_space:
                 processed_text.append(token.lemma_.lower())
-        
+
         # Join processed tokens
         return " ".join(processed_text)
-        

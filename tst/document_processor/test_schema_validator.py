@@ -1,8 +1,10 @@
-import unittest
 import json
 import os
 import tempfile
+import unittest
+
 from jsonschema import ValidationError
+
 from src.document_processor.schema_validator import SchemaValidator
 
 
