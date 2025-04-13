@@ -251,7 +251,6 @@ class ChromaManager:
                 else:
                     flat_metadata[key] = str(value)
 
-            flat_metadata["__debug_marker__"] = "does this persist?"
             flat_metadata["offset"] = document["metadata"].get("offset", -999)
 
             # Select the appropriate collection.
