@@ -1,5 +1,5 @@
 import logging
-import re  # Added explicit import for re module
+import re
 from enum import Enum
 from typing import Dict, List, Any, Optional
 
@@ -7,6 +7,24 @@ import nltk
 import spacy
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
+from scipy.spatial.distance import cosine
+
+# Try to import sentence-transformers if installed
+try:
+    from sentence_transformers import SentenceTransformer
+
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
+
+# Try to import Hugging Face transformers and onnxruntime for local LLM inference
+try:
+    import transformers
+    import onnxruntime
+
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
 
 
 # Define intent types as an Enum for type safety
@@ -25,13 +43,18 @@ class QueryParser:
     Responsible for intent classification and parameter extraction.
     """
 
-    def __init__(self, nlp_model: str = "en_core_web_sm", use_langchain: bool = True):
+    def __init__(self, nlp_model: str = "en_core_web_sm", use_langchain: bool = True,
+                 use_sentence_transformer: bool = True, use_local_llm: bool = False,
+                 local_llm_path: str = None):
         """
         Initialize the QueryParser with necessary NLP components.
 
         Args:
             nlp_model: The spaCy model to use for NLP tasks
             use_langchain: Whether to use LangChain for enhanced parsing
+            use_sentence_transformer: Whether to use sentence-transformer for semantic matching
+            use_local_llm: Whether to use a local LLM for intent classification and parameter extraction
+            local_llm_path: Path to local LLM model
         """
         # Set up logging
         self.logger = logging.getLogger(__name__)
@@ -59,6 +82,44 @@ class QueryParser:
 
         self.lemmatizer = WordNetLemmatizer()
         self.stop_words = set(stopwords.words('english'))
+
+        # Initialize semantic matching components
+        self.use_sentence_transformer = use_sentence_transformer and SENTENCE_TRANSFORMERS_AVAILABLE
+        if self.use_sentence_transformer:
+            try:
+                # Use a small model suitable for local execution
+                self.sentence_model = SentenceTransformer('paraphrase-MiniLM-L6-v2')
+                self.logger.info("Initialized sentence-transformer model")
+            except Exception as e:
+                self.logger.warning(f"Could not initialize sentence-transformer: {e}")
+                self.use_sentence_transformer = False
+
+        # Initialize local LLM components
+        self.use_local_llm = use_local_llm and TRANSFORMERS_AVAILABLE
+        if self.use_local_llm:
+            try:
+                if local_llm_path:
+                    # Use specified local model path
+                    self.tokenizer = transformers.AutoTokenizer.from_pretrained(local_llm_path)
+                    self.local_llm = transformers.pipeline(
+                        "text-generation",
+                        model=local_llm_path,
+                        tokenizer=self.tokenizer,
+                        device_map="auto"  # Use GPU if available
+                    )
+                else:
+                    # Use default small model suitable for local execution
+                    self.tokenizer = transformers.AutoTokenizer.from_pretrained("distilgpt2")
+                    self.local_llm = transformers.pipeline(
+                        "text-generation",
+                        model="distilgpt2",
+                        tokenizer=self.tokenizer,
+                        device_map="auto"
+                    )
+                self.logger.info("Initialized local LLM model")
+            except Exception as e:
+                self.logger.warning(f"Could not initialize local LLM: {e}")
+                self.use_local_llm = False
 
         # Initialize LangChain components if enabled
         self.use_langchain = use_langchain
@@ -127,6 +188,9 @@ class QueryParser:
         # Initialize pattern dictionaries for rule-based parsing
         self._init_patterns()
 
+        # Create standard examples for semantic matching
+        self._init_semantic_examples()
+
     def _init_patterns(self):
         """Initialize regex patterns and keywords for rule-based parsing."""
         # Intent classification patterns
@@ -151,21 +215,23 @@ class QueryParser:
                 r"(show|find|get) (me )?(examples|samples) (of|from)"
             ],
             QueryIntent.METADATA: [
-                r"metadata|schema|fields|properties|attributes",
-                r"what (fields|properties|attributes) (does|do)",
-                r"(structure|organization) of"
+                r"\b(metadata|schema|fields|properties|attributes)\b",
+                r"\bwhat (fields|properties|attributes)\b.*",
+                r"\b(structure|organization) of\b.*"
             ]
         }
 
         # Parameter extraction patterns
         self.model_id_pattern = r"(model[_-]?id|model)[:\s]+([a-zA-Z0-9_-]+)"
-        self.metric_pattern = r"(accuracy|loss|perplexity|clip[_-]?score|performance)"
+        self.metric_pattern = r"(accuracy|loss|perplexity|clip[_-]?score|performance|precision|recall|f1|mae|mse|rmse)"
+
         self.filter_patterns = {
             "architecture": r"architecture[:\s]+(transformer|cnn|rnn|mlp|diffusion|gan)",
             "framework": r"framework[:\s]+(pytorch|tensorflow|jax)",
             "params": r"(parameters|params)[\s:]+(greater than|less than|equal to|>|<|=)\s*(\d+[KkMmBbTt]?)",
             "date": r"(created|modified|updated)[\s:]+(before|after|between|since)\s+([a-zA-Z0-9_-]+)"
         }
+
         self.limit_pattern = r"(limit|top|first)\s+(\d+)"
         self.sort_pattern = r"(sort|order)\s+(by|on)\s+([a-zA-Z_]+)\s+(ascending|descending|asc|desc)?"
 
@@ -173,8 +239,56 @@ class QueryParser:
         self.model_families = [
             "transformer", "gpt", "bert", "t5", "llama", "clip",
             "stable diffusion", "dalle", "cnn", "resnet", "vit",
-            "swin", "yolo", "diffusion", "vae", "gan"
+            "swin", "yolo", "diffusion", "vae", "gan", "bard",
+            "mistral", "gemini", "baichuan", "claude", "ernie",
+            "chatglm", "falcon", "phi", "qwen", "yi", "bloom"
         ]
+
+    def _init_semantic_examples(self):
+        """Initialize standard example queries for semantic matching"""
+        self.intent_examples = {
+            QueryIntent.RETRIEVAL: [
+                "tell me about GPT-4",
+                "what is BERT?",
+                "show details of Llama model",
+                "give me information on transformer architecture",
+                "tell me about the features of T5"
+            ],
+            QueryIntent.COMPARISON: [
+                "compare GPT-4 and BERT",
+                "what's the difference between Llama and GPT?",
+                "how does T5 compare to BERT in accuracy?",
+                "which is better, GPT-3 or GPT-4?",
+                "compare the performance of transformer models"
+            ],
+            QueryIntent.NOTEBOOK: [
+                "create a notebook for analyzing GPT-4",
+                "generate code to evaluate BERT",
+                "make a jupyter notebook for model comparison",
+                "build an analysis script for diffusion models",
+                "generate a colab to explore transformer architecture"
+            ],
+            QueryIntent.IMAGE_SEARCH: [
+                "show images generated by Stable Diffusion",
+                "find pictures created with DALL-E",
+                "display examples of GAN-generated images",
+                "retrieve photos made by diffusion models",
+                "get sample images from Midjourney"
+            ],
+            QueryIntent.METADATA: [
+                "what metadata fields does GPT-4 have?",
+                "show me the schema of BERT",
+                "what properties does Llama model include?",
+                "tell me about the structure of transformer metadata",
+                "what attributes are stored for diffusion models?"
+            ]
+        }
+
+        # Pre-compute example embeddings (if sentence-transformer is enabled)
+        if self.use_sentence_transformer:
+            self.intent_embeddings = {}
+            for intent, examples in self.intent_examples.items():
+                self.intent_embeddings[intent] = self.sentence_model.encode(examples)
 
     def parse_query(self, query_text: str) -> Dict[str, Any]:
         """
@@ -219,95 +333,50 @@ class QueryParser:
     def classify_intent(self, query_text: str) -> QueryIntent:
         """
         Classify the intent of a query.
-
-        Args:
-            query_text: The query text to classify
-
-        Returns:
-            QueryIntent: The classified intent
         """
-        if self.use_langchain:
-            try:
-                # Use LangChain for intent classification
-                raw_result = self.intent_chain.invoke({"query": query_text}).strip().lower()
-
-                # Use a more robust extraction method
-                # Look for specific intent keywords in the response
-                intents = [intent.value for intent in QueryIntent]
-                result = None
-
-                # First try to find direct mentions with quotes
-                # This handles formats like: i would classify this query as "retrieval: basic..."
-                quoted_pattern = re.compile(r'"([^"]*)"')
-                quoted_matches = quoted_pattern.findall(raw_result)
-
-                for quoted_text in quoted_matches:
-                    # Check if any intent is at the start of the quoted text
-                    for intent in intents:
-                        if quoted_text.startswith(intent) or quoted_text.startswith(f"{intent}:"):
-                            result = intent
-                            break
-                    if result:
-                        break
-
-                # If no match found in quotes, try direct word matching
-                if result is None:
-                    for intent in intents:
-                        if intent in raw_result:
-                            result = intent
-                            break
-
-                # If still no match, try the original approach as fallback
-                if result is None and ":" in raw_result:
-                    possible_intent = raw_result.split(":")[0].strip()
-                    # Remove any extra text before the intent name
-                    for intent in intents:
-                        if intent in possible_intent:
-                            result = intent
-                            break
-
-                # If we found a matching intent, return it
-                if result:
-                    for intent in QueryIntent:
-                        if intent.value == result:
-                            return intent
-
-                # Default to RETRIEVAL if no match (safer default than UNKNOWN)
-                self.logger.warning(f"LangChain returned unrecognized intent: {raw_result}")
-                return QueryIntent.RETRIEVAL  # Change from UNKNOWN to RETRIEVAL
-
-            except Exception as e:
-                self.logger.error(f"Error using LangChain for intent classification: {e}")
-                # Fall back to rule-based approach
-
-        # Rule-based intent classification
         query_lower = query_text.lower()
-
-        # Check for multiple model mentions - strong indicator of comparison
         model_mentions = self._extract_model_mentions(query_lower)
+
+        # Step 1: Try using semantic similarity (if available)
+        if self.use_sentence_transformer:
+            try:
+                query_embedding = self.sentence_model.encode([query_text])[0]
+                best_score = -1
+                best_intent = None
+
+                for intent, embeddings in self.intent_embeddings.items():
+                    similarities = [1 - cosine(query_embedding, emb) for emb in embeddings]
+                    max_similarity = max(similarities)
+                    if max_similarity > best_score:
+                        best_score = max_similarity
+                        best_intent = intent
+
+                if best_score > 0.5:
+                    return best_intent
+            except Exception as e:
+                self.logger.warning(f"Semantic matching failed: {e}")
+
+        # Step 2: Rule-based pattern matching (ordered by priority)
         if len(model_mentions) > 1 and any(
-                re.search(pattern, query_lower) for pattern in self.intent_patterns[QueryIntent.COMPARISON]):
+                re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.COMPARISON]):
             return QueryIntent.COMPARISON
 
-        # Check for notebook generation indicators
-        if any(re.search(pattern, query_lower) for pattern in self.intent_patterns[QueryIntent.NOTEBOOK]):
-            return QueryIntent.NOTEBOOK
-
-        # Check for image search indicators
-        if any(re.search(pattern, query_lower) for pattern in self.intent_patterns[QueryIntent.IMAGE_SEARCH]):
-            return QueryIntent.IMAGE_SEARCH
-
-        # Check for metadata query indicators
-        if any(re.search(pattern, query_lower) for pattern in self.intent_patterns[QueryIntent.METADATA]):
+        if any(re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.METADATA]):
             return QueryIntent.METADATA
 
-        # Default to retrieval for any other query that doesn't match specific patterns
-        if any(re.search(pattern, query_lower) for pattern in self.intent_patterns[QueryIntent.RETRIEVAL]) or len(
-                model_mentions) > 0:
+        if any(re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.NOTEBOOK]):
+            return QueryIntent.NOTEBOOK
+
+        if any(re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.IMAGE_SEARCH]):
+            return QueryIntent.IMAGE_SEARCH
+
+        if any(re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.RETRIEVAL]):
             return QueryIntent.RETRIEVAL
 
-        # If no clear patterns match, use NLP-based classification
-        return self._nlp_based_intent_classification(query_text)
+        if model_mentions:
+            return QueryIntent.RETRIEVAL
+
+        return QueryIntent.UNKNOWN
 
     def _nlp_based_intent_classification(self, query_text: str) -> QueryIntent:
         """
@@ -326,30 +395,61 @@ class QueryParser:
         verbs = [token.lemma_ for token in doc if token.pos_ == "VERB"]
         nouns = [token.lemma_ for token in doc if token.pos_ == "NOUN"]
 
-        # Check for comparison-related verbs and multiple entity mentions
-        comparison_verbs = ["compare", "contrast", "differ", "distinguish", "evaluate"]
-        if any(verb in comparison_verbs for verb in verbs) and len(set(nouns)) > 1:
-            return QueryIntent.COMPARISON
+        # Create vocabulary sets for different intents
+        comparison_verbs = ["compare", "contrast", "differ", "distinguish", "evaluate", "versus", "vs", "against"]
+        comparison_nouns = ["comparison", "difference", "similarity", "distinction", "differential"]
 
-        # Check for notebook-related nouns
-        notebook_nouns = ["notebook", "colab", "code", "script", "analysis"]
+        notebook_verbs = ["create", "generate", "make", "build", "develop", "code", "program", "script"]
+        notebook_nouns = ["notebook", "code", "script", "program", "analysis", "jupyter", "colab", "coding"]
+
+        image_verbs = ["show", "display", "find", "get", "generate", "create", "render", "visualize"]
+        image_nouns = ["image", "picture", "photo", "visualization", "render", "sample", "example"]
+
+        metadata_nouns = ["metadata", "schema", "field", "property", "attribute", "structure", "configuration",
+                          "parameter", "setup"]
+
+        model_nouns = ["model", "transformer", "neural", "network", "ai", "architecture", "system"]
+
+        # Optimized classification logic - weight different types of words
+        # Use a more sophisticated scoring mechanism
+        intent_scores = {intent: 0 for intent in QueryIntent}
+
+        # Score for comparison intent
+        if any(verb in comparison_verbs for verb in verbs):
+            intent_scores[QueryIntent.COMPARISON] += 2
+        if any(noun in comparison_nouns for noun in nouns):
+            intent_scores[QueryIntent.COMPARISON] += 1
+        if len(set(nouns)) > 1 and any(noun in model_nouns for noun in nouns):
+            intent_scores[QueryIntent.COMPARISON] += 1
+
+        # Score for notebook intent
+        if any(verb in notebook_verbs for verb in verbs):
+            intent_scores[QueryIntent.NOTEBOOK] += 2
         if any(noun in notebook_nouns for noun in nouns):
-            return QueryIntent.NOTEBOOK
+            intent_scores[QueryIntent.NOTEBOOK] += 2
 
-        # Check for image-related nouns
-        image_nouns = ["image", "picture", "photo", "visualization", "render", "sample"]
-        if any(noun in image_nouns for noun in nouns):
-            return QueryIntent.IMAGE_SEARCH
+        # Score for image search intent
+        if any(verb in image_verbs for verb in verbs) and any(noun in image_nouns for noun in nouns):
+            intent_scores[QueryIntent.IMAGE_SEARCH] += 3
+        elif any(verb in image_verbs for verb in verbs):
+            intent_scores[QueryIntent.IMAGE_SEARCH] += 1
+        elif any(noun in image_nouns for noun in nouns):
+            intent_scores[QueryIntent.IMAGE_SEARCH] += 1
 
-        # Check for metadata-related nouns
-        metadata_nouns = ["metadata", "schema", "field", "property", "attribute", "structure"]
+        # Score for metadata intent
         if any(noun in metadata_nouns for noun in nouns):
-            return QueryIntent.METADATA
+            intent_scores[QueryIntent.METADATA] += 2
 
-        # Default to retrieval if we've found some model-related terms
-        model_nouns = ["model", "transformer", "neural", "network", "ai", "architecture"]
+        # Score for retrieval intent (default)
         if any(noun in model_nouns for noun in nouns):
-            return QueryIntent.RETRIEVAL
+            intent_scores[QueryIntent.RETRIEVAL] += 1
+
+        # Get the intent with the highest score
+        best_intent = max(intent_scores.items(), key=lambda x: x[1])
+
+        # If we have a clear winner with a score > 0, return it
+        if best_intent[1] > 0:
+            return best_intent[0]
 
         # If still uncertain, default to UNKNOWN
         return QueryIntent.UNKNOWN
@@ -367,6 +467,47 @@ class QueryParser:
         """
         if intent is None:
             intent = self.classify_intent(query_text)
+
+        # Try using local LLM for parameter extraction
+        if self.use_local_llm:
+            try:
+                # Construct prompt for parameter extraction
+                prompt = f"""
+                Extract parameters from this query about AI models.
+                Return a JSON object with these possible keys:
+                - model_ids: List of model IDs mentioned
+                - metrics: Performance metrics of interest
+                - filters: Any filtering criteria
+                - limit: Number of results to return
+                - sort_by: Sorting criteria
+                - timeframe: Any time constraints
+
+                Only include keys that are relevant to the query.
+
+                Query: {query_text}
+
+                Parameters:
+                """
+
+                # Generate response
+                response = self.local_llm(prompt, max_length=200, num_return_sequences=1)
+                raw_result = response[0]['generated_text'].replace(prompt, "").strip()
+
+                # Try to extract JSON
+                try:
+                    import json
+                    # Look for JSON pattern in the response
+                    json_match = re.search(r'({.*})', raw_result, re.DOTALL)
+                    if json_match:
+                        params = json.loads(json_match.group(1))
+                        self.logger.info(f"Successfully extracted parameters using local LLM")
+                        return params
+                except Exception as e:
+                    self.logger.warning(f"Failed to parse local LLM output as JSON: {e}")
+
+            except Exception as e:
+                self.logger.warning(f"Error using local LLM for parameter extraction: {e}")
+                # Fall back to other methods
 
         if self.use_langchain:
             try:
@@ -399,7 +540,9 @@ class QueryParser:
         parameters = {}
 
         # Extract model IDs
-        parameters["model_ids"] = self._extract_model_mentions(query_text)
+        model_ids = self._extract_model_mentions(query_text)
+        if model_ids:
+            parameters["model_ids"] = model_ids
 
         # Extract metrics of interest
         metrics = []
@@ -427,6 +570,7 @@ class QueryParser:
                         "operator": match.group(2),
                         "value": match.group(3)
                     }
+
         if filters:
             parameters["filters"] = filters
 
@@ -469,7 +613,7 @@ class QueryParser:
         for match in re.finditer(self.model_id_pattern, query_text.lower()):
             model_ids.append(match.group(2))
 
-        # NEW: Handle "X model" pattern (where X is the model name)
+        # Handle "X model" pattern (where X is the model name)
         model_suffix_pattern = r'(\w+)\s+model\b'
         for match in re.finditer(model_suffix_pattern, query_text.lower()):
             model_ids.append(match.group(1))
@@ -514,7 +658,8 @@ class QueryParser:
             params["comparison_dimensions"] = dimensions
 
         # Extract visualization preference
-        if re.search(r'(show|display|visualize|plot|graph|chart)', query_text.lower()):
+        visualization_pattern = r'(show|display|visualize|plot|graph|chart)'
+        if re.search(visualization_pattern, query_text.lower()):
             params["visualize"] = True
 
         return params
@@ -614,30 +759,137 @@ class QueryParser:
         # Use spaCy for tokenization and lemmatization
         doc = self.nlp(query_text)
 
-        # Keep relevant tokens (remove stopwords, punctuation)
-        tokens = []
-        for token in doc:
-            if (not token.is_stop and not token.is_punct and not token.is_space and
-                    len(token.text.strip()) > 1):
-                # Use lemma for standardization
-                tokens.append(token.lemma_.lower())
-
-        # Handling of technical terms and model names
-        # Don't lemmatize technical terms or model names
-        processed_text = []
+        # Enhanced token handling
+        processed_tokens = []
         skip_indices = set()
 
-        # Identify spans that should be preserved as-is
+        # First pass: identify entities to preserve as-is
         for ent in doc.ents:
-            if ent.label_ in ["PRODUCT", "ORG", "GPE", "PERSON"]:
+            if ent.label_ in ["PRODUCT", "ORG", "GPE", "PERSON", "WORK_OF_ART"]:
                 for i in range(ent.start, ent.end):
                     skip_indices.add(i)
-                processed_text.append(ent.text)
+                processed_tokens.append(ent.text)
 
-        # Add tokens not part of preserved spans
+        # Second pass: handle noun phrases (potential model names)
+        for chunk in doc.noun_chunks:
+            # Check if any of the model families appear in this noun chunk
+            contains_model = any(family in chunk.text.lower() for family in self.model_families)
+            if contains_model:
+                # Check if all tokens in this chunk are already skipped
+                all_skipped = all(i in skip_indices for i in range(chunk.start, chunk.end))
+                if not all_skipped:
+                    # Add all tokens in this chunk to skip indices
+                    for i in range(chunk.start, chunk.end):
+                        skip_indices.add(i)
+                    processed_tokens.append(chunk.text)
+
+        # Third pass: process remaining tokens
         for i, token in enumerate(doc):
-            if i not in skip_indices and not token.is_stop and not token.is_punct and not token.is_space:
-                processed_text.append(token.lemma_.lower())
+            if i not in skip_indices:
+                # Skip stopwords, punctuation, and spaces
+                if not token.is_stop and not token.is_punct and not token.is_space and len(token.text.strip()) > 1:
+                    # Use lemma for standardization
+                    processed_tokens.append(token.lemma_.lower())
 
-        # Join processed tokens
-        return " ".join(processed_text)
+        # Join all processed tokens
+        return " ".join(processed_tokens)
+
+    def get_intent_explanation(self, intent: QueryIntent, query_text: str) -> str:
+        """
+        Generate an explanation for why a particular intent was classified.
+
+        Args:
+            intent: The classified intent
+            query_text: The original query text
+
+        Returns:
+            A human-readable explanation
+        """
+        explanation = f"I classified this as a {intent.value} query because "
+
+        if intent == QueryIntent.RETRIEVAL:
+            model_mentions = self._extract_model_mentions(query_text)
+            if model_mentions:
+                explanation += f"it mentions the model(s) {', '.join(model_mentions)}, "
+                explanation += "and appears to be asking for information about them."
+            else:
+                explanation += "it uses retrieval-related terms and doesn't match other intent patterns."
+
+        elif intent == QueryIntent.COMPARISON:
+            model_mentions = self._extract_model_mentions(query_text)
+            if len(model_mentions) > 1:
+                explanation += f"it mentions multiple models ({', '.join(model_mentions)}) "
+                explanation += "and uses comparison-related language."
+            else:
+                explanation += "it uses comparison terms like 'versus', 'better than', or 'difference between'."
+
+        elif intent == QueryIntent.NOTEBOOK:
+            explanation += "it requests the creation of code, a notebook, or an analysis script."
+
+        elif intent == QueryIntent.IMAGE_SEARCH:
+            explanation += "it asks for images, pictures, or visual examples generated by models."
+
+        elif intent == QueryIntent.METADATA:
+            explanation += "it's asking about the structure, fields, or properties of models rather than their function."
+
+        else:  # UNKNOWN
+            explanation += "it doesn't clearly match any of the known intent patterns."
+
+        return explanation
+
+    def format_result(self, parse_result: Dict[str, Any], include_explanation: bool = False) -> str:
+        """
+        Format the parse result into a human-readable string.
+
+        Args:
+            parse_result: The result from parse_query
+            include_explanation: Whether to include an explanation of the classification
+
+        Returns:
+            A formatted string representation of the parse result
+        """
+        formatted = f"Intent: {parse_result['intent'].upper()}\n\n"
+
+        if include_explanation:
+            intent_enum = next(i for i in QueryIntent if i.value == parse_result['intent'])
+            explanation = self.get_intent_explanation(intent_enum, parse_result.get('processed_query', ''))
+            formatted += f"{explanation}\n\n"
+
+        formatted += "Parameters:\n"
+
+        params = parse_result['parameters']
+        if not params:
+            formatted += "  No specific parameters extracted.\n"
+        else:
+            for key, value in params.items():
+                if key == 'model_ids' and value:
+                    formatted += f"  Models: {', '.join(value)}\n"
+                elif key == 'metrics' and value:
+                    formatted += f"  Metrics: {', '.join(value)}\n"
+                elif key == 'filters' and value:
+                    formatted += "  Filters:\n"
+                    for filter_key, filter_val in value.items():
+                        if isinstance(filter_val, dict):
+                            filter_desc = f"{filter_val.get('operator', '')} {filter_val.get('value', '')}"
+                            formatted += f"    {filter_key}: {filter_desc}\n"
+                        else:
+                            formatted += f"    {filter_key}: {filter_val}\n"
+                elif key == 'limit':
+                    formatted += f"  Limit: {value}\n"
+                elif key == 'sort_by' and value:
+                    order = value.get('order', 'descending')
+                    formatted += f"  Sort by: {value.get('field', '')} ({order})\n"
+                elif key == 'comparison_dimensions' and value:
+                    formatted += f"  Comparison dimensions: {', '.join(value)}\n"
+                elif key == 'analysis_types' and value:
+                    formatted += f"  Analysis types: {', '.join(value)}\n"
+                elif key == 'dataset' and value:
+                    formatted += f"  Dataset: {value}\n"
+                elif key == 'prompt_terms' and value:
+                    formatted += f"  Prompt terms: {value}\n"
+                elif key == 'style_tags' and value:
+                    formatted += f"  Style tags: {', '.join(value)}\n"
+                elif key == 'resolution' and value:
+                    formatted += f"  Resolution: {value.get('width', '')}x{value.get('height', '')}\n"
+
+        return formatted
