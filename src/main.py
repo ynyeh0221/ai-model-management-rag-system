@@ -14,7 +14,6 @@ from src.colab_generator.code_generator import CodeGenerator
 from src.colab_generator.colab_api_client import ColabAPIClient
 from src.colab_generator.reproducibility_manager import ReproducibilityManager
 from src.colab_generator.resource_quota_manager import ResourceQuotaManager
-from src.colab_generator.template_engine import NotebookTemplateEngine
 from src.document_processor.code_parser import CodeParser
 from src.document_processor.image_processor import ImageProcessor
 from src.document_processor.metadata_extractor import MetadataExtractor
@@ -25,7 +24,6 @@ from src.query_engine.result_ranker import ResultRanker
 from src.query_engine.search_dispatcher import SearchDispatcher
 from src.response_generator.llm_interface import LLMInterface
 from src.response_generator.prompt_visualizer import PromptVisualizer
-from src.response_generator.response_formatter import ResponseFormatter
 from src.response_generator.template_manager import TemplateManager
 from src.vector_db_manager.access_control import AccessControlManager
 from src.vector_db_manager.chroma_manager import ChromaManager
@@ -56,11 +54,9 @@ def initialize_components(config_path="./config"):
     # Initialize response generator components
     llm_interface = LLMInterface()
     template_manager = TemplateManager("./templates")
-    response_formatter = ResponseFormatter(template_manager)
     prompt_visualizer = PromptVisualizer(template_manager)
     
     # Initialize Colab notebook generator components
-    notebook_template_engine = NotebookTemplateEngine("./notebook_templates")
     code_generator = CodeGenerator()
     colab_api_client = ColabAPIClient()
     reproducibility_manager = ReproducibilityManager()
@@ -88,11 +84,9 @@ def initialize_components(config_path="./config"):
         "response_generator": {
             "llm_interface": llm_interface,
             "template_manager": template_manager,
-            "response_formatter": response_formatter,
             "prompt_visualizer": prompt_visualizer
         },
         "colab_generator": {
-            "notebook_template_engine": notebook_template_engine,
             "code_generator": code_generator,
             "colab_api_client": colab_api_client,
             "reproducibility_manager": reproducibility_manager,
@@ -104,14 +98,6 @@ def initialize_components(config_path="./config"):
 def process_model_scripts(components, directory_path):
     """Process model scripts in a directory."""
     print(f"Processing model scripts in {directory_path}...")
-
-    # Extract required components
-    code_parser = components["document_processor"]["code_parser"]
-    metadata_extractor = components["document_processor"]["metadata_extractor"]
-    schema_validator = components["document_processor"]["schema_validator"]
-    text_embedder = components["vector_db_manager"]["text_embedder"]
-    chroma_manager = components["vector_db_manager"]["chroma_manager"]
-    access_control = components["vector_db_manager"]["access_control"]
 
     # Set up logging
     logging.basicConfig(level=logging.INFO)
@@ -245,13 +231,6 @@ def process_images(components, directory_path):
         directory_path: Path to directory containing images
     """
     print(f"Processing images in {directory_path}...")
-    
-    # Extract required components
-    image_processor = components["document_processor"]["image_processor"]
-    schema_validator = components["document_processor"]["schema_validator"]
-    image_embedder = components["vector_db_manager"]["image_embedder"]
-    chroma_manager = components["vector_db_manager"]["chroma_manager"]
-    access_control = components["vector_db_manager"]["access_control"]
     
     # Set up logging
     logging.basicConfig(level=logging.INFO)
@@ -396,7 +375,6 @@ def start_ui(components, host="localhost", port=8000):
     query_analytics = components["query_engine"]["query_analytics"]
     llm_interface = components["response_generator"]["llm_interface"]
     template_manager = components["response_generator"]["template_manager"]
-    response_formatter = components["response_generator"]["response_formatter"]
     access_control = components["vector_db_manager"]["access_control"]
     
     # Define available commands
