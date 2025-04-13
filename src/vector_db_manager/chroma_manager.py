@@ -423,7 +423,7 @@ class ChromaManager:
     async def search(self, query: str,
                      collection_name: str = "model_scripts",
                      where: Optional[Dict[str, Any]] = None,
-                     limit: int = 10,
+                     limit: int = 100,
                      offset: int = 0,
                      include: Optional[List[str]] = None,
                      user_id: Optional[str] = None) -> Dict[str, Any]:
@@ -472,7 +472,7 @@ class ChromaManager:
                 # Query by embedding
                 query_args = {
                     "query_embeddings": query_embedding,
-                    "n_results": int(limit) if limit is not None else 10,  # Force conversion to int with fallback
+                    "n_results": int(limit) if limit is not None else 100,  # Force conversion to int with fallback
                     "include": include
                 }
 

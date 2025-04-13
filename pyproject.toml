@@ -26,6 +26,7 @@ nbformat = "*"
 nbconvert = "*"
 GitPython = "*"
 psutil = "*"
+nltk = "*"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "*"
