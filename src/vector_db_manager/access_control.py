@@ -425,7 +425,7 @@ class AccessControlManager:
 
     def get_accessible_models(self, user_id):
         """
-        Get a list of models that the user has access to.
+        Get a deduplicated list of models that the user has access to.
 
         Args:
             user_id: The ID of the user
@@ -439,57 +439,66 @@ class AccessControlManager:
         try:
             # Check if db_client.get is an async method
             if hasattr(self.db_client, 'get') and asyncio.iscoroutinefunction(self.db_client.get):
-                # Run async method in a synchronous context
                 try:
-                    # Get or create an event loop
                     try:
                         loop = asyncio.get_event_loop()
                     except RuntimeError:
                         loop = asyncio.new_event_loop()
                         asyncio.set_event_loop(loop)
 
-                    # Create the coroutine
                     coro = self.db_client.get(
                         collection_name="model_scripts",
                         include=["metadatas"]
                     )
-
-                    # Run it and get the result
                     all_models = loop.run_until_complete(coro)
                 except Exception as e:
                     print(f"Error running async db call: {e}")
                     return []
             else:
-                # Synchronous call
                 all_models = self.db_client.get(
                     collection_name="model_scripts",
                     include=["metadatas"]
                 )
 
-            # Process results
             accessible_models = []
+            seen_model_ids = set()
+
             if isinstance(all_models, dict) and 'results' in all_models:
                 for model in all_models['results']:
-                    file_info = json.loads(model['metadata']['file'])
-                    if self.check_access(model, user_id, "view"):
-                        model_info = {
-                            "model_id": model["metadata"].get("model_id"),
-                            "creation_date": file_info.get("creation_date"),
-                            "last_modified_date": file_info.get("last_modified_date"),
-                            "total_chunks": model["metadata"].get("total_chunks"),
-                            "description": model["metadata"].get("description", "No description")
-                        }
-                        # Add other metadata
-                        if "metadata" in model and model["metadata"]:
-                            metadata = model["metadata"]
+                    try:
+                        metadata = model.get("metadata", {})
+                        model_id = metadata.get("model_id")
+
+                        # Skip if already seen or missing
+                        if not model_id or model_id in seen_model_ids:
+                            continue
+
+                        file_info = json.loads(metadata.get("file", "{}"))
+
+                        if self.check_access(model, user_id, "view"):
+                            model_info = {
+                                "model_id": model_id,
+                                "creation_date": file_info.get("creation_date"),
+                                "last_modified_date": file_info.get("last_modified_date"),
+                                "total_chunks": metadata.get("total_chunks"),
+                                "description": metadata.get("description", "No description")
+                            }
+
+                            # Add other metadata
                             if "framework" in metadata:
                                 model_info["framework"] = metadata["framework"]
                             if "version" in metadata:
                                 model_info["version"] = metadata["version"]
 
-                        accessible_models.append(model_info)
+                            accessible_models.append(model_info)
+                            seen_model_ids.add(model_id)
+
+                    except Exception as inner_e:
+                        print(f"Error processing model entry: {inner_e}")
+                        continue
 
             return accessible_models
+
         except Exception as e:
             print(f"Error retrieving accessible models: {e}")
             return []
