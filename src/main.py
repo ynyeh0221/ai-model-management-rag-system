@@ -5,6 +5,7 @@ import concurrent.futures
 import glob
 import logging
 import os
+from datetime import datetime
 from pathlib import Path
 
 import nbformat
@@ -366,13 +367,20 @@ def display_models_pretty(available_models):
     table.align["Last Modified"] = "l"
     table.align["Absolute Path"] = "l"
 
-    for model in available_models:
+    # Sort models by creation date in descending order
+    sorted_models = sorted(
+        available_models,
+        key=lambda m: datetime.fromisoformat(m['creation_date']),
+        reverse=True
+    )
+
+    for model in sorted_models:
         model_id = model['model_id']
-        created = model['creation_date']
-        modified = model['last_modified_date']
+        created = datetime.fromisoformat(model['creation_date']).strftime("%Y-%m-%dT%H:%M")
+        modified = datetime.fromisoformat(model['last_modified_date']).strftime("%Y-%m-%dT%H:%M")
         absolute_path = model['absolute_path']
 
-        # Optional: truncate long model_id or desc for cleaner look
+        # Truncate if needed
         if len(model_id) > 50:
             model_id = model_id[:47] + "..."
         if len(absolute_path) > 100:
