@@ -1,7 +1,7 @@
 import logging
 import re
 from enum import Enum
-from typing import Dict, List, Any, Optional, Tuple, Union
+from typing import Dict, List, Any, Optional, Union
 
 import nltk
 import spacy
@@ -129,10 +129,10 @@ class QueryParser:
                 Query: {query}
 
                 Respond in this JSON format:
-                {
-                  "intent": "<intent_name>",
-                  "reason": "<short explanation of why this intent was chosen>"
-                }
+                {{ 
+                  "intent": "<intent_name>", 
+                  "reason": "<short explanation of why this intent was chosen>" 
+                }}
                 """
 
                 self.intent_prompt = PromptTemplate(
@@ -160,7 +160,15 @@ class QueryParser:
 
                 Query: {query}
 
-                Parameters:
+                Respond in this JSON format:
+                {{ 
+                  "model_ids": [...], 
+                  "metrics": [...], 
+                  "filters": {{ ... }}, 
+                  "limit": ..., 
+                  "sort_by": "...", 
+                  "timeframe": "..."
+                }}
                 """
 
                 self.param_prompt = PromptTemplate(
@@ -266,6 +274,8 @@ class QueryParser:
             "parameters": parameters,
             "processed_query": processed_query
         }
+
+        print(f"Result: {result}")
 
         self.logger.info(f"Query parsed: {intent_str} with {len(parameters)} parameters")
         self.logger.debug(f"Parsed result: {result}")
@@ -375,26 +385,29 @@ class QueryParser:
 
         if self.use_langchain:
             try:
-                # Use LangChain for parameter extraction
                 import json
-
-                raw_result = self.param_chain.invoke({"query": query_text})
-
-                # Try to extract JSON from markdown code blocks if present
-                json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw_result)
-                if json_match:
-                    json_str = json_match.group(1).strip()
-                else:
-                    # If no code block, use the whole response
-                    json_str = raw_result.strip()
-
                 try:
-                    # Parse the JSON result
-                    params = json.loads(json_str)
+                    raw_result = self.param_chain.invoke({"query": query_text})
+                    print(f"raw_result: {raw_result}")
+
+                    # Find the first opening brace
+                    json_start = raw_result.find('{')
+                    if json_start == -1:
+                        self.logger.warning("No opening brace found in LLM output.")
+                        return {}
+
+                    json_str = raw_result[json_start:].strip()
+                    print(f"json_str: {json_str}")
+
+                    decoder = json.JSONDecoder()
+                    params, idx = decoder.raw_decode(json_str)
+                    print(f"params: {params}")
                     return params
-                except json.JSONDecodeError:
-                    self.logger.warning(f"Could not parse LangChain parameter result as JSON: {raw_result}")
-                    # Fall back to rule-based approach
+
+                except json.JSONDecodeError as e:
+                    self.logger.warning(f"Failed to parse LangChain parameter result as JSON: {e}")
+                except Exception as e:
+                    self.logger.error(f"Error using LangChain for parameter extraction: {e}")
 
             except Exception as e:
                 self.logger.error(f"Error using LangChain for parameter extraction: {e}")

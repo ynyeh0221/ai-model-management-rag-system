@@ -153,7 +153,8 @@ class SearchDispatcher:
 
             # Use a higher limit for the initial search to account for multiple chunks per model
             search_limit = requested_limit * 100  # Get 100x more results to find diverse models
-            filters = parameters.get('filters', {})
+            # filters = parameters.get('filters', {})
+            filters = {}
 
             # Prepare Chroma query
             search_params = {
