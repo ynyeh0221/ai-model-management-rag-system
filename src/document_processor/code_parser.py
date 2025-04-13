@@ -1,7 +1,6 @@
 import ast
 import datetime
 import os
-import textwrap
 
 from git import Repo
 
@@ -74,41 +73,6 @@ class CodeParser:
         #     self.schema_validator.validate(model_info, "model_script_schema")
 
         return model_info
-
-    def split_code_by_ast_structures(self, code: str):
-        try:
-            tree = ast.parse(code)
-        except SyntaxError:
-            return [code]  # fallback to whole script
-
-        lines = code.splitlines()
-        chunks = []
-
-        # Sort nodes by line number
-        nodes = sorted(tree.body, key=lambda n: getattr(n, "lineno", 0))
-
-        for i, node in enumerate(nodes):
-            start = getattr(node, "lineno", None)
-            end = getattr(node, "end_lineno", None)
-
-            if start is None:
-                continue
-
-            start_idx = start - 1
-
-            if end is not None:
-                end_idx = end
-            else:
-                # Estimate end using next node
-                if i + 1 < len(nodes):
-                    end_idx = nodes[i + 1].lineno - 1
-                else:
-                    end_idx = len(lines)
-
-            chunk = "\n".join(lines[start_idx:end_idx])
-            chunks.append(textwrap.dedent(chunk))
-
-        return chunks
 
     def split_ast_and_subsplit_chunks(self, code: str, chunk_size: int = 500, overlap: int = 100):
         """

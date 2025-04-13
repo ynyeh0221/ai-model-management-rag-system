@@ -145,45 +145,6 @@ eval_dataset = "CIFAR-10-test"
         self.assertIn("perplexity", performance)
         self.assertIn("eval_dataset", performance)
 
-    def test_split_code_by_ast_structures(self):
-        """Test that split_into_chunks returns meaningful code structure blocks."""
-        # A toy Python script with multiple structural blocks
-        structural_code = textwrap.dedent("""
-                import torch
-
-                class MyModel(torch.nn.Module):
-                    def __init__(self):
-                        super().__init__()
-                        self.fc = torch.nn.Linear(10, 2)
-
-                    def forward(self, x):
-                        return self.fc(x)
-
-                def train():
-                    print("Training...")
-
-                def evaluate():
-                    print("Evaluating...")
-
-                learning_rate = 0.001
-            """)
-
-        chunks = self.parser.split_code_by_ast_structures(structural_code)
-
-        # At least 3 distinct chunks: class, train function, evaluate function
-        self.assertGreaterEqual(len(chunks), 3)
-
-        # Each chunk should contain at least one keyword: class or def or global var
-        joined_chunks = "\n".join(chunks)
-        self.assertIn("class MyModel", joined_chunks)
-        self.assertIn("def train", joined_chunks)
-        self.assertIn("def evaluate", joined_chunks)
-        self.assertIn("learning_rate", joined_chunks)
-
-        for chunk in chunks:
-            self.assertIsInstance(chunk, str)
-            self.assertGreater(len(chunk.strip()), 0)
-
     def test_split_ast_and_subsplit_chunks(self):
         """Test AST + character-based chunk splitting with structured input."""
 
