@@ -10,6 +10,7 @@ from pathlib import Path
 
 import nbformat
 from nbformat.v4 import new_notebook, new_code_cell
+from networkx.algorithms.threshold import creation_sequence
 from prettytable import PrettyTable
 
 from src.colab_generator.code_generator import CodeGenerator
@@ -221,13 +222,19 @@ def process_single_script(file_path, components):
             except Exception:
                 return "Unknown"
 
-        natural_month = format_natural_date(creation_date_raw)
+        creation_natural_month = format_natural_date(creation_date_raw)
+        last_modified_natural_month = format_natural_date(last_modified_raw)
         content = {
             "title": model_id,
             "code": chunk_text,
             "comments": f"""
-                This model was created in {natural_month}.
+                This model was created in {creation_natural_month}.
+                Created in month: {creation_natural_month}.
+                Created in year: {creation_date_raw[:4]}.
                 Created on {creation_date_raw}.
+                This model was last modified in {last_modified_natural_month}.
+                Last modified in month: {last_modified_natural_month}.
+                Last modified in year: {last_modified_raw[:4]}.
                 Last modified on {last_modified_raw}.
                 Size: {metadata.get("file", {}).get('size_bytes', 'N/A')} bytes.
             """
