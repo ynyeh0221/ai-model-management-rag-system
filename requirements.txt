@@ -4,8 +4,25 @@ chromadb>=0.4.0
 torch>=2.0.0
 # Add any other dependencies your project needs
 
-google-api-python-client
+google-api-python-client~=2.166.0
 google-auth
-google-auth-oauthlib
+google-auth-oauthlib~=1.2.1
 google-auth-httplib2
-nbformat
+nbformat~=5.10.4
+prettytable~=3.16.0
+nltk~=3.9.1
+spacy~=3.8.5
+pandas~=2.2.3
+google~=3.0.0
+protobuf~=5.29.4
+nbconvert~=7.16.6
+traitlets~=5.14.3
+pillow~=11.1.0
+torchvision~=0.21.0
+GitPython~=3.1.44
+jsonschema~=4.23.0
+jinja2~=3.1.6
+Markdown~=3.7
+matplotlib~=3.9.4
+tqdm~=4.67.1
+scikit-learn~=1.6.1

@@ -115,4 +115,3 @@ class TemplateManager:
     def get_template_history(self, template_id):
         """Get the history of a template."""
         return self.history.get(template_id, [])
-
