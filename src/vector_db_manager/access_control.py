@@ -481,7 +481,7 @@ class AccessControlManager:
                                 "creation_date": file_info.get("creation_date"),
                                 "last_modified_date": file_info.get("last_modified_date"),
                                 "total_chunks": metadata.get("total_chunks"),
-                                "description": metadata.get("description", "No description")
+                                "absolute_path": file_info.get("absolute_path")
                             }
 
                             # Add other metadata

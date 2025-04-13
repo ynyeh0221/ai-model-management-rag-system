@@ -358,21 +358,27 @@ def process_single_image(file_path, components):
 
 def display_models_pretty(available_models):
     table = PrettyTable()
-    table.field_names = ["Model ID", "Created", "Last Modified", "Description"]
+    table.field_names = ["Model ID", "Created", "Last Modified", "Absolute Path"]
+
+    # Align all columns to the left
+    table.align["Model ID"] = "l"
+    table.align["Created"] = "l"
+    table.align["Last Modified"] = "l"
+    table.align["Absolute Path"] = "l"
 
     for model in available_models:
         model_id = model['model_id']
         created = model['creation_date']
         modified = model['last_modified_date']
-        desc = model.get('description', 'No description')
+        absolute_path = model['absolute_path']
 
         # Optional: truncate long model_id or desc for cleaner look
-        if len(model_id) > 40:
-            model_id = model_id[:37] + "..."
-        if len(desc) > 40:
-            desc = desc[:37] + "..."
+        if len(model_id) > 50:
+            model_id = model_id[:47] + "..."
+        if len(absolute_path) > 100:
+            absolute_path = absolute_path[:97] + "..."
 
-        table.add_row([model_id, created, modified, desc])
+        table.add_row([model_id, created, modified, absolute_path])
 
     print(table)
 
@@ -450,6 +456,12 @@ def start_ui(components, host="localhost", port=8000):
                 else:
                     table = PrettyTable()
                     table.field_names = ["Image ID", "Prompt", "File Path"]
+
+                    # Align all columns to the left
+                    table.align["Model ID"] = "l"
+                    table.align["Prompt"] = "l"
+                    table.align["File Path"] = "l"
+
                     for image in available_images:
                         image_id = image['id']
                         prompt = image.get('prompt', 'No prompt')
