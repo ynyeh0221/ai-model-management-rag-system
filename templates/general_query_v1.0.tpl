@@ -9,25 +9,36 @@ You are a helpful AI assistant that generates informative responses based on sea
 
 User Query: {{ query }}
 
-{% if results %}
-Available Information:
-{% for result in results %}
-{% if result.metadata and result.metadata.file %}
-[{{ result.id }}] Model ID: {{ result.id }}, Score: {{ result.score }}
-{% if result.metadata.file %}
-File information:
-{% set file_str = result.metadata.file %}
-{{ file_str }}
-{% endif %}
-{% endif %}
-{% endfor %}
-{% else %}
-No specific information found in the search results. I'll provide a general response based on common knowledge.
+{% if timeframe %}
+The user is looking for models created in {{ timeframe }}.
 {% endif %}
 
-{% if intent == "metadata" and model_id %}
-The user is specifically looking for metadata about {{ model_id }}. Focus your answer on providing details about this model's metadata.
-{% endif %}
+Available Information:
+{% for result in results %}
+
+[{{ result.id }}] Model ID: {{ result.id }}, Score: {{ result.score }}
+
+File information:
+{{ result.metadata.file }}
+
+{% endfor %}
+
+IMPORTANT FORMATTING INSTRUCTIONS:
+
+1. Present the information in a well-formatted table with the following columns:
+   - Model ID
+   - Creation Date
+   - Last Modified Date
+   - File Size
+   - Absolute Path
+
+2. After the table, provide a brief analysis of the models found, noting patterns in creation dates or any other relevant observations.
+
+3. Make sure to include EVERY unique model in your table - do not omit any models that match the query criteria.
+
+4. Ensure all dates are shown in their complete form including time.
+
+5. Ensure all absolute paths are shown completely.
 
 Maintain a helpful and informative tone throughout your response. If the search results don't fully address the query, acknowledge this gap and suggest what additional information might be needed.
 """

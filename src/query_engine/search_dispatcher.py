@@ -142,16 +142,16 @@ class SearchDispatcher:
             # Extract search parameters with more robust error handling
             # Ensure requested_limit is a valid integer using try/except
             try:
-                requested_limit = int(parameters.get('limit', 10))
+                requested_limit = int(parameters.get('limit', 100))
                 if requested_limit <= 0:
-                    requested_limit = 10
+                    requested_limit = 100
             except (TypeError, ValueError):
                 requested_limit = 10  # Default to 10 for any conversion errors
 
             self.logger.debug(f"Using requested_limit: {requested_limit}")
 
             # Use a higher limit for the initial search to account for multiple chunks per model
-            search_limit = requested_limit * 100  # Get 100x more results to find diverse models
+            search_limit = requested_limit * 200  # Get 200x more results to find diverse models
             # Manually use empty filters for now
             filters = {}
 
@@ -289,7 +289,7 @@ class SearchDispatcher:
             embedding_time = (time.time() - embedding_start) * 1000
 
             # Extract search parameters
-            limit = parameters.get('limit', 20)
+            limit = parameters.get('limit', 100)
             style_tags = parameters.get('style_tags', [])
             prompt_terms = parameters.get('prompt_terms', "")
             resolution = parameters.get('resolution', None)
@@ -525,13 +525,32 @@ class SearchDispatcher:
         try:
             # Extract search parameters
             filters = parameters.get('filters', {})
-            limit = parameters.get('limit', 20)
+            limit = parameters.get('limit', 100)
 
-            # Convert filters to Chroma format
-            chroma_filters = self._translate_filters_to_chroma(filters)
+            # Convert filters to Chroma format - creating where_conditions list
+            where_conditions = []
+
+            for key, value in filters.items():
+                if isinstance(value, dict) and any(op.startswith('$') for op in value.keys()):
+                    # Already has operators
+                    where_conditions.append({key: value})
+                elif isinstance(value, list):
+                    # List values become $in operators
+                    where_conditions.append({key: {"$in": value}})
+                else:
+                    # Simple values become $eq operators
+                    where_conditions.append({key: {"$eq": value}})
+
+            # Create a proper $and query if we have multiple conditions
+            chroma_filters = {}
+            if len(where_conditions) > 1:
+                chroma_filters = {"$and": where_conditions}
+            elif len(where_conditions) == 1:
+                chroma_filters = where_conditions[0]
 
             # Execute metadata search (no embedding needed)
             search_start = time.time()
+            print(f"chroma_filters: {chroma_filters}")
             metadata_results = await self.chroma_manager.get(
                 collection_name="model_scripts",
                 limit=limit,

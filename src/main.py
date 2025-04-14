@@ -193,6 +193,19 @@ def process_single_script(file_path, components):
             chunk_text = chunk_obj
             chunk_metadata = {}
 
+        creation_date_raw = clean_iso_timestamp(metadata.get("file", {}).get("creation_date", "N/A"))
+        last_modified_raw = clean_iso_timestamp(metadata.get("file", {}).get("last_modified_date", "N/A"))
+
+        def format_natural_date(iso_date: str):
+            try:
+                dt = datetime.fromisoformat(iso_date)
+                return dt.strftime("%B")  # e.g. "April 2025"
+            except Exception:
+                return "Unknown"
+
+        creation_natural_month = format_natural_date(creation_date_raw)
+        last_modified_natural_month = format_natural_date(last_modified_raw)
+
         document = {
             "id": f"model_script_{model_id}_{i}",
             "$schema_version": "1.0.0",
@@ -202,7 +215,12 @@ def process_single_script(file_path, components):
                 **chunk_metadata,  # <- store offset, type, etc.
                 "chunk_id": i,
                 "total_chunks": len(chunks),
-                "model_id": model_id
+                "model_id": model_id,
+                "created_at": creation_date_raw,
+                "created_month": creation_natural_month,
+                "created_year": creation_date_raw[:4],
+                "last_modified_month": last_modified_natural_month,
+                "last_modified_year": last_modified_raw[:4]
             }
         }
 
@@ -211,18 +229,6 @@ def process_single_script(file_path, components):
             logging.warning(f"Schema validation failed for {file_path}, chunk {i}: {validation_result['errors']}")
             continue
 
-        creation_date_raw = clean_iso_timestamp(metadata.get("file", {}).get("creation_date", "N/A"))
-        last_modified_raw = clean_iso_timestamp(metadata.get("file", {}).get("last_modified_date", "N/A"))
-
-        def format_natural_date(iso_date: str):
-            try:
-                dt = datetime.fromisoformat(iso_date)
-                return dt.strftime("%B %Y")  # e.g. "April 2025"
-            except Exception:
-                return "Unknown"
-
-        creation_natural_month = format_natural_date(creation_date_raw)
-        last_modified_natural_month = format_natural_date(last_modified_raw)
         content = {
             "title": model_id,
             "code": chunk_text,
@@ -567,32 +573,78 @@ def start_ui(components, host="localhost", port=8000):
 
                 print("Generating response...")
 
-                # Create simplified results to avoid token limits
-                simplified_results = []
-                for r in ranked_results:
-                    # Extract model_id from multiple possible locations
-                    model_id = r.get('model_id', r.get('metadata', {}).get('model_id', r.get('id', 'Unknown')))
+                # Create simplified results with deduplication
+                def create_deduplicated_results(ranked_results):
+                    """
+                    Create a simplified and deduplicated list of results based on model_id.
 
-                    # Get the score with proper fallback
-                    score = r.get('score', 0.0)
+                    Args:
+                        ranked_results: List of ranked search results
 
-                    # Include the complete metadata dictionary
-                    metadata = r.get('metadata', {})
+                    Returns:
+                        List of deduplicated simplified results
+                    """
+                    # Use a dictionary to track unique model IDs
+                    unique_models = {}
 
-                    simplified_result = {
-                        'id': model_id,  # Use model_id as the primary identifier
-                        'original_id': r.get('id', 'Unknown'),  # Keep original ID as a reference
-                        'score': score,
-                        'metadata': metadata  # Include the full metadata
-                    }
-                    simplified_results.append(simplified_result)
+                    for r in ranked_results:
+                        # Extract model_id from multiple possible locations
+                        model_id = r.get('model_id', r.get('metadata', {}).get('model_id', r.get('id', 'Unknown')))
+
+                        # Skip if we've already processed this model_id
+                        if model_id in unique_models:
+                            continue
+
+                        # Get the score with proper fallback
+                        score = r.get('score', 0.0)
+
+                        # Include the complete metadata dictionary
+                        metadata = r.get('metadata', {})
+
+                        # Create the simplified result
+                        simplified_result = {
+                            'id': model_id,  # Use model_id as the primary identifier
+                            'original_id': r.get('id', 'Unknown'),  # Keep original ID as a reference
+                            'score': score,
+                            'metadata': metadata  # Include the full metadata
+                        }
+
+                        # Add to our dictionary of unique models
+                        unique_models[model_id] = simplified_result
+
+                    # Convert the dictionary values to a list
+                    simplified_results = list(unique_models.values())
+
+                    # Optional: Re-sort by score if needed
+                    simplified_results.sort(key=lambda x: x['score'], reverse=True)
+
+                    return simplified_results
+
+                # Usage in your existing code
+                simplified_results = create_deduplicated_results(ranked_results)
 
                 def prepare_template_context(query_text, simplified_results, parsed_query):
-                    # Extract model_id from the query parameters
-                    model_id = parsed_query.get("parameters", {}).get("filters", {}).get("model_id", "Unknown Model")
+                    """
+                    Prepare the context for the template with proper model information.
 
-                    # Get intent
+                    Args:
+                        query_text: The original query text
+                        simplified_results: List of simplified search results
+                        parsed_query: The parsed query information
+
+                    Returns:
+                        Dictionary containing the template context
+                    """
+                    # Extract intent
                     intent = parsed_query.get("intent", "unknown")
+
+                    # Get unique model IDs from the results (to avoid duplicates)
+                    unique_models = {}
+                    for result in simplified_results:
+                        model_id = result.get('id')
+                        # Only add if not already in our unique models dict
+                        if model_id and model_id not in unique_models:
+                            unique_models[model_id] = result
 
                     # Format metadata as a table if available
                     file_info = None
@@ -607,7 +659,12 @@ def start_ui(components, host="localhost", port=8000):
                         file_str = metadata.get('file', '{}')
                         try:
                             import json
-                            file_info = json.loads(file_str)
+                            if isinstance(file_str, str):
+                                file_info = json.loads(file_str)
+                            elif isinstance(file_str, dict):
+                                file_info = file_str
+                            else:
+                                file_info = {}
                         except:
                             file_info = {}
 
@@ -617,13 +674,14 @@ def start_ui(components, host="localhost", port=8000):
                     # Create context with top-level variables
                     context = {
                         'intent': intent,
-                        'model_id': model_id,
+                        'unique_models': list(unique_models.values()),
                         'file_info': file_info,
                         'total_chunks': total_chunks,
-                        # Include original data just in case
                         'query': query_text,
                         'results': simplified_results,
-                        'parsed_query': parsed_query
+                        'parsed_query': parsed_query,
+                        # Add timeframe information if this is a metadata query for a specific month
+                        'timeframe': parsed_query.get('parameters', {}).get('filters', {}).get('created_month', None)
                     }
 
                     return context
@@ -636,14 +694,36 @@ def start_ui(components, host="localhost", port=8000):
                     rendered_prompt = template_manager.render_template(template_id, context)
 
                     def print_llm_content(response):
+                        """
+                        Extract and print content from an LLM response in various formats.
+
+                        Args:
+                            response: The response from the LLM, which could be a string, dict, or list
+                        """
                         try:
                             # Handle dict case
                             if isinstance(response, dict):
                                 if "content" in response:
                                     print(response["content"])
+                                elif "text" in response:
+                                    print(response["text"])
+                                elif "response" in response:
+                                    print(response["response"])
+                                elif "answer" in response:
+                                    print(response["answer"])
+                                elif "message" in response:
+                                    # Check for OpenAI format
+                                    if "content" in response["message"]:
+                                        print(response["message"]["content"])
+                                    else:
+                                        print(response["message"])
                                 else:
-                                    print("No 'content' field found in the dictionary response")
+                                    print("No recognizable content field found in the dictionary response")
                                     print(f"Available fields: {list(response.keys())}")
+                                    # Try to print the full dictionary if it's not too large
+                                    if len(str(response)) < 1000:
+                                        print("Response content:")
+                                        print(response)
 
                             # Handle str case
                             elif isinstance(response, str):
@@ -651,10 +731,11 @@ def start_ui(components, host="localhost", port=8000):
                                 try:
                                     import json
                                     parsed = json.loads(response)
-                                    if "content" in parsed:
-                                        print(parsed["content"])
+                                    if isinstance(parsed, dict):
+                                        # Recursively call with the parsed dict
+                                        print_llm_content(parsed)
                                     else:
-                                        # If not JSON or no content field, print the string
+                                        # Just print the string as is
                                         print(response)
                                 except json.JSONDecodeError:
                                     # Not JSON, print as is
@@ -665,8 +746,9 @@ def start_ui(components, host="localhost", port=8000):
                                 if response and len(response) > 0:
                                     # Try the first element
                                     first_elem = response[0]
-                                    if isinstance(first_elem, dict) and "content" in first_elem:
-                                        print(first_elem["content"])
+                                    if isinstance(first_elem, dict):
+                                        # Recursively call with the first dict
+                                        print_llm_content(first_elem)
                                     else:
                                         print(first_elem)
                                 else:
@@ -674,9 +756,17 @@ def start_ui(components, host="localhost", port=8000):
 
                             else:
                                 print(f"Unsupported response type: {type(response)}")
+                                # Try to print it anyway
+                                print(str(response))
 
                         except Exception as e:
                             print(f"Error extracting content: {e}")
+                            # Try to print the raw response
+                            try:
+                                print("Raw response:")
+                                print(str(response)[:500])  # Print first 500 chars at most
+                            except:
+                                print("Could not print raw response")
 
                     # Usage
                     llm_response = llm_interface.generate_response(
