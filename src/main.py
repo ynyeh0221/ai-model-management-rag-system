@@ -48,13 +48,13 @@ def initialize_components(config_path="./config"):
     access_control = AccessControlManager(chroma_manager)
     
     # Initialize query engine components
-    query_parser = QueryParser()
+    query_parser = QueryParser(llm_model_name="deepseek-llm:7b")
     search_dispatcher = SearchDispatcher(chroma_manager, text_embedder, image_embedder)
     result_ranker = ResultRanker()
     query_analytics = QueryAnalytics()
     
     # Initialize response generator components
-    llm_interface = LLMInterface()
+    llm_interface = LLMInterface(model_name="deepseek-llm:7b")
     template_manager = TemplateManager("./templates")
     prompt_visualizer = PromptVisualizer(template_manager)
     
@@ -688,6 +688,7 @@ def start_ui(components, host="localhost", port=8000):
 
                 # Usage
                 context = prepare_template_context(query_text, simplified_results, parsed_query)
+                print(f"context: {context}")
 
                 try:
                     # First, try to render the template with the context

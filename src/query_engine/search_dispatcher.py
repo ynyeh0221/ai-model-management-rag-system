@@ -169,6 +169,7 @@ class SearchDispatcher:
                 collection_name="model_scripts",
                 **search_params
             )
+            print(f"Search results: {model_results}")
             search_time = (time.time() - search_start) * 1000
 
             # Group results by model_id
