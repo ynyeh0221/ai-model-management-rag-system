@@ -567,6 +567,8 @@ class ChromaManager:
             if where and len(where) > 0:
                 get_args["where"] = where
 
+            print(f"Get args: {get_args}")
+
             # Get documents
             results = await self._run_in_executor(
                 collection.get,

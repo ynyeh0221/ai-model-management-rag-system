@@ -536,7 +536,7 @@ class SearchDispatcher:
                 collection_name="model_scripts",
                 limit=limit,
                 where=chroma_filters,
-                include=["metadatas"]  # Changed from "metadata" to "metadatas"
+                include=["metadatas"]
             )
             search_time = (time.time() - search_start) * 1000
 
@@ -545,6 +545,7 @@ class SearchDispatcher:
             for idx, result in enumerate(metadata_results.get('results', [])):
                 items.append({
                     'id': result.get('id'),
+                    'score': 100.0,
                     'metadata': result.get('metadata', {}),
                     'rank': idx + 1
                 })

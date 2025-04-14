@@ -42,8 +42,7 @@ class QueryParser:
     Responsible for intent classification and parameter extraction.
     """
 
-    def __init__(self, nlp_model: str = "en_core_web_sm", use_langchain: bool = True,
-                 use_local_llm: bool = False, local_llm_path: str = None):
+    def __init__(self, nlp_model: str = "en_core_web_sm", use_langchain: bool = True):
         """
         Initialize the QueryParser with necessary NLP components.
 
@@ -79,33 +78,6 @@ class QueryParser:
 
         self.lemmatizer = WordNetLemmatizer()
         self.stop_words = set(stopwords.words('english'))
-
-        # Initialize local LLM components
-        self.use_local_llm = use_local_llm and TRANSFORMERS_AVAILABLE
-        if self.use_local_llm:
-            try:
-                if local_llm_path:
-                    # Use specified local model path
-                    self.tokenizer = transformers.AutoTokenizer.from_pretrained(local_llm_path)
-                    self.local_llm = transformers.pipeline(
-                        "text-generation",
-                        model=local_llm_path,
-                        tokenizer=self.tokenizer,
-                        device_map="auto"  # Use GPU if available
-                    )
-                else:
-                    # Use default small model suitable for local execution
-                    self.tokenizer = transformers.AutoTokenizer.from_pretrained("distilgpt2")
-                    self.local_llm = transformers.pipeline(
-                        "text-generation",
-                        model="distilgpt2",
-                        tokenizer=self.tokenizer,
-                        device_map="auto"
-                    )
-                self.logger.info("Initialized local LLM model")
-            except Exception as e:
-                self.logger.warning(f"Could not initialize local LLM: {e}")
-                self.use_local_llm = False
 
         # Initialize LangChain components if enabled
         self.use_langchain = use_langchain
@@ -146,25 +118,28 @@ class QueryParser:
                 self.intent_chain = self.intent_prompt | self.langchain_llm
 
                 # Define a prompt template for parameter extraction
+                # Define a prompt template for parameter extraction
                 param_template = """
                 Extract parameters from this query about AI models.
                 Return a JSON object with these possible keys:
-                - model_ids: List of model IDs mentioned
                 - metrics: Performance metrics of interest
-                - filters: Any filtering criteria
+                - filters: Any filtering criteria 
                 - limit: Number of results to return
                 - sort_by: Sorting criteria
                 - timeframe: Any time constraints
 
                 Only include keys that are relevant to the query.
 
+                IMPORTANT: Whenever specific models are mentioned in the query (regardless of query type), always include those model IDs in both:
+                1. The model_ids list AND
+                2. The filters dictionary under the key "model_id"
+
                 Query: {query}
 
                 Respond in this JSON format:
                 {{ 
-                  "model_ids": [...], 
                   "metrics": [...], 
-                  "filters": {{ ... }}, 
+                  "filters": {{ "model_id": "...", ... }}, 
                   "limit": ..., 
                   "sort_by": "...", 
                   "timeframe": "..."
@@ -340,47 +315,6 @@ class QueryParser:
         if intent is None:
             intent, reason = self.classify_intent(query_text)
 
-        # Try using local LLM for parameter extraction
-        if self.use_local_llm:
-            try:
-                # Construct prompt for parameter extraction
-                prompt = f"""
-                Extract parameters from this query about AI models.
-                Return a JSON object with these possible keys:
-                - model_ids: List of model IDs mentioned
-                - metrics: Performance metrics of interest
-                - filters: Any filtering criteria
-                - limit: Number of results to return
-                - sort_by: Sorting criteria
-                - timeframe: Any time constraints
-
-                Only include keys that are relevant to the query.
-
-                Query: {query_text}
-
-                Parameters:
-                """
-
-                # Generate response
-                response = self.local_llm(prompt, max_length=200, num_return_sequences=1)
-                raw_result = response[0]['generated_text'].replace(prompt, "").strip()
-
-                # Try to extract JSON
-                try:
-                    import json
-                    # Look for JSON pattern in the response
-                    json_match = re.search(r'({.*})', raw_result, re.DOTALL)
-                    if json_match:
-                        params = json.loads(json_match.group(1))
-                        self.logger.info(f"Successfully extracted parameters using local LLM")
-                        return params
-                except Exception as e:
-                    self.logger.warning(f"Failed to parse local LLM output as JSON: {e}")
-
-            except Exception as e:
-                self.logger.warning(f"Error using local LLM for parameter extraction: {e}")
-                # Fall back to other methods
-
         if self.use_langchain:
             try:
                 import json
@@ -411,11 +345,6 @@ class QueryParser:
         # Rule-based parameter extraction
         parameters = {}
 
-        # Extract model IDs
-        model_ids = self._extract_model_mentions(query_text)
-        if model_ids:
-            parameters["model_ids"] = model_ids
-
         # Extract metrics of interest
         metrics = []
         for match in re.finditer(self.metric_pattern, query_text.lower()):
@@ -443,6 +372,13 @@ class QueryParser:
                         "value": match.group(3)
                     }
 
+        # Add model_ids to filters if this is a metadata query and model_ids are present
+        model_ids = self._extract_model_mentions(query_text)
+        if model_ids:
+            # Add target model_id to filters
+            filters["model_id"] = model_ids[0] if len(model_ids) == 1 else model_ids
+
+        # Only add filters to parameters if there are any
         if filters:
             parameters["filters"] = filters
 

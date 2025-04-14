@@ -528,6 +528,7 @@ def start_ui(components, host="localhost", port=8000):
                 # Parse the query
                 parsed_query = query_parser.parse_query(query_text)
                 print(f"\nQuery intent is classified to : {parsed_query['intent']}, with reason : {parsed_query['reason']}")
+                print(f"Parsed query: {parsed_query}")
 
                 # Log the query for analytics
                 query_analytics.log_query(user_id, query_text, parsed_query)
@@ -565,6 +566,33 @@ def start_ui(components, host="localhost", port=8000):
                     template_id = "general_query"
 
                 print("Generating response...")
+
+                if parsed_query["intent"] == "metadata":
+                    def print_metadata_as_table(metadata):
+                        # Create a new table
+                        table = PrettyTable()
+
+                        # Define the column names
+                        table.field_names = ["Metadata Field", "Value"]
+
+                        # Fields to skip
+                        skip_fields = ['__debug_marker__', 'chunk_id', 'offset']
+
+                        # Add rows to the table, skipping the specified fields
+                        for key, value in metadata.items():
+                            if key not in skip_fields:
+                                table.add_row([key, value])
+
+                        # Set alignment
+                        table.align["Field"] = "l"
+                        table.align["Value"] = "l"
+
+                        # Set max width for the value column to prevent wrapping
+                        table.max_width["Value"] = 80
+
+                        # Print the table
+                        print(table)
+                    print_metadata_as_table(ranked_results[0].get('metadata', {}))
 
                 # Create simplified results to avoid token limits
                 # Simplified results to avoid token limits
@@ -780,8 +808,6 @@ def generate_notebook(components, model_id, output_path):
         results["results"],
         key=lambda x: x["metadata"].get("chunk_id", 0)
     )
-
-    print(f"Chunks: {chunks[:5]}")
 
     # Prepare structured chunks
     chunk_contents = []
