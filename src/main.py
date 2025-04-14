@@ -567,115 +567,126 @@ def start_ui(components, host="localhost", port=8000):
 
                 print("Generating response...")
 
-                if parsed_query["intent"] == "metadata":
-                    def print_metadata_as_table(metadata):
-                        # Create a new table
-                        table = PrettyTable()
-
-                        # Define the column names
-                        table.field_names = ["Metadata Field", "Value"]
-
-                        # Fields to skip
-                        skip_fields = ['__debug_marker__', 'chunk_id', 'offset']
-
-                        # Add rows to the table, skipping the specified fields
-                        for key, value in metadata.items():
-                            if key not in skip_fields:
-                                table.add_row([key, value])
-
-                        # Set alignment
-                        table.align["Field"] = "l"
-                        table.align["Value"] = "l"
-
-                        # Set max width for the value column to prevent wrapping
-                        table.max_width["Value"] = 80
-
-                        # Print the table
-                        print(table)
-                    print_metadata_as_table(ranked_results[0].get('metadata', {}))
-
                 # Create simplified results to avoid token limits
-                # Simplified results to avoid token limits
                 simplified_results = []
                 for r in ranked_results:
-                    content = r.get('content', '')
-                    # Truncate content if it's too long
-                    if content and len(content) > 200:
-                        content = content[:200] + "..."
-
-                    # Use model_id instead of chunk id
+                    # Extract model_id from multiple possible locations
                     model_id = r.get('model_id', r.get('metadata', {}).get('model_id', r.get('id', 'Unknown')))
+
+                    # Get the score with proper fallback
+                    score = r.get('score', 0.0)
+
+                    # Include the complete metadata dictionary
+                    metadata = r.get('metadata', {})
 
                     simplified_result = {
                         'id': model_id,  # Use model_id as the primary identifier
                         'original_id': r.get('id', 'Unknown'),  # Keep original ID as a reference
-                        'content': content,
-                        'score': r.get('score', 0)
+                        'score': score,
+                        'metadata': metadata  # Include the full metadata
                     }
                     simplified_results.append(simplified_result)
 
-                # Prepare context for template rendering
-                context = {
-                    'query': query_text,
-                    'results': simplified_results,
-                    'parsed_query': parsed_query
-                }
+                def prepare_template_context(query_text, simplified_results, parsed_query):
+                    # Extract model_id from the query parameters
+                    model_id = parsed_query.get("parameters", {}).get("filters", {}).get("model_id", "Unknown Model")
+
+                    # Get intent
+                    intent = parsed_query.get("intent", "unknown")
+
+                    # Format metadata as a table if available
+                    file_info = None
+                    total_chunks = 0
+
+                    if simplified_results and len(simplified_results) > 0:
+                        # Get the first result's metadata
+                        result = simplified_results[0]
+                        metadata = result.get('metadata', {})
+
+                        # Extract file info if available
+                        file_str = metadata.get('file', '{}')
+                        try:
+                            import json
+                            file_info = json.loads(file_str)
+                        except:
+                            file_info = {}
+
+                        # Get total chunks
+                        total_chunks = metadata.get('total_chunks', 0)
+
+                    # Create context with top-level variables
+                    context = {
+                        'intent': intent,
+                        'model_id': model_id,
+                        'file_info': file_info,
+                        'total_chunks': total_chunks,
+                        # Include original data just in case
+                        'query': query_text,
+                        'results': simplified_results,
+                        'parsed_query': parsed_query
+                    }
+
+                    return context
+
+                # Usage
+                context = prepare_template_context(query_text, simplified_results, parsed_query)
 
                 try:
                     # First, try to render the template with the context
                     rendered_prompt = template_manager.render_template(template_id, context)
 
-                    # Generate response from LLM
+                    def print_llm_content(response):
+                        try:
+                            # Handle dict case
+                            if isinstance(response, dict):
+                                if "content" in response:
+                                    print(response["content"])
+                                else:
+                                    print("No 'content' field found in the dictionary response")
+                                    print(f"Available fields: {list(response.keys())}")
+
+                            # Handle str case
+                            elif isinstance(response, str):
+                                # Try to parse as JSON first
+                                try:
+                                    import json
+                                    parsed = json.loads(response)
+                                    if "content" in parsed:
+                                        print(parsed["content"])
+                                    else:
+                                        # If not JSON or no content field, print the string
+                                        print(response)
+                                except json.JSONDecodeError:
+                                    # Not JSON, print as is
+                                    print(response)
+
+                            # Handle list case
+                            elif isinstance(response, list):
+                                if response and len(response) > 0:
+                                    # Try the first element
+                                    first_elem = response[0]
+                                    if isinstance(first_elem, dict) and "content" in first_elem:
+                                        print(first_elem["content"])
+                                    else:
+                                        print(first_elem)
+                                else:
+                                    print("Empty list response")
+
+                            else:
+                                print(f"Unsupported response type: {type(response)}")
+
+                        except Exception as e:
+                            print(f"Error extracting content: {e}")
+
+                    # Usage
                     llm_response = llm_interface.generate_response(
                         prompt=rendered_prompt,
                         temperature=0.7,
-                        max_tokens=1500
+                        max_tokens=3000
                     )
 
-                    # Format the final response
-                    import json
-                    if isinstance(llm_response, dict) and 'content' in llm_response:
-                        final_response = {
-                            'content': llm_response['content'],
-                            'metadata': {
-                                'model': llm_interface.model_name,
-                                'query_type': parsed_query["type"],
-                                'result_count': len(ranked_results),
-                                'top_results': [r.get('model_id', r.get('metadata', {}).get('model_id', r.get('id')))
-                                                for r in ranked_results]
-                            }
-                        }
-
-                        # Image search table display:
-                        if parsed_query["type"] == "image_search":
-                            print("\nDetailed Image Information:")
-                            separator_line = "-" * 120
-                            print(separator_line)
-                            print("| {:<30} | {:<85} |".format("Model ID", "Image Path"))
-                            print(separator_line)
-
-                            for result in ranked_results:
-                                model_id = result.get('model_id',
-                                                      result.get('metadata', {}).get('model_id',
-                                                                                     result.get('metadata', {}).get(
-                                                                                         'source_model_id',
-                                                                                         result.get('id', 'Unknown'))))
-
-                                image_path = result.get('metadata', {}).get('image_path', 'Not available')
-
-                                print("| {:<30} | {:<85} |".format(
-                                    model_id[:30] if model_id else "Unknown",
-                                    image_path[:85] if image_path else "Not available"))  # Show 85 characters of path
-
-                            print(separator_line)
-
-                        # Pretty print the response
-                        print("\nFormatted Response:")
-                        print(json.dumps(final_response, indent=2))
-                    else:
-                        # If response is a string or unexpected format
-                        print("\nGenerated Response:")
-                        print(llm_response)
+                    print("Printing LLM Response...")
+                    print_llm_content(llm_response)
 
                 except Exception as e:
                     print(f"Error generating response: {str(e)}")
