@@ -48,13 +48,13 @@ def initialize_components(config_path="./config"):
     access_control = AccessControlManager(chroma_manager)
     
     # Initialize query engine components
-    query_parser = QueryParser(llm_model_name="deepseek-llm:7b")
+    query_parser = QueryParser(llm_model_name="mistral:latest")
     search_dispatcher = SearchDispatcher(chroma_manager, text_embedder, image_embedder)
     result_ranker = ResultRanker()
     query_analytics = QueryAnalytics()
     
     # Initialize response generator components
-    llm_interface = LLMInterface(model_name="deepseek-llm:7b")
+    llm_interface = LLMInterface(model_name="mistral:latest")
     template_manager = TemplateManager("./templates")
     prompt_visualizer = PromptVisualizer(template_manager)
     
@@ -149,13 +149,14 @@ def process_model_scripts(components, directory_path):
 
     logger.info("Model script processing completed")
 
+
 def process_single_script(file_path, components):
     """Process a single model script file.
-    
+
     Args:
         file_path: Path to the model script file
         components: Dictionary containing initialized system components
-        
+
     Returns:
         Tuple of (document_id, success) if processed, None if skipped
     """
@@ -166,16 +167,16 @@ def process_single_script(file_path, components):
     text_embedder = components["vector_db_manager"]["text_embedder"]
     chroma_manager = components["vector_db_manager"]["chroma_manager"]
     access_control = components["vector_db_manager"]["access_control"]
-    
+
     # 1. Parse the code to determine if it's a model script and extract relevant parts
     parse_result = code_parser.parse(file_path)
     if not parse_result or not parse_result.get("is_model_script", False):
         # Not a model script, skip it
         return None
-    
+
     # 2. Extract metadata
     metadata = metadata_extractor.extract_metadata(file_path)
-    
+
     # 3. Split into chunks for processing
     chunks = code_parser.split_ast_and_subsplit_chunks(parse_result["content"], chunk_size=500, overlap=100)
 
@@ -184,7 +185,73 @@ def process_single_script(file_path, components):
     file_stem = file_path_obj.stem
     model_id = f"{folder_name}_{file_stem}"
 
-    documents = []
+    # Create metadata document first
+    creation_date_raw = clean_iso_timestamp(metadata.get("file", {}).get("creation_date", "N/A"))
+    last_modified_raw = clean_iso_timestamp(metadata.get("file", {}).get("last_modified_date", "N/A"))
+
+    def format_natural_date(iso_date: str):
+        try:
+            dt = datetime.fromisoformat(iso_date)
+            return dt.strftime("%B")  # e.g. "April 2025"
+        except Exception:
+            return "Unknown"
+
+    creation_natural_month = format_natural_date(creation_date_raw)
+    last_modified_natural_month = format_natural_date(last_modified_raw)
+
+    # Prepare metadata document
+    metadata_document = {
+        "id": f"model_metadata_{model_id}",
+        "$schema_version": "1.0.0",
+        "content": f"Model: {model_id}",  # Simple summary for embedding
+        "metadata": {
+            **metadata,
+            "model_id": model_id,
+            "created_at": creation_date_raw,
+            "created_month": creation_natural_month,
+            "created_year": creation_date_raw[:4],
+            "last_modified_month": last_modified_natural_month,
+            "last_modified_year": last_modified_raw[:4],
+            "total_chunks": len(chunks)
+        }
+    }
+
+    # Validate using the metadata schema
+    validation_result = schema_validator.validate(metadata_document, "model_metadata_schema")
+    if not validation_result["valid"]:
+        logging.warning(f"Schema validation failed for metadata document of {file_path}: {validation_result['errors']}")
+        return None
+
+    # Add access control metadata
+    access_metadata = access_control.get_document_permissions(metadata_document)
+    metadata_document["metadata"]["access_control"] = access_metadata
+
+    # Create metadata embedding
+    metadata_content = {
+        "title": model_id,
+        "description": f"""
+            Model created in {creation_natural_month}.
+            Created in month: {creation_natural_month}.
+            Created in year: {creation_date_raw[:4]}.
+            Created on {creation_date_raw}.
+            Last modified in {last_modified_natural_month}.
+            Last modified in year: {last_modified_raw[:4]}.
+            Last modified on {last_modified_raw}.
+            Size: {metadata.get("file", {}).get('size_bytes', 'N/A')} bytes.
+        """
+    }
+    metadata_embedding = text_embedder.embed_mixed_content(metadata_content)
+
+    # Store metadata document
+    asyncio.run(chroma_manager.add_document(
+        collection_name="model_scripts_metadata",
+        document_id=metadata_document["id"],
+        document=metadata_document,
+        embed_content=metadata_embedding
+    ))
+
+    # Process and store code chunks
+    chunk_documents = []
     for i, chunk_obj in enumerate(chunks):
         if isinstance(chunk_obj, dict):
             chunk_text = chunk_obj.get("text", "")
@@ -193,74 +260,40 @@ def process_single_script(file_path, components):
             chunk_text = chunk_obj
             chunk_metadata = {}
 
-        creation_date_raw = clean_iso_timestamp(metadata.get("file", {}).get("creation_date", "N/A"))
-        last_modified_raw = clean_iso_timestamp(metadata.get("file", {}).get("last_modified_date", "N/A"))
-
-        def format_natural_date(iso_date: str):
-            try:
-                dt = datetime.fromisoformat(iso_date)
-                return dt.strftime("%B")  # e.g. "April 2025"
-            except Exception:
-                return "Unknown"
-
-        creation_natural_month = format_natural_date(creation_date_raw)
-        last_modified_natural_month = format_natural_date(last_modified_raw)
-
-        document = {
-            "id": f"model_script_{model_id}_{i}",
+        chunk_document = {
+            "id": f"model_chunk_{model_id}_{i}",
             "$schema_version": "1.0.0",
             "content": chunk_text,
             "metadata": {
-                **metadata,
                 **chunk_metadata,  # <- store offset, type, etc.
+                "model_id": model_id,
                 "chunk_id": i,
                 "total_chunks": len(chunks),
-                "model_id": model_id,
-                "created_at": creation_date_raw,
-                "created_month": creation_natural_month,
-                "created_year": creation_date_raw[:4],
-                "last_modified_month": last_modified_natural_month,
-                "last_modified_year": last_modified_raw[:4]
+                "metadata_doc_id": metadata_document["id"]  # Reference to metadata document
             }
         }
 
-        validation_result = schema_validator.validate(document, "model_script_schema")
+        # Validate using the chunk schema
+        validation_result = schema_validator.validate(chunk_document, "model_chunk_schema")
         if not validation_result["valid"]:
-            logging.warning(f"Schema validation failed for {file_path}, chunk {i}: {validation_result['errors']}")
+            logging.warning(
+                f"Schema validation failed for chunk schema of {file_path}, chunk {i}: {validation_result['errors']}")
             continue
 
-        content = {
-            "title": model_id,
-            "code": chunk_text,
-            "comments": f"""
-                This model was created in {creation_natural_month}.
-                Created in month: {creation_natural_month}.
-                Created in year: {creation_date_raw[:4]}.
-                Created on {creation_date_raw}.
-                This model was last modified in {last_modified_natural_month}.
-                Last modified in month: {last_modified_natural_month}.
-                Last modified in year: {last_modified_raw[:4]}.
-                Last modified on {last_modified_raw}.
-                Size: {metadata.get("file", {}).get('size_bytes', 'N/A')} bytes.
-            """
-        }
-        print(f"Content: {content}")
-        embedding = text_embedder.embed_mixed_content(content)
+        # Create chunk embedding
+        chunk_embedding = text_embedder.embed_text(chunk_text)
 
-        access_metadata = access_control.get_document_permissions(document)
-        document["metadata"]["access_control"] = access_metadata
-
+        # Store chunk document
         asyncio.run(chroma_manager.add_document(
-            collection_name="model_scripts",
-            document_id=document["id"],
-            document=document,
-            embed_content=embedding
+            collection_name="model_scripts_chunks",
+            document_id=chunk_document["id"],
+            document=chunk_document,
+            embed_content=chunk_embedding
         ))
 
-        documents.append(document)
+        chunk_documents.append(chunk_document)
 
-    # Return the first document ID and success status
-    return (documents[0]["id"], True) if documents else (None, False)
+    return (metadata_document["id"], True) if chunk_documents else (None, False)
 
 def process_images(components, directory_path):
     """Process images in a directory.
@@ -550,12 +583,12 @@ def start_ui(components, host="localhost", port=8000):
                     user_id=user_id
                 ))
 
-                # Rank the results
+                # Rank the results and filter out low-similarities
                 if isinstance(search_results, dict) and 'items' in search_results:
                     ranked_results = result_ranker.rank_results(search_results['items'])
 
-                    # Filter out low-score results (e.g., score < 0.3)
-                    similarity_threshold = 0.45
+                    # Filter out low-score results
+                    similarity_threshold = 0.3
                     ranked_results = [r for r in ranked_results if r.get('score', 0) >= similarity_threshold]
                 else:
                     ranked_results = []
@@ -570,63 +603,13 @@ def start_ui(components, host="localhost", port=8000):
 
                 print("Generating response...")
 
-                # Create simplified results with deduplication
-                def create_deduplicated_results(ranked_results):
-                    """
-                    Create a simplified and deduplicated list of results based on model_id.
-
-                    Args:
-                        ranked_results: List of ranked search results
-
-                    Returns:
-                        List of deduplicated simplified results
-                    """
-                    # Use a dictionary to track unique model IDs
-                    unique_models = {}
-
-                    for r in ranked_results:
-                        # Extract model_id from multiple possible locations
-                        model_id = r.get('model_id', r.get('metadata', {}).get('model_id', r.get('id', 'Unknown')))
-
-                        # Skip if we've already processed this model_id
-                        if model_id in unique_models:
-                            continue
-
-                        # Get the score with proper fallback
-                        score = r.get('score', 0.0)
-
-                        # Include the complete metadata dictionary
-                        metadata = r.get('metadata', {})
-
-                        # Create the simplified result
-                        simplified_result = {
-                            'id': model_id,  # Use model_id as the primary identifier
-                            'original_id': r.get('id', 'Unknown'),  # Keep original ID as a reference
-                            'score': score,
-                            'metadata': metadata  # Include the full metadata
-                        }
-
-                        # Add to our dictionary of unique models
-                        unique_models[model_id] = simplified_result
-
-                    # Convert the dictionary values to a list
-                    simplified_results = list(unique_models.values())
-
-                    # Optional: Re-sort by score if needed
-                    simplified_results.sort(key=lambda x: x['score'], reverse=True)
-
-                    return simplified_results
-
-                # Usage in your existing code
-                simplified_results = create_deduplicated_results(ranked_results)
-
-                def prepare_template_context(query_text, simplified_results, parsed_query):
+                def prepare_template_context(query_text, results, parsed_query):
                     """
                     Prepare the context for the template with proper model information.
 
                     Args:
                         query_text: The original query text
-                        simplified_results: List of simplified search results
+                        results: List of simplified search results
                         parsed_query: The parsed query information
 
                     Returns:
@@ -635,47 +618,11 @@ def start_ui(components, host="localhost", port=8000):
                     # Extract intent
                     intent = parsed_query.get("intent", "unknown")
 
-                    # Get unique model IDs from the results (to avoid duplicates)
-                    unique_models = {}
-                    for result in simplified_results:
-                        model_id = result.get('id')
-                        # Only add if not already in our unique models dict
-                        if model_id and model_id not in unique_models:
-                            unique_models[model_id] = result
-
-                    # Format metadata as a table if available
-                    file_info = None
-                    total_chunks = 0
-
-                    if simplified_results and len(simplified_results) > 0:
-                        # Get the first result's metadata
-                        result = simplified_results[0]
-                        metadata = result.get('metadata', {})
-
-                        # Extract file info if available
-                        file_str = metadata.get('file', '{}')
-                        try:
-                            import json
-                            if isinstance(file_str, str):
-                                file_info = json.loads(file_str)
-                            elif isinstance(file_str, dict):
-                                file_info = file_str
-                            else:
-                                file_info = {}
-                        except:
-                            file_info = {}
-
-                        # Get total chunks
-                        total_chunks = metadata.get('total_chunks', 0)
-
                     # Create context with top-level variables
                     context = {
                         'intent': intent,
-                        'unique_models': list(unique_models.values()),
-                        'file_info': file_info,
-                        'total_chunks': total_chunks,
                         'query': query_text,
-                        'results': simplified_results,
+                        'results': results,
                         'parsed_query': parsed_query,
                         # Add timeframe information if this is a metadata query for a specific month
                         'timeframe': parsed_query.get('parameters', {}).get('filters', {}).get('created_month', None)
@@ -684,7 +631,8 @@ def start_ui(components, host="localhost", port=8000):
                     return context
 
                 # Usage
-                context = prepare_template_context(query_text, simplified_results, parsed_query)
+                context = prepare_template_context(query_text, ranked_results, parsed_query)
+                print(f"ranked_results count: {len(ranked_results)}")
                 print(f"context: {context}")
 
                 try:
@@ -770,7 +718,7 @@ def start_ui(components, host="localhost", port=8000):
                     llm_response = llm_interface.generate_response(
                         prompt=rendered_prompt,
                         temperature=0.7,
-                        max_tokens=10000
+                        max_tokens=5000
                     )
 
                     print("Printing LLM Response...")
@@ -782,7 +730,7 @@ def start_ui(components, host="localhost", port=8000):
 
                     # Fallback: Create a simple prompt without using the template system
                     fallback_prompt = f"Query: {query_text}\n\nResults:\n"
-                    for i, r in enumerate(simplified_results):
+                    for i, r in enumerate(ranked_results):
                         fallback_prompt += f"{i + 1}. {r['id']}: {r['content']}\n"
                     fallback_prompt += "\nPlease provide a comprehensive response to the query based on these results."
 
@@ -791,7 +739,7 @@ def start_ui(components, host="localhost", port=8000):
                         fallback_response = llm_interface.generate_response(
                             prompt=fallback_prompt,
                             temperature=0.7,
-                            max_tokens=10000
+                            max_tokens=3000
                         )
                         print("\nFallback Response:")
                         print(fallback_response)
@@ -876,6 +824,7 @@ def start_ui(components, host="localhost", port=8000):
     
     print("UI session ended.")
 
+
 def generate_notebook(components, model_id, output_path):
     """Generate a Colab notebook for model analysis using full script reconstruction."""
     print(f"Generating notebook for model {model_id}...")
@@ -889,10 +838,25 @@ def generate_notebook(components, model_id, output_path):
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger("notebook_generator")
 
-    # Retrieve all chunks for the given model_id
+    # First retrieve metadata for the model
+    logger.info(f"Retrieving metadata for model {model_id}")
+    metadata_results = asyncio.run(chroma_manager.get(
+        collection_name="model_scripts_metadata",
+        where={"model_id": {"$eq": model_id}},
+        include=["metadatas"],
+        limit=1
+    ))
+
+    if not metadata_results or "results" not in metadata_results or not metadata_results["results"]:
+        logger.error(f"No metadata found for model {model_id}")
+        return None
+
+    model_metadata = metadata_results["results"][0].get("metadata", {})
+
+    # Now retrieve all code chunks for the given model_id
     logger.info(f"Retrieving all code chunks for model {model_id}")
     results = asyncio.run(chroma_manager.get(
-        collection_name="model_scripts",
+        collection_name="model_scripts_chunks",
         where={"model_id": {"$eq": model_id}},
         include=["documents", "metadatas"],
         limit=200  # increase if needed

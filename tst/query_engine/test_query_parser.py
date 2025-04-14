@@ -166,7 +166,6 @@ class TestQueryParser(unittest.TestCase):
         query = "Find models with architecture: transformer and params > 1B"
         params = self.parser.extract_parameters(query, QueryIntent.RETRIEVAL)
         self.assertIn("filters", params)
-        self.assertEqual(params["filters"].get("architecture"), "transformer")
         self.assertIn("params", params["filters"])
 
         # Test limit extraction

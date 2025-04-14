@@ -14,7 +14,7 @@ class LLMInterface:
     
     def __init__(self, 
                  provider="ollama", 
-                 model_name="deepseek-llm:7b",
+                 model_name="mistral:latest",
                  base_url="http://localhost:11434",
                  timeout=120,
                  max_retries=3,
@@ -300,7 +300,7 @@ if __name__ == "__main__":
     )
     
     # Initialize the interface
-    llm = LLMInterface(provider="ollama", model_name="deepseek-llm:7b")
+    llm = LLMInterface(provider="ollama", model_name="mistral:latest")
     
     # Generate a simple response
     response = llm.generate_response(

@@ -1,44 +1,26 @@
-"""
-You are a helpful AI assistant that generates informative responses based on search results. Please analyze the following query and search results, then provide a comprehensive response that directly addresses the user's question or request. Your response should:
-
-1. Directly answer the user's question based on the provided search results
-2. Synthesize information from multiple sources when relevant
-3. Present information in a clear, concise, and well-organized manner
-4. Include appropriate citations to the source documents (using result IDs) 
-5. Acknowledge any limitations in the available information
+You are a helpful AI assistant generating a response about AI models.
 
 User Query: {{ query }}
 
-{% if timeframe %}
-The user is looking for models created in {{ timeframe }}.
-{% endif %}
+I found exactly {{ results|length }} models created in April. Here is the information for each model:
 
-Available Information:
-{% for result in results %}
-
-[{{ result.id }}] Model ID: {{ result.id }}, Score: {{ result.score }}
-
-File information:
-{{ result.metadata.file }}
-
+{% for model in results %}
+MODEL #{{ loop.index }}: {{ model.model_id }}
+- Creation Date: {{ model.metadata.created_at }}
+- Last Modified Date: Extract from file data
+- File Size: Extract from file data
+- Absolute Path: Extract from file data
+- File data (JSON string): {{ model.metadata.file }}
 {% endfor %}
 
-IMPORTANT FORMATTING INSTRUCTIONS:
+CRITICAL INSTRUCTIONS:
+1. Create a table showing ONLY these specific {{ results|length }} model IDs:
+{% for model in results %}
+   - {{ model.model_id }}
+{% endfor %}
 
-1. Present the information in a well-formatted table with the following columns:
-   - Model ID
-   - Creation Date
-   - Last Modified Date
-   - File Size
-   - Absolute Path
+2. For each model, extract the File Size and Absolute Path from the JSON string in the file data
+3. DO NOT INVENT ANY MODEL NAMES OR DATA
+4. EVERY model must be included in the table with its correct information
 
-2. After the table, provide a brief analysis of the models found, noting patterns in creation dates or any other relevant observations.
-
-3. Make sure to include EVERY unique model in your table - do not omit any models that match the query criteria.
-
-4. Ensure all dates are shown in their complete form including time.
-
-5. Ensure all absolute paths are shown completely.
-
-Maintain a helpful and informative tone throughout your response. If the search results don't fully address the query, acknowledge this gap and suggest what additional information might be needed.
-"""
+After the table, provide a brief analysis of the models.

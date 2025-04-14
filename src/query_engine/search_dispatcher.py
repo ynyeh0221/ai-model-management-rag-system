@@ -130,6 +130,7 @@ class SearchDispatcher:
     async def handle_text_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle a text search query for model scripts and metadata.
+        Returns a single result per unique model_id.
         """
         self.logger.debug(f"Handling text search: {query}")
         start_time = time.time()
@@ -139,8 +140,7 @@ class SearchDispatcher:
             embedding_start = time.time()
             embedding_time = (time.time() - embedding_start) * 1000
 
-            # Extract search parameters with more robust error handling
-            # Ensure requested_limit is a valid integer using try/except
+            # Extract search parameters
             try:
                 requested_limit = int(parameters.get('limit', 100))
                 if requested_limit <= 0:
@@ -151,11 +151,10 @@ class SearchDispatcher:
             self.logger.debug(f"Using requested_limit: {requested_limit}")
 
             # Use a higher limit for the initial search to account for multiple chunks per model
-            search_limit = requested_limit * 200  # Get 200x more results to find diverse models
-            # Manually use empty filters for now
-            filters = {}
+            search_limit = requested_limit * 100
+            filters = parameters.get('filters', {})
 
-            # Prepare Chroma query
+            # Prepare Chroma query for chunks
             search_params = {
                 'query': query,
                 'where': self._translate_filters_to_chroma(filters),
@@ -163,29 +162,31 @@ class SearchDispatcher:
                 'include': ["metadatas", "documents", "distances"]
             }
 
-            # Execute vector search
+            # Execute vector search on code chunks
             search_start = time.time()
-            model_results = await self.chroma_manager.search(
-                collection_name="model_scripts",
+            chunk_results = await self.chroma_manager.search(
+                collection_name="model_scripts_chunks",
                 **search_params
             )
-            print(f"Search results: {model_results}")
             search_time = (time.time() - search_start) * 1000
 
             # Group results by model_id
             model_groups = {}
 
-            for idx, result in enumerate(model_results.get('results', [])):
+            for idx, result in enumerate(chunk_results.get('results', [])):
                 # Extract model_id from metadata
                 model_id = result.get('metadata', {}).get('model_id', 'unknown')
+                metadata_doc_id = result.get('metadata', {}).get('metadata_doc_id', None)
 
                 # Initialize group if this is the first chunk from this model
                 if model_id not in model_groups:
                     model_groups[model_id] = {
                         'model_id': model_id,
+                        'metadata_doc_id': metadata_doc_id,
                         'chunks': [],
                         'best_score': 0,
-                        'best_chunk_idx': -1
+                        'best_chunk_idx': -1,
+                        'metadata': None  # Will be populated later
                     }
 
                 # Add this chunk to the model's group
@@ -203,6 +204,48 @@ class SearchDispatcher:
                     model_groups[model_id]['best_score'] = result.get('score', 0)
                     model_groups[model_id]['best_chunk_idx'] = chunk_idx
 
+            # Fetch metadata for all models found - directly query the metadata collection
+            model_ids = list(model_groups.keys())
+            if model_ids:
+                # First, try to fetch by metadata_doc_ids if available
+                metadata_doc_ids = [group['metadata_doc_id'] for group in model_groups.values()
+                                    if group['metadata_doc_id']]
+
+                if metadata_doc_ids:
+                    metadata_results = await self.chroma_manager.get(
+                        collection_name="model_scripts_metadata",
+                        ids=metadata_doc_ids,
+                        include=["metadatas"]
+                    )
+
+                    # Map metadata to models by metadata_doc_id
+                    for result in metadata_results.get('results', []):
+                        result_id = result.get('id')
+                        # Find which model group this metadata belongs to
+                        for model_id, group in model_groups.items():
+                            if group['metadata_doc_id'] == result_id:
+                                group['metadata'] = result.get('metadata', {})
+
+                # For any model without metadata, try to fetch by model_id
+                models_without_metadata = [model_id for model_id, group in model_groups.items()
+                                           if group['metadata'] is None]
+
+                if models_without_metadata:
+                    # Create a where clause to fetch metadata by model_id
+                    where_clause = {"model_id": {"$in": models_without_metadata}}
+
+                    additional_metadata = await self.chroma_manager.get(
+                        collection_name="model_scripts_metadata",
+                        where=where_clause,
+                        include=["metadatas"]
+                    )
+
+                    # Map these results by model_id
+                    for result in additional_metadata.get('results', []):
+                        result_model_id = result.get('metadata', {}).get('model_id')
+                        if result_model_id in model_groups:
+                            model_groups[result_model_id]['metadata'] = result.get('metadata', {})
+
             # Convert groups to a list and sort by best score
             model_list = list(model_groups.values())
             model_list.sort(key=lambda x: x['best_score'], reverse=True)
@@ -210,28 +253,28 @@ class SearchDispatcher:
             # Limit to requested number of models
             model_list = model_list[:requested_limit]
 
-            # Prepare final deduplicated items list
+            # Prepare unique model items list - one entry per model
             items = []
             for rank, model in enumerate(model_list):
-                # Get the best chunk from this model
+                # Create a single result item per model
+                metadata = model['metadata'] or {}
                 best_chunk = None
+
+                # Get the best chunk
                 if model['chunks'] and 0 <= model['best_chunk_idx'] < len(model['chunks']):
                     best_chunk = model['chunks'][model['best_chunk_idx']]
 
-                if best_chunk:
-                    # Create the result item
-                    item = {
-                        'id': best_chunk['id'],
-                        'model_id': model['model_id'],
-                        'score': model['best_score'],
-                        'metadata': best_chunk['metadata'],
-                        'content': best_chunk['content'],
-                        'rank': rank + 1,
-                        'chunk_count': len(model['chunks']),  # Add count of available chunks
-                        # Optional: include references to all chunks
-                        'chunk_ids': [chunk['id'] for chunk in model['chunks']]
-                    }
-                    items.append(item)
+                # Create a consolidated item
+                item = {
+                    'id': model['metadata_doc_id'] or (
+                        best_chunk['id'] if best_chunk else f"model_{model['model_id']}"),
+                    'model_id': model['model_id'],
+                    'score': model['best_score'],
+                    'metadata': metadata,
+                    'rank': rank + 1,
+                    'chunk_count': len(model['chunks'])
+                }
+                items.append(item)
 
             # Log performance metrics if analytics available
             if self.analytics and 'query_id' in parameters:
@@ -247,7 +290,7 @@ class SearchDispatcher:
                 'type': 'text_search',
                 'items': items,
                 'total_found': len(items),
-                'total_models': len(model_groups),  # Add count of unique models found
+                'total_models': len(model_groups),
                 'performance': {
                     'embedding_time_ms': embedding_time,
                     'search_time_ms': search_time,
@@ -528,7 +571,18 @@ class SearchDispatcher:
             filters = parameters.get('filters', {})
             limit = parameters.get('limit', 100)
 
-            # Convert filters to Chroma format - creating where_conditions list
+            # If query mentions a specific month, add it to filters
+            if "april" in query.lower():
+                if not filters:
+                    filters = {}
+                filters["created_month"] = {"$eq": "April"}
+            elif "march" in query.lower():
+                if not filters:
+                    filters = {}
+                filters["created_month"] = {"$eq": "March"}
+            # Add more month checks as needed
+
+            # Convert filters to Chroma format
             where_conditions = []
 
             for key, value in filters.items():
@@ -549,11 +603,11 @@ class SearchDispatcher:
             elif len(where_conditions) == 1:
                 chroma_filters = where_conditions[0]
 
-            # Execute metadata search (no embedding needed)
+            # Execute metadata search
             search_start = time.time()
             print(f"chroma_filters: {chroma_filters}")
             metadata_results = await self.chroma_manager.get(
-                collection_name="model_scripts",
+                collection_name="model_scripts_metadata",
                 limit=limit,
                 where=chroma_filters,
                 include=["metadatas"]
@@ -567,7 +621,8 @@ class SearchDispatcher:
                     'id': result.get('id'),
                     'score': 100.0,
                     'metadata': result.get('metadata', {}),
-                    'rank': idx + 1
+                    'rank': idx + 1,
+                    'model_id': result.get('metadata', {}).get('model_id', 'unknown')
                 })
 
             return {

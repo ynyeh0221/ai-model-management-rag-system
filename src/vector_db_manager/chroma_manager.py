@@ -68,7 +68,7 @@ class ChromaManager:
         except Exception as e:
             self.logger.error(f"Error initializing Chroma client: {e}", exc_info=True)
             raise
-    
+
     def _initialize_default_collections(self):
         """
         Initialize default collections for different document types.
@@ -77,14 +77,31 @@ class ChromaManager:
         try:
             # Define default collections
             default_collections = {
-                "model_scripts": {
-                    "description": "Collection for model scripts and code",
+                "model_scripts_metadata": {
+                    "description": "Collection for model metadata",
                     "embedding_function": self.text_embedding_function,
                     "metadata_schema": {
                         "model_id": "string",
                         "version": "string",
                         "framework": "string",
-                        "architecture_type": "string"
+                        "architecture_type": "string",
+                        "created_month": "string",
+                        "created_year": "string",
+                        "last_modified_month": "string",
+                        "last_modified_year": "string",
+                        "total_chunks": "number"
+                    }
+                },
+                "model_scripts_chunks": {
+                    "description": "Collection for code chunks",
+                    "embedding_function": self.text_embedding_function,
+                    "metadata_schema": {
+                        "model_id": "string",
+                        "chunk_id": "number",
+                        "total_chunks": "number",
+                        "metadata_doc_id": "string",
+                        "offset": "number",
+                        "type": "string"
                     }
                 },
                 "generated_images": {
@@ -107,17 +124,20 @@ class ChromaManager:
                     }
                 }
             }
-            
+
             # Create or get collections
             for name, config in default_collections.items():
-                self._get_or_create_collection(
+                collection = self._get_or_create_collection(
                     name=name,
                     embedding_function=config["embedding_function"],
                     metadata={"description": config["description"]}
                 )
-            
+
+                # Cache the collection for later use
+                self.collections[name] = collection
+
             self.logger.info(f"Initialized {len(default_collections)} default collections")
-            
+
         except Exception as e:
             self.logger.error(f"Error initializing default collections: {e}", exc_info=True)
             raise

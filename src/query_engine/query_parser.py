@@ -42,7 +42,7 @@ class QueryParser:
     Responsible for intent classification and parameter extraction.
     """
 
-    def __init__(self, nlp_model: str = "en_core_web_sm", use_langchain: bool = True, llm_model_name: str = "deepseek-llm:7b"):
+    def __init__(self, nlp_model: str = "en_core_web_sm", use_langchain: bool = True, llm_model_name: str = "mistral:latest"):
         """
         Initialize the QueryParser with necessary NLP components.
 
@@ -415,6 +415,42 @@ class QueryParser:
         if intent is None:
             intent, reason = self.classify_intent(query_text)
 
+        # Initialize parameters
+        parameters = {}
+        query_lower = query_text.lower()
+
+        # Define generic architecture terms that should not be added to filters
+        generic_terms = {
+            "cnn", "convolutional", "neural network", "deep learning",
+            "rnn", "recurrent", "lstm", "transformer", "attention",
+            "diffusion", "gan", "generative adversarial", "vae",
+            "variational", "autoencoder", "bert", "gpt", "mlp"
+        }
+
+        # Direct time-based detection for metadata queries
+        if intent == QueryIntent.METADATA:
+            filters = {}
+
+            # Look for month mentions
+            months = ["january", "february", "march", "april", "may", "june",
+                      "july", "august", "september", "october", "november", "december"]
+
+            for month in months:
+                if month in query_lower:
+                    filters["created_month"] = month.capitalize()
+                    break
+
+            # Look for year mentions
+            year_pattern = r"(20\d\d)"
+            year_match = re.search(year_pattern, query_text)
+            if year_match:
+                filters["created_year"] = year_match.group(1)
+
+            # Add filters to parameters if any were found
+            if filters:
+                parameters["filters"] = filters
+
+        # Try LangChain extraction if available and appropriate
         if self.use_langchain:
             try:
                 import json
@@ -436,7 +472,9 @@ class QueryParser:
                     self.logger.debug(f"Original LLM params: {params}")
                     self.logger.debug(f"Cleaned params: {cleaned_params}")
 
-                    return cleaned_params
+                    # Merge with our parameters
+                    for key, value in cleaned_params.items():
+                        parameters[key] = value
 
                 except json.JSONDecodeError as e:
                     self.logger.warning(f"Failed to parse LangChain parameter result as JSON: {e}")
@@ -445,10 +483,10 @@ class QueryParser:
 
             except Exception as e:
                 self.logger.error(f"Error using LangChain for parameter extraction: {e}")
-                # Fall back to rule-based approach
+                # Continue with rule-based approach
 
-        # Rule-based parameter extraction
-        parameters = {}
+        # Extract filters (start with existing or create new)
+        filters = parameters.get("filters", {})
 
         # Extract metrics of interest
         metrics = []
@@ -457,12 +495,14 @@ class QueryParser:
         if metrics:
             parameters["metrics"] = metrics
 
-        # Extract filters
-        filters = {}
+        # Process other filter patterns
         for filter_name, pattern in self.filter_patterns.items():
             for match in re.finditer(pattern, query_text.lower()):
                 if filter_name == "architecture":
-                    filters["architecture"] = match.group(1)
+                    # Only add if it's a specific architecture, not a generic term
+                    arch_value = match.group(1)
+                    if arch_value not in generic_terms:
+                        filters["architecture"] = arch_value
                 elif filter_name == "framework":
                     filters["framework"] = match.group(1)
                 elif filter_name == "params":
@@ -477,16 +517,15 @@ class QueryParser:
                         "value": match.group(3)
                     }
 
-        # Add model_ids to filters if this is a metadata query and model_ids are present
+        # Add model_ids to filters if appropriate
         model_ids = self._extract_model_mentions(query_text)
         if model_ids:
-            # Only add model_id to filters if it has valid values
-            if len(model_ids) == 1 and model_ids[0].lower() != "none" and model_ids[0].lower() != "all":
-                filters["model_id"] = model_ids[0]
-            elif len(model_ids) > 1:
-                # Filter out "none" and "all" values
-                valid_model_ids = [mid for mid in model_ids if mid.lower() not in ["none", "all"]]
-                if valid_model_ids:
+            # Filter out generic architecture terms
+            valid_model_ids = [mid for mid in model_ids if mid.lower() not in generic_terms]
+            if valid_model_ids:
+                if len(valid_model_ids) == 1:
+                    filters["model_id"] = valid_model_ids[0]
+                else:
                     filters["model_id"] = valid_model_ids
 
         # Only add filters to parameters if there are any
@@ -528,26 +567,47 @@ class QueryParser:
         """
         model_ids = []
 
+        # Define a list of generic architecture terms that should not be treated as model IDs
+        generic_architectures = [
+            "cnn", "rnn", "lstm", "transformer", "gan", "vae", "mlp",
+            "diffusion", "autoencoder", "bert", "gpt"
+        ]
+
         # Try to extract explicit model_id mentions
         for match in re.finditer(self.model_id_pattern, query_text.lower()):
-            model_ids.append(match.group(2))
+            model_id = match.group(2)
+            # Only add if it's not a generic architecture term
+            if model_id.lower() not in generic_architectures:
+                model_ids.append(model_id)
 
         # Handle "X model" pattern (where X is the model name)
         model_suffix_pattern = r'(\w+)\s+model\b'
         for match in re.finditer(model_suffix_pattern, query_text.lower()):
-            model_ids.append(match.group(1))
+            model_id = match.group(1)
+            # Only add if it's not a generic architecture term
+            if model_id.lower() not in generic_architectures:
+                model_ids.append(model_id)
 
         # Check for model family mentions
         doc = self.nlp(query_text)
         for ent in doc.ents:
             if ent.label_ in ["ORG", "PRODUCT"]:
-                model_ids.append(ent.text)
+                # Only add if it's not a generic architecture term
+                if ent.text.lower() not in generic_architectures:
+                    model_ids.append(ent.text)
 
         # Check for common model family keywords
         for family in self.model_families:
+            # Skip generic architecture terms
+            if family.lower() in generic_architectures:
+                continue
+
             matches = re.finditer(r'\b' + re.escape(family) + r'[-_]?(\d+|v\d+)?\b', query_text.lower())
             for match in matches:
-                model_ids.append(match.group(0))
+                model_id = match.group(0)
+                # Only add if it's not a generic architecture term
+                if model_id.lower() not in generic_architectures:
+                    model_ids.append(model_id)
 
         # Deduplicate and clean
         return list(set(model_ids))

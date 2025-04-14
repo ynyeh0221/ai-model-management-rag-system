@@ -2,7 +2,7 @@
   "registry_name": "MySchemaRegistry",
   "schemas": [
     {
-      "schema_id": "model_script_schema",
+      "schema_id": "model_metadata_schema",
       "schema_version": "1.0.0",
       "schema_definition": {
         "type": "object",
@@ -12,16 +12,21 @@
           "metadata": {
             "type": "object",
             "properties": {
-              "model_id": { "type": "string" },
-              "chunk_id": { "type": "integer" },
-              "total_chunks": { "type": "integer" },
+              "model_id": {"type": "string"},
+              "created_at": {"type": "string"},
+              "created_month": {"type": "string"},
+              "created_year": {"type": "string"},
+              "last_modified_month": {"type": "string"},
+              "last_modified_year": {"type": "string"},
+              "total_chunks": {"type": "integer"},
+              "file": {"type": "object"},
               "framework": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": "string" }
+                  "name": {"type": "string"}
                 }
               },
-              "access_control": { "type": "object" }
+              "access_control": {"type": "object"}
             },
             "required": ["model_id"],
             "additionalProperties": true
@@ -29,19 +34,46 @@
         },
         "required": ["id", "content", "metadata"]
       },
-      "description": "Schema for model scripts including metadata",
-      "updated_date": "2025-04-11T00:00:00"
+      "description": "Schema for model metadata documents",
+      "updated_date": "2025-04-14T00:00:00"
+    },
+    {
+      "schema_id": "model_chunk_schema",
+      "schema_version": "1.0.0",
+      "schema_definition": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "content": {"type": "string"},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model_id": {"type": "string"},
+              "chunk_id": {"type": "integer"},
+              "total_chunks": {"type": "integer"},
+              "metadata_doc_id": {"type": "string"},
+              "offset": {"type": "integer"},
+              "type": {"type": "string"},
+              "access_control": {"type": "object"}
+            },
+            "required": ["model_id", "chunk_id"],
+            "additionalProperties": true
+          }
+        },
+        "required": ["id", "content", "metadata"]
+      },
+      "description": "Schema for code chunk documents",
+      "updated_date": "2025-04-14T00:00:00"
     },
     {
       "schema_id": "generated_image_schema",
       "schema_version": "1.0.0",
       "schema_definition": {
         "type": "object",
-        "properties": {
-        },
+        "properties": {},
         "required": []
       },
-      "description": "Schema for model scripts",
+      "description": "Schema for generated images",
       "updated_date": "2025-04-09T00:00:00"
     }
   ]
