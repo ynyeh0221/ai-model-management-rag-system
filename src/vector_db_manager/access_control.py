@@ -496,7 +496,7 @@ class AccessControlManager:
                     except Exception as inner_e:
                         print(f"Error processing model entry: {inner_e}")
                         continue
-
+            print(accessible_models)
             return accessible_models
 
         except Exception as e:

@@ -499,13 +499,11 @@ def start_ui(components, host="localhost", port=8000):
                 available_images = access_control.get_accessible_images(user_id)
 
                 print("\nAvailable images:")
-
                 if not available_images:
                     print("  No images available")
                 else:
                     table = PrettyTable()
                     table.field_names = ["Image ID", "Prompt", "File Path"]
-
                     # Align all columns to the left
                     table.align["Model ID"] = "l"
                     table.align["Prompt"] = "l"
@@ -521,7 +519,6 @@ def start_ui(components, host="localhost", port=8000):
                             prompt = prompt[:37] + "..."
                         if len(filepath) > 50:
                             filepath = filepath[:47] + "..."
-
                         table.add_row([image_id, prompt, filepath])
                     print(table)
 
@@ -773,7 +770,7 @@ def start_ui(components, host="localhost", port=8000):
                     llm_response = llm_interface.generate_response(
                         prompt=rendered_prompt,
                         temperature=0.7,
-                        max_tokens=3000
+                        max_tokens=10000
                     )
 
                     print("Printing LLM Response...")
@@ -794,7 +791,7 @@ def start_ui(components, host="localhost", port=8000):
                         fallback_response = llm_interface.generate_response(
                             prompt=fallback_prompt,
                             temperature=0.7,
-                            max_tokens=1000
+                            max_tokens=10000
                         )
                         print("\nFallback Response:")
                         print(fallback_response)
