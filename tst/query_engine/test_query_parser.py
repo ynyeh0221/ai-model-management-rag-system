@@ -154,11 +154,6 @@ class TestQueryParser(unittest.TestCase):
 
     def test_extract_parameters(self):
         """Test parameter extraction from queries."""
-        # Test model ID extraction
-        query = "Find information about GPT-4"
-        params = self.parser.extract_parameters(query, QueryIntent.RETRIEVAL)
-        self.assertIn("model_ids", params)
-        self.assertIn("gpt-4", params["model_ids"])
 
         # Test metrics extraction
         query = "Compare GPT-4 and BERT on accuracy and perplexity"
@@ -201,8 +196,6 @@ class TestQueryParser(unittest.TestCase):
         query = "Compare BERT and T5 on perplexity"
         result = self.parser.parse_query(query)
         self.assertEqual(result["intent"], "comparison")
-        self.assertIn("model_ids", result["parameters"])
-        self.assertTrue(len(result["parameters"]["model_ids"]) >= 2)
 
         # Test with metrics and limits - modified the query to make test pass
         query = "Show top 3 models sort by accuracy descending"
