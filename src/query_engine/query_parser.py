@@ -49,8 +49,6 @@ class QueryParser:
         Args:
             nlp_model: The spaCy model to use for NLP tasks
             use_langchain: Whether to use LangChain for enhanced parsing
-            use_local_llm: Whether to use a local LLM for intent classification and parameter extraction
-            local_llm_path: Path to local LLM model
         """
         # Set up logging
         self.logger = logging.getLogger(__name__)
