@@ -184,8 +184,6 @@ class SearchDispatcher:
                         'model_id': model_id,
                         'metadata_doc_id': metadata_doc_id,
                         'chunks': [],
-                        'best_score': 0,
-                        'best_chunk_idx': -1,
                         'metadata': None  # Will be populated later
                     }
 
@@ -193,16 +191,10 @@ class SearchDispatcher:
                 chunk_idx = len(model_groups[model_id]['chunks'])
                 model_groups[model_id]['chunks'].append({
                     'id': result.get('id'),
-                    'score': result.get('score', 0),
                     'metadata': result.get('metadata', {}),
                     'content': result.get('document', ""),
                     'chunk_idx': chunk_idx
                 })
-
-                # Update best score if this chunk has a higher score
-                if result.get('score', 0) > model_groups[model_id]['best_score']:
-                    model_groups[model_id]['best_score'] = result.get('score', 0)
-                    model_groups[model_id]['best_chunk_idx'] = chunk_idx
 
             # Fetch metadata for all models found - directly query the metadata collection
             model_ids = list(model_groups.keys())
@@ -246,9 +238,8 @@ class SearchDispatcher:
                         if result_model_id in model_groups:
                             model_groups[result_model_id]['metadata'] = result.get('metadata', {})
 
-            # Convert groups to a list and sort by best score
+            # Convert groups to a list
             model_list = list(model_groups.values())
-            model_list.sort(key=lambda x: x['best_score'], reverse=True)
 
             # Limit to requested number of models
             model_list = model_list[:requested_limit]
@@ -258,18 +249,11 @@ class SearchDispatcher:
             for rank, model in enumerate(model_list):
                 # Create a single result item per model
                 metadata = model['metadata'] or {}
-                best_chunk = None
-
-                # Get the best chunk
-                if model['chunks'] and 0 <= model['best_chunk_idx'] < len(model['chunks']):
-                    best_chunk = model['chunks'][model['best_chunk_idx']]
 
                 # Create a consolidated item
                 item = {
-                    'id': model['metadata_doc_id'] or (
-                        best_chunk['id'] if best_chunk else f"model_{model['model_id']}"),
+                    'id': model['metadata_doc_id'],
                     'model_id': model['model_id'],
-                    'score': model['best_score'],
                     'metadata': metadata,
                     'rank': rank + 1,
                     'chunk_count': len(model['chunks'])
@@ -382,7 +366,6 @@ class SearchDispatcher:
 
                 items.append({
                     'id': result.get('id'),
-                    'score': result.get('score', 0.0),
                     'metadata': metadata,
                     'image_path': image_path,
                     'thumbnail_path': thumbnail_path,
@@ -619,7 +602,6 @@ class SearchDispatcher:
             for idx, result in enumerate(metadata_results.get('results', [])):
                 items.append({
                     'id': result.get('id'),
-                    'score': 100.0,
                     'metadata': result.get('metadata', {}),
                     'rank': idx + 1,
                     'model_id': result.get('metadata', {}).get('model_id', 'unknown')

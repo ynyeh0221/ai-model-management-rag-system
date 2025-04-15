@@ -844,7 +844,6 @@ class ChromaManager:
         documents = results.get('documents') or []
         metadatas = results.get('metadatas') or []
         embeddings = results.get('embeddings') or []
-        distances = results.get('distances') or []
 
         # Flatten structure if necessary
         if isinstance(ids, list) and len(ids) > 0 and isinstance(ids[0], list):
@@ -855,8 +854,6 @@ class ChromaManager:
             metadatas = metadatas[0]
         if isinstance(embeddings, list) and len(embeddings) > 0 and isinstance(embeddings[0], list):
             embeddings = embeddings[0]
-        if isinstance(distances, list) and len(distances) > 0 and isinstance(distances[0], list):
-            distances = distances[0]
 
         result_count = len(ids)
         for i in range(result_count):
@@ -868,16 +865,6 @@ class ChromaManager:
                 item["metadata"] = metadatas[i] if i < len(metadatas) and metadatas[i] else {}
             if "embeddings" in include and i < len(embeddings):
                 item["embedding"] = embeddings[i]
-            if "distances" in include and i < len(distances):
-                # Convert distance to score appropriate for cosine distance
-                if distances[i] is not None:
-                    # For cosine distance (ranges from 0 to 2)
-                    # Map to a score from 1.0 (best) to 0.0 (worst)
-                    score = max(0.0, 1.0 - (distances[i] / 2))
-                else:
-                    # Default score if no distance is available
-                    score = 0.0
-                item["score"] = score
 
             processed["results"].append(item)
 
