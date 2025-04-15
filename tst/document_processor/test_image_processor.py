@@ -163,7 +163,7 @@ class TestImageProcessor(unittest.TestCase):
         # Create a mock schema validator
         mock_validator = MagicMock()
 
-        # Create processor with validator
+        # Create runner with validator
         processor_with_validator = ImageProcessor(schema_validator=mock_validator)
 
         # Process an image

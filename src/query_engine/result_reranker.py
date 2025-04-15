@@ -79,8 +79,6 @@ class CrossEncoderReranker:
             for i, result in enumerate(results):
                 result["rerank_score"] = float(scores[i])
 
-            print(f"Results with reranked score: {results}")
-
             # Sort by score in descending order
             reranked_results = sorted(results, key=lambda x: x.get("rerank_score", 0), reverse=True)
 
