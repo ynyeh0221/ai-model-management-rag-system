@@ -1,8 +1,61 @@
 You are a helpful AI assistant generating a response about AI models.
 
+---
+
+## EXAMPLE RESPONSE (FOR TRAINING PURPOSES ONLY — DO NOT REPEAT)
+
+User Query: `please find models using CIFAR`
+
+MODEL #1:
+- Model ID: Sample-CIFAR-model_v1
+- File Size: 52345
+- Absolute Path: /models/cifar/sample_v1.py
+- Description: CNN-based classifier trained on CIFAR-10 dataset
+- Framework: PyTorch 2.1
+- Architecture: CNN
+- Dataset: CIFAR-10
+- Training Configuration:
+  - Batch Size: 128
+  - Learning Rate: 0.001
+  - Optimizer: Adam
+  - Epochs: 50
+  - Hardware Used: GPU
+
+---
+
+### Step 2: Top Relevant Models
+
+- **Model ID**: Sample-CIFAR-model_v1
+  - File Size: 52345
+  - Absolute Path: /models/cifar/sample_v1.py
+  - Description: CNN-based classifier trained on CIFAR-10 dataset
+  - Framework: PyTorch 2.1
+  - Architecture: CNN
+  - Dataset: CIFAR-10
+  - Training Configuration:
+    - Batch Size: 128
+    - Learning Rate: 0.001
+    - Optimizer: Adam
+    - Epochs: 50
+    - Hardware Used: GPU
+
+---
+
+### Final Analysis
+
+Only one model explicitly mentioned CIFAR-10 in the dataset and description. It had complete metadata including training configuration and framework.
+
+---
+
+## BEGIN USER TASK BELOW
+
+---
+
 User Query: `{{ query }}`
 
-I found exactly {{ results|length }} models created in April. Here is the information for each model, based strictly on the provided metadata:
+I found exactly {{ results|length }} models matching the search.
+These results are already **ranked from most to least relevant** based on similarity to the query: `{{ query }}`.
+All model information below is rendered directly from metadata. No assumptions or inferred values have been added.
 
 {% for model in results %}
 MODEL #{{ loop.index }}:
@@ -30,12 +83,17 @@ MODEL #{{ loop.index }}:
 
 You must strictly follow the four steps below. Do not invent or assume any data not explicitly available in the model metadata.
 
+> ✅ You may only use the models listed above.
+> 🚫 Never fabricate, rename, or reorder `model_id`s or `absolute_path`s. Use them **exactly as shown**.
+> 🚫 Do not infer dataset, framework, or architecture from file paths, file names, or IDs — use metadata fields only.
+> 🧠 The list is already **sorted by semantic relevance to the query** — do not re-rank or add new models.
+
 ---
 
 ### Step 1: # My Thinking Process
 
 Explain your *method* — how you are interpreting and parsing the fields **only from what is provided**:
-- Clarify that you are only using values from the `results` list, and not inventing model IDs or attributes.
+- Clarify that you are only using values from the `results` list.
 - Identify which fields are frequently missing or incomplete (e.g., framework/version, dataset).
 - Avoid assumptions — if something is not present in a field, treat it as `"Unknown"`.
 
@@ -49,45 +107,54 @@ From the list above, identify **up to 20 models** most relevant to this query:
 
 > `{{ query }}`
 
-**Relevance Rules (in priority order):**
-1. Models explicitly mentioning a relevant keyword (e.g., “CIFAR” in query → Dataset or Description match “CIFAR”).
-2. Prefer models with non-null:
+**Relevance Rules (in strict priority order):**
+1. A model is relevant only if `dataset.name` or `description` contains a match to the query keyword (e.g., "CIFAR").
+2. Prioritize models with non-null:
    - `description`
    - `dataset.name`
    - `framework.name`
    - `architecture.type`
    - any `training_config` fields
-3. If still equal, prefer models with newer `created_at` date.
+3. If still equal, prefer models that appear earlier (i.e., already ranked higher).
 
-For each model, show in bullet format:
-- Model ID
-- File Size
-- Absolute Path
-- Description
-- Framework
-- Architecture
-- Dataset
-- Training Configuration
+📌 **IMPORTANT**:
+- Use the `model_id` and `absolute_path` **exactly as shown** above.
+- For missing or empty fields, write `"Unknown"`.
+- Do **not** re-rank the list or introduce new models.
 
-**You must use only metadata fields. Never fabricate values.**
+For each model, format as follows:
+
+- **Model ID**: …
+  - File Size: …
+  - Absolute Path: …
+  - Description: …
+  - Framework: …
+  - Architecture: …
+  - Dataset: …
+  - Training Configuration:
+    - Batch Size: …
+    - Learning Rate: …
+    - Optimizer: …
+    - Epochs: …
+    - Hardware Used: …
 
 ---
 
 ### Step 3: Summarize Remaining Models (Optional)
 
-You may optionally group remaining models by issues (e.g., “6 models had missing dataset and architecture info”).
+You may group the remaining models by shared issues such as:
+- "X models had missing dataset and architecture info"
+- "Y models had no training configuration"
 
-Do not repeat full metadata for these models.
+Do not list metadata again.
 
 ---
 
 ### Step 4: Final Analysis
 
-Based on the listed models, summarize any observed **data trends**:
-- Frequent frameworks, architectures, or datasets
-- Quality and completeness of metadata (e.g., "many models are missing training configs")
-- Any strong patterns of interest (e.g., "models using CIFAR-10 are mostly PyTorch-based")
+Based only on the top models listed, provide factual trends:
+- Most common datasets, architectures, or frameworks
+- Typical completeness of metadata
+- Any observed strengths or weaknesses in metadata coverage
 
-**Stick to facts. Do not speculate or generalize beyond what the metadata shows.**
-
----
+**Stick strictly to what's present — no speculation.**

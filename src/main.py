@@ -23,7 +23,7 @@ from src.document_processor.metadata_extractor import MetadataExtractor
 from src.document_processor.schema_validator import SchemaValidator
 from src.query_engine.query_analytics import QueryAnalytics
 from src.query_engine.query_parser import QueryParser
-from src.query_engine.result_ranker import ResultRanker
+from src.query_engine.result_reranker import CrossEncoderReranker
 from src.query_engine.search_dispatcher import SearchDispatcher
 from src.response_generator.llm_interface import LLMInterface
 from src.response_generator.prompt_visualizer import PromptVisualizer
@@ -54,9 +54,9 @@ def initialize_components(config_path="./config"):
     # Initialize query engine components
     query_parser = QueryParser(llm_model_name="deepseek-r1:7b")
     search_dispatcher = SearchDispatcher(chroma_manager, text_embedder, image_embedder)
-    result_ranker = ResultRanker()
     query_analytics = QueryAnalytics()
-    
+    result_reranker = CrossEncoderReranker(device="mps")
+
     # Initialize response generator components
     template_manager = TemplateManager("./templates")
     prompt_visualizer = PromptVisualizer(template_manager)
@@ -83,8 +83,8 @@ def initialize_components(config_path="./config"):
         "query_engine": {
             "query_parser": query_parser,
             "search_dispatcher": search_dispatcher,
-            "result_ranker": result_ranker,
-            "query_analytics": query_analytics
+            "query_analytics": query_analytics,
+            "reranker": result_reranker
         },
         "response_generator": {
             "llm_interface": llm_interface,
@@ -516,8 +516,8 @@ def start_ui(components, host="localhost", port=8000):
     # Extract required components
     query_parser = components["query_engine"]["query_parser"]
     search_dispatcher = components["query_engine"]["search_dispatcher"]
-    result_ranker = components["query_engine"]["result_ranker"]
     query_analytics = components["query_engine"]["query_analytics"]
+    reranker = components["query_engine"]["reranker"]
     llm_interface = components["response_generator"]["llm_interface"]
     template_manager = components["response_generator"]["template_manager"]
     access_control = components["vector_db_manager"]["access_control"]
@@ -599,7 +599,6 @@ def start_ui(components, host="localhost", port=8000):
 
                 # Parse the query
                 parsed_query = query_parser.parse_query(query_text)
-                print(f"\nQuery intent is classified to : {parsed_query['intent']}, with reason : {parsed_query['reason']}")
                 print(f"Parsed query: {parsed_query}")
 
                 # Log the query for analytics
@@ -611,6 +610,7 @@ def start_ui(components, host="localhost", port=8000):
                 #    continue
 
                 print("Searching...")
+
                 # Dispatch the query
                 search_results = asyncio.run(search_dispatcher.dispatch(
                     query=parsed_query["processed_query"] if "processed_query" in parsed_query else query_text,
@@ -619,15 +619,36 @@ def start_ui(components, host="localhost", port=8000):
                     user_id=user_id
                 ))
 
+                # Get reranking parameters from config
+                max_to_return = 10  # Default max to return
+                rerank_threshold = 0.3  # Default threshold
+
+                print(f"Search results: {search_results}")
                 # Rank the results and filter out low-similarities
                 if isinstance(search_results, dict) and 'items' in search_results:
-                    ranked_results = result_ranker.rank_results(search_results['items'])
+                    # Extract the items from the search results
+                    items_to_rerank = search_results['items']
 
-                    # Filter out low-score results
-                    similarity_threshold = 0.3
-                    ranked_results = [r for r in ranked_results if r.get('score', 0) >= similarity_threshold]
+                    # Add a content field if it doesn't exist (reranker might require this)
+                    for item in items_to_rerank:
+                        if 'content' not in item:
+                            # Use some meaningful field as content, like model_id or metadata description
+                            item['content'] = item.get('model_id', '') + ': ' + item.get('metadata', {}).get(
+                                'description', 'No description')
+
+                    if reranker and items_to_rerank:
+                        print(f"Sending {len(items_to_rerank)} items to reranker")
+                        reranked_results = reranker.rerank(
+                            query=parsed_query.get("processed_query", query_text),
+                            results=items_to_rerank,
+                            top_k=max_to_return,
+                            threshold=rerank_threshold
+                        )
+                    else:
+                        reranked_results = items_to_rerank
                 else:
-                    ranked_results = []
+                    reranked_results = []
+                print(f"Reranked results: {reranked_results}")
 
                 # Select template based on query type
                 if parsed_query["type"] == "comparison":
@@ -651,10 +672,10 @@ def start_ui(components, host="localhost", port=8000):
                     Returns:
                         Dictionary containing the template context
                     """
-
                     def parse_nested_json(metadata, fields):
                         for field in fields:
                             raw_value = metadata.get(field)
+
                             if isinstance(raw_value, str):
                                 try:
                                     parsed = json.loads(raw_value)
@@ -671,10 +692,12 @@ def start_ui(components, host="localhost", port=8000):
 
                     def preprocess_model(model):
                         metadata = model.get("metadata", {})
+
                         # Parse specific fields
                         metadata = parse_nested_json(metadata,
                                                      ["architecture", "dataset", "framework", "training_config", "file",
                                                       "git"])
+
                         # Normalize values like "N/A"
                         metadata = normalize_values(metadata)
                         model["metadata"] = metadata
@@ -695,15 +718,13 @@ def start_ui(components, host="localhost", port=8000):
                     return context
 
                 # Usage
-                context = prepare_template_context(query_text, ranked_results, parsed_query)
-                print(f"ranked_results count: {len(ranked_results)}")
+                context = prepare_template_context(query_text, reranked_results, parsed_query)
                 print(f"context: {context}")
 
                 try:
                     # First, try to render the template with the context
                     rendered_prompt = template_manager.render_template(template_id, context)
                     print(f"prompt: {rendered_prompt}")
-
                     def print_llm_content(response):
                         """
                         Extract and print content from an LLM response in various formats.
@@ -711,6 +732,7 @@ def start_ui(components, host="localhost", port=8000):
                         Args:
                             response: The response from the LLM, which could be a string, dict, or list
                         """
+
                         try:
                             # Handle dict case
                             if isinstance(response, dict):
@@ -728,9 +750,11 @@ def start_ui(components, host="localhost", port=8000):
                                         print(response["message"]["content"])
                                     else:
                                         print(response["message"])
+
                                 else:
                                     print("No recognizable content field found in the dictionary response")
                                     print(f"Available fields: {list(response.keys())}")
+
                                     # Try to print the full dictionary if it's not too large
                                     if len(str(response)) < 1000:
                                         print("Response content:")
@@ -742,6 +766,7 @@ def start_ui(components, host="localhost", port=8000):
                                 try:
                                     import json
                                     parsed = json.loads(response)
+
                                     if isinstance(parsed, dict):
                                         # Recursively call with the parsed dict
                                         print_llm_content(parsed)
@@ -795,7 +820,7 @@ def start_ui(components, host="localhost", port=8000):
 
                     # Fallback: Create a simple prompt without using the template system
                     fallback_prompt = f"Query: {query_text}\n\nResults:\n"
-                    for i, r in enumerate(ranked_results):
+                    for i, r in enumerate(reranked_results):
                         fallback_prompt += f"{i + 1}. {r['id']}: {r['content']}\n"
                     fallback_prompt += "\nPlease provide a comprehensive response to the query based on these results."
 
@@ -808,10 +833,11 @@ def start_ui(components, host="localhost", port=8000):
                         )
                         print("\nFallback Response:")
                         print(fallback_response)
+
                     except Exception as e2:
                         print(f"Fallback also failed: {str(e2)}")
                         print("Could not generate LLM response. Check your connection and service status.")
-                    
+
             elif cmd.lower().startswith("compare-models"):
                 if cmd.lower() == "compare-models":
                     models_to_compare = input("Enter model IDs to compare (comma separated): ").split(",")
