@@ -81,7 +81,9 @@ class CodeParser:
             '}\n\n'
             'Allowed values for "architecture.type": "CNN", "RNN", "Transformer", or "other".\n'
             'If a field is not identifiable, use "unknown", "other", or null.\n'
-            "All values must be valid JSON values."
+            "All values must be valid JSON values.\n\n"
+            "**Before responding, ensure that the output is valid JSON using a JSON validator. "
+            "Double check that there is no extra text, no markdown, and no trailing commas.**"
         )
 
         user_prompt = f"Analyze the following code:\n```python\n{code_str}\n```"

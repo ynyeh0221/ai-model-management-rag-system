@@ -132,12 +132,24 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     async def test_initialize_default_collections(self):
-        # Check that default collections were initialized.
-        default_names = {"model_scripts", "generated_images", "relationships"}
-        self.assertTrue(default_names.issubset(set(self.manager.collections.keys())))
-        # Also ensure that the dummy client has these collections.
-        for name in default_names:
-            collection = self.manager.collections[name]
+        # Updated to match actual collection names initialized in ChromaManager
+        expected_collections = {
+            "model_scripts_metadata",
+            "model_scripts_chunks",
+            "generated_images",
+            "relationships"
+        }
+        actual_collections = set(self.manager.collections.keys())
+
+        self.assertTrue(
+            expected_collections.issubset(actual_collections),
+            msg=f"Expected collections {expected_collections} not found in actual collections {actual_collections}"
+        )
+
+        # Also ensure that the dummy client has these collections
+        for name in expected_collections:
+            collection = self.manager.collections.get(name)
+            self.assertIsNotNone(collection, f"Collection '{name}' not found in manager")
             self.assertIsInstance(collection, DummyCollection)
 
     async def test_get_collection_creates_new(self):
