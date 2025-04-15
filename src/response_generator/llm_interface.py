@@ -204,7 +204,7 @@ class LLMInterface:
                     {"role": "user", "content": user_prompt}
                 ],
                 "temperature": temperature,
-                # Note: Ollama's chat API doesn't have a direct max_tokens parameter
+                "stream": False,
                 "options": {
                     "num_predict": max_tokens
                 }

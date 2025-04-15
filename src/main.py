@@ -35,9 +35,12 @@ from src.vector_db_manager.text_embedder import TextEmbedder
 
 def initialize_components(config_path="./config"):
     """Initialize all components of the RAG system."""
+
+    llm_interface = LLMInterface(model_name="mistral:latest", timeout=6000)
+
     # Initialize document processor components
     schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
-    code_parser = CodeParser(schema_validator)
+    code_parser = CodeParser(schema_validator=schema_validator, llm_interface=llm_interface)
     metadata_extractor = MetadataExtractor()
     image_processor = ImageProcessor(schema_validator)
     
@@ -54,7 +57,6 @@ def initialize_components(config_path="./config"):
     query_analytics = QueryAnalytics()
     
     # Initialize response generator components
-    llm_interface = LLMInterface(model_name="mistral:latest")
     template_manager = TemplateManager("./templates")
     prompt_visualizer = PromptVisualizer(template_manager)
     
@@ -227,6 +229,16 @@ def process_single_script(file_path, components):
     metadata_document["metadata"]["access_control"] = access_metadata
 
     # Create metadata embedding
+    # Extract additional metadata from LLM parse_result
+    llm_fields = {
+        "description": parse_result.get("description", "No description"),
+        "framework": parse_result.get("framework", {}).get("name", "unknown"),
+        "architecture": parse_result.get("architecture", {}).get("type", "unknown"),
+        "dataset": parse_result.get("dataset", {}).get("name", "unknown"),
+        "optimizer": parse_result.get("training_config", {}).get("optimizer", "unknown")
+    }
+
+    # Create metadata embedding content
     metadata_content = {
         "title": model_id,
         "description": f"""
@@ -238,8 +250,15 @@ def process_single_script(file_path, components):
             Last modified in year: {last_modified_raw[:4]}.
             Last modified on {last_modified_raw}.
             Size: {metadata.get("file", {}).get('size_bytes', 'N/A')} bytes.
+
+            Description: {llm_fields["description"]}.
+            Framework: {llm_fields["framework"]}.
+            Architecture: {llm_fields["architecture"]}.
+            Dataset: {llm_fields["dataset"]}.
+            Optimizer: {llm_fields["optimizer"]}.
         """
     }
+
     metadata_embedding = text_embedder.embed_mixed_content(metadata_content)
 
     # Store metadata document
@@ -717,8 +736,8 @@ def start_ui(components, host="localhost", port=8000):
                     # Usage
                     llm_response = llm_interface.generate_response(
                         prompt=rendered_prompt,
-                        temperature=0.7,
-                        max_tokens=5000
+                        temperature=0.5,
+                        max_tokens=4000
                     )
 
                     print("Printing LLM Response...")
@@ -738,8 +757,8 @@ def start_ui(components, host="localhost", port=8000):
                         # Try again with the fallback prompt
                         fallback_response = llm_interface.generate_response(
                             prompt=fallback_prompt,
-                            temperature=0.7,
-                            max_tokens=3000
+                            temperature=0.5,
+                            max_tokens=4000
                         )
                         print("\nFallback Response:")
                         print(fallback_response)

@@ -1,157 +1,133 @@
 import ast
 import datetime
+import json
 import os
+import re
 
 from git import Repo
 
 
 class CodeParser:
-    def __init__(self, schema_validator=None):
+    def __init__(self, schema_validator=None, llm_interface=None):
         self.schema_validator = schema_validator
+        self.llm_interface = llm_interface
+        self.llm_metadata_cache = {}
 
     def parse(self, file_path):
-        """
-        Determine whether to process the file.
-        Process Python files (.py and optionally .ipynb) using parse_file;
-        skip others.
-        """
         ext = os.path.splitext(file_path)[1].lower()
         if ext in ['.py', '.ipynb']:
             return self.parse_file(file_path)
-        else:
-            # If the file is not a Python code file, skip parsing and return None.
-            return None
+        return None
 
     def parse_file(self, file_path):
         """Parse a Python file and extract model information."""
-        with open(file_path, "r") as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             file_content = f.read()
 
         try:
             tree = ast.parse(file_content, filename=file_path)
         except SyntaxError as e:
-            raise ValueError(f"Syntax error when parsing {file_path}: {e}")
+            raise ValueError(f"Syntax error while parsing {file_path}: {e}")
 
-        # Initialize model_info with file-level metadata.
+        # LLM-based extraction (single call)
+        self.llm_metadata_cache = self._extract_llm_metadata(file_content)
+
         model_info = {
             "creation_date": self._get_creation_date(file_path),
             "last_modified_date": self._get_last_modified_date(file_path)
         }
 
-        # Extract basic model information from the AST.
+        # AST-based model metadata
         extracted_info = self._extract_model_info(tree)
         model_info.update(extracted_info)
 
-        # Detect the ML framework from import statements.
-        framework = self._detect_framework(tree)
-        model_info["framework"] = framework
+        # Replace these 5 fields with LLM parsing
+        model_info["framework"] = self.llm_metadata_cache.get("framework", {"name": "unknown", "version": "unknown"})
+        model_info["architecture"] = self.llm_metadata_cache.get("architecture", {"type": "unknown", "dimensions": {}})
+        model_info["dataset"] = self.llm_metadata_cache.get("dataset", {"name": "unknown"})
+        model_info["training_config"] = self.llm_metadata_cache.get("training_config", {})
+        model_info["performance"] = self.llm_metadata_cache.get("performance", {})
+        model_info["description"] = self.llm_metadata_cache.get("description", "N/A")
 
-        # Extract architecture details.
-        architecture = self._extract_architecture(tree, model_info)
-        model_info["architecture"] = architecture
-
-        # Extract dataset information.
-        dataset_info = self._extract_dataset_info(tree, model_info)
-        model_info["dataset"] = dataset_info
-
-        # Extract training configuration.
-        training_config = self._extract_training_config(tree, model_info)
-        model_info["training_config"] = training_config
-
-        # Extract performance metrics.
-        performance_metrics = self._extract_performance_metrics(tree, model_info)
-        model_info["performance"] = performance_metrics
-
-        # Mark this file as a model script unconditionally.
         model_info["is_model_script"] = True
-
-        # This is needed later for splitting into chunks.
         model_info["content"] = file_content
 
-        # Optionally validate extracted metadata
-        # if self.schema_validator:
-        #     self.schema_validator.validate(model_info, "model_script_schema")
+        print(f"updated model_info: {model_info}")
 
         return model_info
 
-    def split_ast_and_subsplit_chunks(self, code: str, chunk_size: int = 500, overlap: int = 100):
-        """
-        Split code by AST structures, then subchunk each block with proper character offsets.
+    def _extract_llm_metadata(self, code_str: str, max_retries: int = 3) -> dict:
+        """Send code to the LLM and get structured metadata, retrying if response isn't valid JSON."""
+        if not self.llm_interface:
+            return {}
 
-        Returns a list of dicts: [{ "text": str, "source_block": str, "offset": int }]
-        """
-        try:
-            tree = ast.parse(code)
-        except SyntaxError:
-            return [{"text": code, "source_block": code, "offset": 0}]  # fallback
+        system_prompt = (
+            "You are a code analysis assistant. "
+            "Analyze the following Python code and extract metadata. "
+            "Your response must be a **single valid JSON object only** — no explanations, no markdown, no comments, no text before or after.\n\n"
+            "The JSON should have the following structure:\n"
+            '{\n'
+            '  "description": "Short summary of what the model does (max 50 characters)",\n'
+            '  "framework": { "name": "e.g. PyTorch", "version": "e.g. 1.13" },\n'
+            '  "architecture": { "type": "CNN" },\n'
+            '  "dataset": { "name": "MNIST" },\n'
+            '  "training_config": {\n'
+            '    "batch_size": 32,\n'
+            '    "learning_rate": 0.001,\n'
+            '    "optimizer": "Adam",\n'
+            '    "epochs": 10,\n'
+            '    "hardware_used": "GPU"\n'
+            '  }\n'
+            '}\n\n'
+            'Allowed values for "architecture.type": "CNN", "RNN", "Transformer", or "other".\n'
+            'If a field is not identifiable, use "unknown", "other", or null.\n'
+            "All values must be valid JSON values."
+        )
 
-        lines = code.splitlines(keepends=True)
-        chunks = []
+        user_prompt = f"Analyze the following code:\n```python\n{code_str}\n```"
 
-        # Track absolute character offset in the full source
-        for node in sorted(tree.body, key=lambda n: getattr(n, "lineno", 0)):
-            start_line = getattr(node, "lineno", None)
-            end_line = getattr(node, "end_lineno", None)
+        for attempt in range(1, max_retries + 1):
+            try:
+                result = self.llm_interface.generate_structured_response(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0,
+                    max_tokens=4000,
+                )
 
-            if start_line is None:
-                continue
+                raw_content = result.get("content", "")
+                if not isinstance(raw_content, str):
+                    raise ValueError(f"Expected string in result['content'], got {type(raw_content)}")
 
-            # Line indices are 1-based in AST, 0-based in list
-            start_idx = start_line - 1
-            end_idx = end_line if end_line else (start_idx + 1)
+                raw_content = raw_content.strip()
+                print(f"[Attempt {attempt}] Raw content: {raw_content}")
 
-            block_lines = lines[start_idx:end_idx]
-            block_code = "".join(block_lines)
-            block_start_char_offset = sum(len(l) for l in lines[:start_idx])
+                # First try raw
+                try:
+                    return json.loads(raw_content)
+                except json.JSONDecodeError:
+                    pass
 
-            # Sub-split block with overlap, tracking correct char offset
-            for j in range(0, len(block_code), chunk_size - overlap):
-                chunk_text = block_code[j:j + chunk_size]
-                if chunk_text.strip():
-                    chunks.append({
-                        "text": chunk_text,
-                        "source_block": block_code,
-                        "offset": block_start_char_offset + j
-                    })
+                # Try simple cleanup: quote unquoted keys
+                try:
+                    cleaned_content = re.sub(
+                        r'(?<!")(?P<key>[a-zA-Z_][a-zA-Z0-9_]*)(?=\s*:)', r'"\g<key>"', raw_content
+                    )
+                    parsed = json.loads(cleaned_content)
+                    return parsed
+                except json.JSONDecodeError:
+                    print(f"[Attempt {attempt}] Failed to parse cleaned content.")
 
-        return chunks
+            except Exception as e:
+                print(f"[Attempt {attempt}] LLM error: {e}")
 
-    def _get_creation_date(self, file_path):
-        """Get file creation date, preferring git history if available."""
-        try:
-            repo = Repo(os.path.dirname(file_path), search_parent_directories=True)
-            # Get the earliest commit for the file.
-            commits = list(repo.iter_commits(paths=file_path, max_count=1, reverse=True))
-            if commits:
-                return datetime.datetime.fromtimestamp(commits[0].committed_date).isoformat()
-        except Exception:
-            pass
+            print(f"[Attempt {attempt}] Retrying...\n")
 
-        # Fallback: use filesystem creation time
-        try:
-            stat = os.stat(file_path)
-            return datetime.datetime.fromtimestamp(stat.st_ctime).isoformat()
-        except Exception:
-            return None
-
-    def _get_last_modified_date(self, file_path):
-        """Get file last modified date, preferring git history if available."""
-        try:
-            repo = Repo(os.path.dirname(file_path), search_parent_directories=True)
-            commit = next(repo.iter_commits(paths=file_path, max_count=1))
-            return datetime.datetime.fromtimestamp(commit.committed_date).isoformat()
-        except Exception:
-            pass
-
-        # Fallback: use filesystem modification time
-        try:
-            stat = os.stat(file_path)
-            return datetime.datetime.fromtimestamp(stat.st_mtime).isoformat()
-        except Exception:
-            return None
+        print("[LLMParser] Failed to parse valid JSON after retries.")
+        return {}
 
     def _extract_model_info(self, tree):
-        """Extract model information from AST."""
+        """Extract model name and type from AST."""
         model_info = {}
 
         class ModelVisitor(ast.NodeVisitor):
@@ -159,11 +135,10 @@ class CodeParser:
                 self.model_name = None
 
             def visit_ClassDef(self, node):
-                # Rudimentary check: if a class inherits from common ML module bases.
                 for base in node.bases:
                     if hasattr(base, 'id') and base.id in ['Module', 'nn.Module']:
                         self.model_name = node.name
-                        break  # Stop visiting once a model is found.
+                        break
 
         visitor = ModelVisitor()
         visitor.visit(tree)
@@ -179,155 +154,71 @@ class CodeParser:
 
         return model_info
 
-    def _detect_framework(self, tree):
-        """Detect ML framework from imports."""
-        frameworks = ['torch', 'tensorflow', 'keras', 'jax']
-        detected = {}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name in frameworks:
-                        detected['name'] = alias.name
-                        detected['version'] = "unknown"
-                        return detected
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    for fw in frameworks:
-                        if fw in node.module:
-                            detected['name'] = fw
-                            detected['version'] = "unknown"
-                            return detected
+    def _get_creation_date(self, file_path):
+        """Get file creation date using Git history or fallback to filesystem."""
+        try:
+            repo = Repo(os.path.dirname(file_path), search_parent_directories=True)
+            commits = list(repo.iter_commits(paths=file_path, max_count=1, reverse=True))
+            if commits:
+                return datetime.datetime.fromtimestamp(commits[0].committed_date).isoformat()
+        except Exception:
+            pass
 
-        return {"name": "unknown", "version": "unknown"}
+        try:
+            stat = os.stat(file_path)
+            return datetime.datetime.fromtimestamp(stat.st_ctime).isoformat()
+        except Exception:
+            return None
 
-    def _extract_architecture(self, tree, model_info):
-        """Extract model architecture and dimensions."""
-        architecture = {
-            "type": "unknown",
-            "dimensions": {}
-        }
+    def _get_last_modified_date(self, file_path):
+        """Get last modified date using Git history or fallback to filesystem."""
+        try:
+            repo = Repo(os.path.dirname(file_path), search_parent_directories=True)
+            commit = next(repo.iter_commits(paths=file_path, max_count=1))
+            return datetime.datetime.fromtimestamp(commit.committed_date).isoformat()
+        except Exception:
+            pass
 
-        class ArchitectureVisitor(ast.NodeVisitor):
-            def __init__(self, model_id):
-                self.model_id = model_id
-                self.architecture_type = "unknown"
-                self.dimensions = {}
+        try:
+            stat = os.stat(file_path)
+            return datetime.datetime.fromtimestamp(stat.st_mtime).isoformat()
+        except Exception:
+            return None
 
-            def visit_ClassDef(self, node):
-                if node.name.lower() == self.model_id:
-                    for body_item in node.body:
-                        if isinstance(body_item, ast.FunctionDef) and body_item.name == '__init__':
-                            for stmt in body_item.body:
-                                if isinstance(stmt, ast.Assign):
-                                    for target in stmt.targets:
-                                        if (isinstance(target, ast.Attribute) and
-                                            isinstance(target.value, ast.Name) and
-                                            target.value.id == 'self'):
-                                            attr_name = target.attr
-                                            if attr_name in ['num_layers', 'hidden_size', 'num_attention_heads', 'total_parameters']:
-                                                try:
-                                                    value = ast.literal_eval(stmt.value)
-                                                except Exception:
-                                                    value = None
-                                                self.dimensions[attr_name] = value
+    def split_ast_and_subsplit_chunks(self, code: str, chunk_size: int = 500, overlap: int = 100):
+        """
+        Split code by AST blocks and subchunk each block with overlap.
+        Returns list of dicts: [{ "text": str, "source_block": str, "offset": int }]
+        """
+        try:
+            tree = ast.parse(code)
+        except SyntaxError:
+            return [{"text": code, "source_block": code, "offset": 0}]
 
-            def visit_Call(self, node):
-                if hasattr(node.func, 'attr') and node.func.attr.lower() in ['transformer', 'cnn', 'rnn', 'mlp']:
-                    self.architecture_type = node.func.attr.lower()
+        lines = code.splitlines(keepends=True)
+        chunks = []
 
-        arch_visitor = ArchitectureVisitor(model_info.get('model_id', ''))
-        arch_visitor.visit(tree)
-        architecture['type'] = arch_visitor.architecture_type
-        architecture['dimensions'] = arch_visitor.dimensions
-        return architecture
+        for node in sorted(tree.body, key=lambda n: getattr(n, "lineno", 0)):
+            start_line = getattr(node, "lineno", None)
+            end_line = getattr(node, "end_lineno", None)
 
-    def _extract_dataset_info(self, tree, model_info):
-        """Extract dataset information."""
-        dataset_info = {
-            "name": "unknown",
-            "version": "unknown",
-            "num_samples": 0,
-            "split": "unknown"
-        }
+            if start_line is None:
+                continue
 
-        class DatasetVisitor(ast.NodeVisitor):
-            def __init__(self):
-                self.dataset_info = {}
+            start_idx = start_line - 1
+            end_idx = end_line if end_line else (start_idx + 1)
 
-            def visit_Assign(self, node):
-                if isinstance(node.targets[0], ast.Name):
-                    var_name = node.targets[0].id.lower()
-                    if var_name in ['dataset', 'train_data']:
-                        try:
-                            value = ast.literal_eval(node.value)
-                            if isinstance(value, str):
-                                self.dataset_info['name'] = value
-                            elif isinstance(value, dict):
-                                self.dataset_info.update(value)
-                        except Exception:
-                            pass
+            block_lines = lines[start_idx:end_idx]
+            block_code = "".join(block_lines)
+            block_start_char_offset = sum(len(l) for l in lines[:start_idx])
 
-        ds_visitor = DatasetVisitor()
-        ds_visitor.visit(tree)
-        if ds_visitor.dataset_info:
-            dataset_info.update(ds_visitor.dataset_info)
+            for j in range(0, len(block_code), chunk_size - overlap):
+                chunk_text = block_code[j:j + chunk_size]
+                if chunk_text.strip():
+                    chunks.append({
+                        "text": chunk_text,
+                        "source_block": block_code,
+                        "offset": block_start_char_offset + j
+                    })
 
-        return dataset_info
-
-    def _extract_training_config(self, tree, model_info):
-        """Extract training configuration."""
-        training_config = {
-            "batch_size": None,
-            "learning_rate": None,
-            "optimizer": "unknown",
-            "epochs": None,
-            "training_time_hours": None,
-            "hardware_used": "unknown"
-        }
-
-        class TrainingVisitor(ast.NodeVisitor):
-            def __init__(self):
-                self.config = {}
-
-            def visit_Assign(self, node):
-                if isinstance(node.targets[0], ast.Name):
-                    var_name = node.targets[0].id.lower()
-                    if var_name in training_config:
-                        try:
-                            value = ast.literal_eval(node.value)
-                            self.config[var_name] = value
-                        except Exception:
-                            pass
-
-        train_visitor = TrainingVisitor()
-        train_visitor.visit(tree)
-        training_config.update(train_visitor.config)
-        return training_config
-
-    def _extract_performance_metrics(self, tree, model_info):
-        """Extract performance metrics."""
-        performance = {
-            "accuracy": None,
-            "loss": None,
-            "perplexity": None,
-            "eval_dataset": "unknown"
-        }
-
-        class PerformanceVisitor(ast.NodeVisitor):
-            def __init__(self):
-                self.metrics = {}
-
-            def visit_Assign(self, node):
-                if isinstance(node.targets[0], ast.Name):
-                    var_name = node.targets[0].id.lower()
-                    if var_name in ['accuracy', 'loss', 'perplexity', 'eval_dataset']:
-                        try:
-                            value = ast.literal_eval(node.value)
-                            self.metrics[var_name] = value
-                        except Exception:
-                            pass
-
-        perf_visitor = PerformanceVisitor()
-        perf_visitor.visit(tree)
-        performance.update(perf_visitor.metrics)
-        return performance
+        return chunks
