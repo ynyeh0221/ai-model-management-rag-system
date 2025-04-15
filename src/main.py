@@ -36,7 +36,7 @@ from src.vector_db_manager.text_embedder import TextEmbedder
 def initialize_components(config_path="./config"):
     """Initialize all components of the RAG system."""
 
-    llm_interface = LLMInterface(model_name="mistral:latest", timeout=6000)
+    llm_interface = LLMInterface(model_name="deepseek-r1:7b", timeout=15000)
 
     # Initialize document processor components
     schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
@@ -51,7 +51,7 @@ def initialize_components(config_path="./config"):
     access_control = AccessControlManager(chroma_manager)
     
     # Initialize query engine components
-    query_parser = QueryParser(llm_model_name="mistral:latest")
+    query_parser = QueryParser(llm_model_name="deepseek-r1:7b")
     search_dispatcher = SearchDispatcher(chroma_manager, text_embedder, image_embedder)
     result_ranker = ResultRanker()
     query_analytics = QueryAnalytics()
@@ -673,6 +673,7 @@ def start_ui(components, host="localhost", port=8000):
                 try:
                     # First, try to render the template with the context
                     rendered_prompt = template_manager.render_template(template_id, context)
+                    print(f"prompt: {rendered_prompt}")
 
                     def print_llm_content(response):
                         """
@@ -753,7 +754,7 @@ def start_ui(components, host="localhost", port=8000):
                     llm_response = llm_interface.generate_response(
                         prompt=rendered_prompt,
                         temperature=0.5,
-                        max_tokens=4000
+                        max_tokens=30000
                     )
 
                     print("Printing LLM Response...")
@@ -774,7 +775,7 @@ def start_ui(components, host="localhost", port=8000):
                         fallback_response = llm_interface.generate_response(
                             prompt=fallback_prompt,
                             temperature=0.5,
-                            max_tokens=4000
+                            max_tokens=30000
                         )
                         print("\nFallback Response:")
                         print(fallback_response)

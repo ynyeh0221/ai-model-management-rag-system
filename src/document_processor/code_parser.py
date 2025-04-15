@@ -143,7 +143,7 @@ class CodeParser:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0,
-                    max_tokens=4000,
+                    max_tokens=20000,
                 )
 
                 raw_content = result.get("content", "")

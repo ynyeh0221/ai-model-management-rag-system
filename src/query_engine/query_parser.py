@@ -42,7 +42,7 @@ class QueryParser:
     Responsible for intent classification and parameter extraction.
     """
 
-    def __init__(self, nlp_model: str = "en_core_web_sm", use_langchain: bool = True, llm_model_name: str = "mistral:latest"):
+    def __init__(self, nlp_model: str = "en_core_web_sm", use_langchain: bool = True, llm_model_name: str = "deepseek-r1:7b"):
         """
         Initialize the QueryParser with necessary NLP components.
 
