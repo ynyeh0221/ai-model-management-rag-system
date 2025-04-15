@@ -130,7 +130,9 @@ class CodeParser:
             '    "hardware_used": "GPU"\n'
             '  }\n'
             '}\n\n'
-            "Respond only with <thinking>...</thinking> followed by JSON. No markdown. No comments. No extra text."
+            "🟡 If you cannot confidently extract a field, use \"unknown\", null, or a placeholder value.\n"
+            "✅ Always include **all required fields**, even if the values are unknown.\n"
+            "Respond only with <thinking>...</thinking> followed by the valid JSON. No markdown, no comments, no explanations outside the <thinking> block."
         )
 
         user_prompt = f"Analyze the following code:\n```python\n{code_str}\n```"
