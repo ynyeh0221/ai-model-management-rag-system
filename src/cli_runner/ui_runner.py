@@ -10,6 +10,14 @@ from prettytable import PrettyTable
 
 
 class UIRunner:
+    """
+    A command-line interface runner for the AI Model Management RAG system.
+
+    This class handles user interactions through a command-line interface,
+    providing functionalities to search, list, compare models, and generate
+    notebooks for model analysis.
+    """
+
     def __init__(self):
         self.components = None
         self.user_id = "anonymous"
@@ -42,7 +50,12 @@ class UIRunner:
         print("=" * 50)
 
     def _run_command_loop(self):
-        """Main command processing loop."""
+        """
+        Main command processing loop.
+
+        Continuously reads user input, processes commands, and handles exceptions
+        until the user exits the application.
+        """
         while True:
             try:
                 print("\n")
@@ -75,7 +88,12 @@ class UIRunner:
         print("UI session ended.")
 
     def _handle_help_command(self):
-        """Display available commands and their descriptions."""
+        """
+        Display available commands and their descriptions.
+
+        Prints a list of all available commands with brief descriptions
+        of their functionality.
+        """
         commands = {
             "query": "Search for model scripts or images",
             "list-models": "List available models",
@@ -91,7 +109,12 @@ class UIRunner:
             print(f"  {cmd_name:<15} - {cmd_desc}")
 
     def _handle_list_models_command(self):
-        """List all models accessible to the current user."""
+        """
+        List all models accessible to the current user.
+
+        Retrieves and displays models that the current user has permission
+        to access in a formatted table.
+        """
         access_control = self.components["vector_db_manager"]["access_control"]
 
         # Get models the user has access to
@@ -100,7 +123,12 @@ class UIRunner:
         self._display_models_pretty(available_models)
 
     def _handle_list_images_command(self):
-        """List all images accessible to the current user."""
+        """
+        List all images accessible to the current user.
+
+        Retrieves and displays images that the current user has permission
+        to access in a formatted table.
+        """
         access_control = self.components["vector_db_manager"]["access_control"]
 
         # Get images the user has access to
@@ -113,7 +141,15 @@ class UIRunner:
             self._display_images_pretty(available_images)
 
     def _handle_query_command(self, cmd):
-        """Process and execute a query command."""
+        """
+        Process and execute a query command.
+
+        Parses the query, dispatches it to the search system, reranks results,
+        and generates a response using an LLM.
+
+        Args:
+            cmd (str): The command string, which may include the query text.
+        """
         # Extract required components
         query_parser = self.components["query_engine"]["query_parser"]
         search_dispatcher = self.components["query_engine"]["search_dispatcher"]
@@ -154,7 +190,22 @@ class UIRunner:
 
     def _process_search_results(self, search_results, reranker, parsed_query, query_text, max_to_return=10,
                                 rerank_threshold=0.3):
-        """Process and rerank search results."""
+        """
+        Process and rerank search results.
+
+        Prepares search results for reranking and applies reranking if available.
+
+        Args:
+            search_results (dict): The raw search results from the dispatcher.
+            reranker (object): Reranker component for ordering results by relevance.
+            parsed_query (dict): The parsed query information.
+            query_text (str): The original query text.
+            max_to_return (int, optional): Maximum number of results to return. Defaults to 10.
+            rerank_threshold (float, optional): Similarity threshold for reranking. Defaults to 0.3.
+
+        Returns:
+            list: Reranked search results.
+        """
         print(f"Search results: {search_results}")
 
         if not isinstance(search_results, dict) or 'items' not in search_results:
@@ -182,7 +233,19 @@ class UIRunner:
             return items_to_rerank
 
     def _generate_query_response(self, query_text, reranked_results, parsed_query, template_manager, llm_interface):
-        """Generate a response to the query using the appropriate template."""
+        """
+        Generate a response to the query using the appropriate template.
+
+        Selects a template based on query type, renders it with context,
+        and generates a response using an LLM.
+
+        Args:
+            query_text (str): The original query text.
+            reranked_results (list): The reranked search results.
+            parsed_query (dict): The parsed query information.
+            template_manager (object): Component for rendering templates.
+            llm_interface (object): Component for generating LLM responses.
+        """
         # Select template based on query type
         if parsed_query["type"] == "comparison":
             template_id = "model_comparison"
@@ -217,7 +280,19 @@ class UIRunner:
             self._handle_fallback_response(query_text, reranked_results, llm_interface)
 
     def _prepare_template_context(self, query_text, results, parsed_query):
-        """Prepare the context for the template with proper model information."""
+        """
+        Prepare the context for the template with proper model information.
+
+        Processes and cleans model metadata for use in template rendering.
+
+        Args:
+            query_text (str): The original query text.
+            results (list): The search results to include in the context.
+            parsed_query (dict): The parsed query information.
+
+        Returns:
+            dict: Context dictionary for template rendering.
+        """
 
         def parse_nested_json(metadata, fields):
             for field in fields:
@@ -265,7 +340,16 @@ class UIRunner:
         return context
 
     def _handle_fallback_response(self, query_text, reranked_results, llm_interface):
-        """Handle fallback when template rendering fails."""
+        """
+        Handle fallback when template rendering fails.
+
+        Creates a simple prompt and attempts to generate a response directly.
+
+        Args:
+            query_text (str): The original query text.
+            reranked_results (list): The reranked search results.
+            llm_interface (object): Component for generating LLM responses.
+        """
         print("Falling back to direct LLM call...")
 
         # Create a simple prompt without using the template system
@@ -288,7 +372,15 @@ class UIRunner:
             print("Could not generate LLM response. Check your connection and service status.")
 
     def _print_llm_content(self, response):
-        """Extract and print content from an LLM response in various formats."""
+        """
+        Extract and print content from an LLM response in various formats.
+
+        Handles different response formats (dict, string, list) and attempts
+        to extract and print the most relevant content.
+
+        Args:
+            response: The response from the LLM, which could be a string, dict, or list.
+        """
         try:
             # Handle dict case
             if isinstance(response, dict):
@@ -360,7 +452,14 @@ class UIRunner:
                 print("Could not print raw response")
 
     def _handle_compare_models_command(self, cmd):
-        """Handle the compare-models command."""
+        """
+        Handle the compare-models command.
+
+        Parses model IDs to compare and displays a placeholder message.
+
+        Args:
+            cmd (str): The command string, which may include model IDs.
+        """
         if cmd.lower() == "compare-models":
             models_to_compare = input("Enter model IDs to compare (comma separated): ").split(",")
         else:
@@ -376,7 +475,15 @@ class UIRunner:
         print("Model comparison functionality will be implemented in a future update.")
 
     def _handle_generate_notebook_command(self, cmd):
-        """Handle the generate-notebook command."""
+        """
+        Handle the generate-notebook command.
+
+        Parses command arguments, extracts model ID and output path,
+        and generates a notebook for the specified model.
+
+        Args:
+            cmd (str): The command string, which may include model ID and options.
+        """
         notebook_type = "evaluation"
 
         if cmd.lower() == "generate-notebook":
@@ -409,7 +516,15 @@ class UIRunner:
             print("Failed to generate notebook")
 
     def _display_models_pretty(self, available_models):
-        """Display models in a nicely formatted table."""
+        """
+        Display models in a nicely formatted table.
+
+        Creates and prints a table showing model information with proper
+        column alignment and truncation for long values.
+
+        Args:
+            available_models (list): List of model dictionaries to display.
+        """
         table = PrettyTable()
         table.field_names = ["Model ID", "Created", "Last Modified", "Absolute Path"]
 
@@ -443,7 +558,15 @@ class UIRunner:
         print(table)
 
     def _display_images_pretty(self, available_images):
-        """Display images in a nicely formatted table."""
+        """
+        Display images in a nicely formatted table.
+
+        Creates and prints a table showing image information with proper
+        column alignment and truncation for long values.
+
+        Args:
+            available_images (list): List of image dictionaries to display.
+        """
         table = PrettyTable()
         table.field_names = ["Image ID", "Prompt", "File Path"]
 
@@ -468,7 +591,20 @@ class UIRunner:
         print(table)
 
     def generate_notebook(self, components, model_id, output_path):
-        """Generate a Colab notebook for model analysis using full script reconstruction."""
+        """
+        Generate a Colab notebook for model analysis using full script reconstruction.
+
+        Retrieves model metadata and code chunks, reconstructs the full script,
+        creates a notebook, and saves it to the specified path.
+
+        Args:
+            components (dict): Dictionary containing initialized system components.
+            model_id (str): ID of the model to generate a notebook for.
+            output_path (str): Path where the generated notebook will be saved.
+
+        Returns:
+            str or None: Path to the generated notebook if successful, None otherwise.
+        """
         print(f"Generating notebook for model {model_id}...")
 
         # Extract components
@@ -536,7 +672,18 @@ class UIRunner:
         return output_path
 
     def _prepare_chunk_contents(self, chunks):
-        """Convert raw chunks to structured format for script reconstruction."""
+        """
+        Convert raw chunks to structured format for script reconstruction.
+
+        Transforms document chunks from various formats into a consistent
+        structure with text content and offset information.
+
+        Args:
+            chunks (list): List of raw document chunks.
+
+        Returns:
+            list: List of structured chunk dictionaries with text and offset.
+        """
         chunk_contents = []
         for doc in chunks:
             content = doc.get("document", "")
