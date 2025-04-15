@@ -64,7 +64,7 @@ The system is composed of the following components:
 | Frontend          | React, Tailwind CSS, Zustand |
 | Vector Search     | ChromaDB, FAISS, SQLite |
 | Embeddings        | SentenceTransformers, OpenCLIP |
-| LLM Integration   | LangChain, OpenAI, Claude, LLaMA, Deepseek |
+| LLM Integration   | LangChain, OpenAI, LLaMA, Mistral |
 | Image Processing  | Pillow, OpenCLIP |
 | Notebooks         | nbformat, Papermill, Google Colab API |
 | Visualization     | Matplotlib, Plotly |
