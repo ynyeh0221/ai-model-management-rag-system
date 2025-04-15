@@ -41,19 +41,68 @@ class CodeParser:
         extracted_info = self._extract_model_info(tree)
         model_info.update(extracted_info)
 
-        # Replace these 5 fields with LLM parsing
-        model_info["framework"] = self.llm_metadata_cache.get("framework", {"name": "unknown", "version": "unknown"})
-        model_info["architecture"] = self.llm_metadata_cache.get("architecture", {"type": "unknown", "dimensions": {}})
-        model_info["dataset"] = self.llm_metadata_cache.get("dataset", {"name": "unknown"})
-        model_info["training_config"] = self.llm_metadata_cache.get("training_config", {})
-        model_info["performance"] = self.llm_metadata_cache.get("performance", {})
-        model_info["description"] = self.llm_metadata_cache.get("description", "N/A")
+        # Safely parse framework
+        framework = self.llm_metadata_cache.get("framework", {})
+        if isinstance(framework, str):
+            model_info["framework"] = {"name": framework, "version": None}
+        elif isinstance(framework, dict):
+            model_info["framework"] = {
+                "name": framework.get("name") if isinstance(framework.get("name"), str) else None,
+                "version": framework.get("version") if isinstance(framework.get("version"), str) else None
+            }
+        else:
+            model_info["framework"] = {"name": None, "version": None}
 
+        # Safely parse architecture
+        arch = self.llm_metadata_cache.get("architecture", {})
+        if isinstance(arch, str):
+            model_info["architecture"] = {"type": arch}
+        elif isinstance(arch, dict):
+            model_info["architecture"] = {
+                "type": arch.get("type") if isinstance(arch.get("type"), str) else None
+            }
+        else:
+            model_info["architecture"] = {"type": None}
+
+        # Safely parse dataset
+        dataset = self.llm_metadata_cache.get("dataset", {})
+        if isinstance(dataset, str):
+            model_info["dataset"] = {"name": dataset}
+        elif isinstance(dataset, dict):
+            model_info["dataset"] = {
+                "name": dataset.get("name") if isinstance(dataset.get("name"), str) else None
+            }
+        else:
+            model_info["dataset"] = {"name": None}
+
+        # Safely parse training_config
+        tc = self.llm_metadata_cache.get("training_config", {})
+        if isinstance(tc, dict):
+            model_info["training_config"] = {
+                "batch_size": tc.get("batch_size") if isinstance(tc.get("batch_size"), int) else None,
+                "learning_rate": tc.get("learning_rate") if isinstance(tc.get("learning_rate"), (int, float)) else None,
+                "optimizer": tc.get("optimizer") if isinstance(tc.get("optimizer"), str) else None,
+                "epochs": tc.get("epochs") if isinstance(tc.get("epochs"), int) else None,
+                "hardware_used": tc.get("hardware_used") if isinstance(tc.get("hardware_used"), str) else None
+            }
+        else:
+            model_info["training_config"] = {
+                "batch_size": None,
+                "learning_rate": None,
+                "optimizer": None,
+                "epochs": None,
+                "hardware_used": None
+            }
+
+        # Description
+        desc = self.llm_metadata_cache.get("description")
+        model_info["description"] = desc if isinstance(desc, str) else "N/A"
+
+        # Remaining fields
         model_info["is_model_script"] = True
         model_info["content"] = file_content
 
         print(f"updated model_info: {model_info}")
-
         return model_info
 
     def _extract_llm_metadata(self, code_str: str, max_retries: int = 3) -> dict:

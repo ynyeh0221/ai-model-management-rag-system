@@ -12,21 +12,48 @@
           "metadata": {
             "type": "object",
             "properties": {
-              "model_id": {"type": "string"},
-              "created_at": {"type": "string"},
-              "created_month": {"type": "string"},
-              "created_year": {"type": "string"},
-              "last_modified_month": {"type": "string"},
-              "last_modified_year": {"type": "string"},
-              "total_chunks": {"type": "integer"},
-              "file": {"type": "object"},
+              "model_id": { "type": "string" },
+              "description": { "type": "string" },
+              "created_at": { "type": "string" },
+              "created_month": { "type": "string" },
+              "created_year": { "type": "string" },
+              "last_modified_month": { "type": "string" },
+              "last_modified_year": { "type": "string" },
+              "total_chunks": { "type": "integer" },
+              "file": { "type": "object" },
               "framework": {
                 "type": "object",
                 "properties": {
-                  "name": {"type": "string"}
+                  "name": { "type": ["string", "null"] },
+                  "version": { "type": ["string", "null"] }
+                },
+                "required": ["name"]
+              },
+              "architecture": {
+                "type": "object",
+                "properties": {
+                  "type": { "type": ["string", "null"] }
+                },
+                "required": ["type"]
+              },
+              "dataset": {
+                "type": "object",
+                "properties": {
+                  "name": { "type": ["string", "null"] }
+                },
+                "required": ["name"]
+              },
+              "training_config": {
+                "type": "object",
+                "properties": {
+                  "batch_size": { "type": ["integer", "null"] },
+                  "learning_rate": { "type": ["number", "null"] },
+                  "optimizer": { "type": ["string", "null"] },
+                  "epochs": { "type": ["integer", "null"] },
+                  "hardware_used": { "type": ["string", "null"] }
                 }
               },
-              "access_control": {"type": "object"}
+              "access_control": { "type": "object" }
             },
             "required": ["model_id"],
             "additionalProperties": true

@@ -201,6 +201,25 @@ def process_single_script(file_path, components):
     creation_natural_month = format_natural_date(creation_date_raw)
     last_modified_natural_month = format_natural_date(last_modified_raw)
 
+    # Extract additional metadata from LLM parse_result
+    llm_fields = {
+        "description": parse_result.get("description", "No description"),
+        "framework": parse_result.get("framework", {}),
+        "architecture": parse_result.get("architecture", {}),
+        "dataset": parse_result.get("dataset", {}),
+        "training_config": parse_result.get("training_config", {})
+    }
+
+    # Ensure all fields are the correct type
+    if isinstance(llm_fields["framework"], str):
+        llm_fields["framework"] = {"name": llm_fields["framework"], "version": "unknown"}
+    if isinstance(llm_fields["architecture"], str):
+        llm_fields["architecture"] = {"type": llm_fields["architecture"]}
+    if isinstance(llm_fields["dataset"], str):
+        llm_fields["dataset"] = {"name": llm_fields["dataset"]}
+    if not isinstance(llm_fields["training_config"], dict):
+        llm_fields["training_config"] = {}
+
     # Prepare metadata document
     metadata_document = {
         "id": f"model_metadata_{model_id}",
@@ -209,6 +228,11 @@ def process_single_script(file_path, components):
         "metadata": {
             **metadata,
             "model_id": model_id,
+            "description": llm_fields["description"],
+            "framework": llm_fields["framework"],
+            "architecture": llm_fields["architecture"],
+            "dataset": llm_fields["dataset"],
+            "training_config": llm_fields["training_config"],
             "created_at": creation_date_raw,
             "created_month": creation_natural_month,
             "created_year": creation_date_raw[:4],
@@ -229,14 +253,6 @@ def process_single_script(file_path, components):
     metadata_document["metadata"]["access_control"] = access_metadata
 
     # Create metadata embedding
-    # Extract additional metadata from LLM parse_result
-    llm_fields = {
-        "description": parse_result.get("description", "No description"),
-        "framework": parse_result.get("framework", {}).get("name", "unknown"),
-        "architecture": parse_result.get("architecture", {}).get("type", "unknown"),
-        "dataset": parse_result.get("dataset", {}).get("name", "unknown"),
-        "optimizer": parse_result.get("training_config", {}).get("optimizer", "unknown")
-    }
 
     # Create metadata embedding content
     metadata_content = {
@@ -255,7 +271,7 @@ def process_single_script(file_path, components):
             Framework: {llm_fields["framework"]}.
             Architecture: {llm_fields["architecture"]}.
             Dataset: {llm_fields["dataset"]}.
-            Optimizer: {llm_fields["optimizer"]}.
+            Training config: {llm_fields["training_config"]}.
         """
     }
 
