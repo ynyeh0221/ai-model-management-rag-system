@@ -2,9 +2,9 @@
 import argparse
 import os
 
-from runner.image_processor_runner import ImageProcessorRunner
-from runner.script_processor_runner import ScriptProcessorRunner
-from runner.ui_runner import UIRunner
+from cli_runner.image_processor_runner import ImageProcessorRunner
+from cli_runner.script_processor_runner import ScriptProcessorRunner
+from cli_runner.ui_runner import UIRunner
 from src.colab_generator.code_generator import CodeGenerator
 from src.colab_generator.colab_api_client import ColabAPIClient
 from src.colab_generator.reproducibility_manager import ReproducibilityManager
@@ -31,7 +31,7 @@ def initialize_components(config_path="./config"):
 
     llm_interface = LLMInterface(model_name="deepseek-r1:7b", timeout=20000)
 
-    # Initialize document runner components
+    # Initialize document cli_runner components
     schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
     code_parser = CodeParser(schema_validator=schema_validator, llm_interface=llm_interface)
     metadata_extractor = MetadataExtractor()

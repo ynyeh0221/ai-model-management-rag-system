@@ -15,7 +15,7 @@ class ImageProcessorRunner:
         """Process images in a directory.
 
         This function walks through the directory to find image files,
-        processes them using the image runner component, generates
+        processes them using the image cli_runner component, generates
         embeddings, and stores them in the vector database.
 
         Args:

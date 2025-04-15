@@ -377,9 +377,7 @@ class UIRunner:
 
     def _handle_generate_notebook_command(self, cmd):
         """Handle the generate-notebook command."""
-        model_id = None
         notebook_type = "evaluation"
-        output_path = None
 
         if cmd.lower() == "generate-notebook":
             model_id = input("Enter model ID: ")
@@ -494,8 +492,6 @@ class UIRunner:
         if not metadata_results or "results" not in metadata_results or not metadata_results["results"]:
             logger.error(f"No metadata found for model {model_id}")
             return None
-
-        model_metadata = metadata_results["results"][0].get("metadata", {})
 
         # Now retrieve all code chunks for the given model_id
         logger.info(f"Retrieving all code chunks for model {model_id}")
