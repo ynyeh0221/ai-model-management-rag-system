@@ -105,21 +105,23 @@ class CodeParser:
         print(f"updated model_info: {model_info}")
         return model_info
 
-    def _extract_llm_metadata(self, code_str: str, max_retries: int = 3) -> dict:
-        """Send code to the LLM and get structured metadata, retrying if response isn't valid JSON."""
+    def _extract_llm_metadata(self, code_str: str, max_retries: int = 10) -> dict:
+        """Send code to LLM, extract and validate structured metadata as JSON. Retry if invalid."""
         if not self.llm_interface:
             return {}
+
+        REQUIRED_KEYS = {"description", "framework", "architecture", "dataset", "training_config"}
 
         system_prompt = (
             "You are a code analysis assistant. "
             "Analyze the following Python code and extract metadata. "
-            "Your response must be a **single valid JSON object only** — no explanations, no markdown, no comments, no text before or after.\n\n"
-            "The JSON should have the following structure:\n"
+            "You may include reasoning in a <thinking>...</thinking> block, but must output a valid JSON object afterward.\n\n"
+            "The output **must strictly follow this JSON structure**:\n"
             '{\n'
-            '  "description": "Short summary of what the model does (max 50 characters)",\n'
-            '  "framework": { "name": "e.g. PyTorch", "version": "e.g. 1.13" },\n'
-            '  "architecture": { "type": "CNN" },\n'
-            '  "dataset": { "name": "MNIST" },\n'
+            '  "description": "Short summary of what the model does",\n'
+            '  "framework": { "name": "...", "version": "..." },\n'
+            '  "architecture": { "type": "..." },\n'
+            '  "dataset": { "name": "..." },\n'
             '  "training_config": {\n'
             '    "batch_size": 32,\n'
             '    "learning_rate": 0.001,\n'
@@ -128,14 +130,29 @@ class CodeParser:
             '    "hardware_used": "GPU"\n'
             '  }\n'
             '}\n\n'
-            'Allowed values for "architecture.type": "CNN", "RNN", "Transformer", or "other".\n'
-            'If a field is not identifiable, use "unknown", "other", or null.\n'
-            "All values must be valid JSON values.\n\n"
-            "**Before responding, ensure that the output is valid JSON using a JSON validator. "
-            "Double check that there is no extra text, no markdown, and no trailing commas.**"
+            "Respond only with <thinking>...</thinking> followed by JSON. No markdown. No comments. No extra text."
         )
 
         user_prompt = f"Analyze the following code:\n```python\n{code_str}\n```"
+
+        def extract_first_json_object(text: str) -> dict:
+            brace_stack = []
+            start_idx = None
+            for i, char in enumerate(text):
+                if char == '{':
+                    if start_idx is None:
+                        start_idx = i
+                    brace_stack.append('{')
+                elif char == '}':
+                    if brace_stack:
+                        brace_stack.pop()
+                        if not brace_stack and start_idx is not None:
+                            candidate = text[start_idx:i + 1]
+                            try:
+                                return json.loads(candidate)
+                            except json.JSONDecodeError:
+                                pass
+            return {}
 
         for attempt in range(1, max_retries + 1):
             try:
@@ -143,38 +160,36 @@ class CodeParser:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0,
-                    max_tokens=31000,
+                    max_tokens=32000,
                 )
 
                 raw_content = result.get("content", "")
                 if not isinstance(raw_content, str):
-                    raise ValueError(f"Expected string in result['content'], got {type(raw_content)}")
+                    raise ValueError("LLM response was not a string")
 
-                raw_content = raw_content.strip()
-                print(f"[Attempt {attempt}] Raw content: {raw_content}")
+                print(f"raw_content: {raw_content}")
 
-                # First try raw
-                try:
-                    return json.loads(raw_content)
-                except json.JSONDecodeError:
-                    pass
+                # Strip <thinking>...</thinking>
+                cleaned = re.sub(r"<thinking>.*?</thinking>", "", raw_content, flags=re.DOTALL).strip()
 
-                # Try simple cleanup: quote unquoted keys
-                try:
-                    cleaned_content = re.sub(
-                        r'(?<!")(?P<key>[a-zA-Z_][a-zA-Z0-9_]*)(?=\s*:)', r'"\g<key>"', raw_content
-                    )
-                    parsed = json.loads(cleaned_content)
+                parsed = extract_first_json_object(cleaned)
+                print(f"parsed: {parsed}")
+
+                if not parsed:
+                    print(f"[Attempt {attempt}] JSON parsing failed.")
+                elif not isinstance(parsed, dict):
+                    print(f"[Attempt {attempt}] Parsed JSON is not a dictionary.")
+                elif not REQUIRED_KEYS.issubset(parsed.keys()):
+                    print(f"[Attempt {attempt}] JSON missing required keys: {REQUIRED_KEYS - set(parsed.keys())}")
+                else:
                     return parsed
-                except json.JSONDecodeError:
-                    print(f"[Attempt {attempt}] Failed to parse cleaned content.")
 
             except Exception as e:
-                print(f"[Attempt {attempt}] LLM error: {e}")
+                print(f"[Attempt {attempt}] Error: {e}")
 
             print(f"[Attempt {attempt}] Retrying...\n")
 
-        print("[LLMParser] Failed to parse valid JSON after retries.")
+        print("[LLMParser] Failed to extract valid metadata after retries.")
         return {}
 
     def _extract_model_info(self, tree):
