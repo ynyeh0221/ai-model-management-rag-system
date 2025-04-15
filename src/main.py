@@ -3,6 +3,7 @@ import argparse
 import asyncio
 import concurrent.futures
 import glob
+import json
 import logging
 import os
 from datetime import datetime
@@ -36,7 +37,7 @@ from src.vector_db_manager.text_embedder import TextEmbedder
 def initialize_components(config_path="./config"):
     """Initialize all components of the RAG system."""
 
-    llm_interface = LLMInterface(model_name="deepseek-r1:7b", timeout=15000)
+    llm_interface = LLMInterface(model_name="deepseek-r1:7b", timeout=20000)
 
     # Initialize document processor components
     schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
@@ -650,17 +651,45 @@ def start_ui(components, host="localhost", port=8000):
                     Returns:
                         Dictionary containing the template context
                     """
-                    # Extract intent
-                    intent = parsed_query.get("intent", "unknown")
 
-                    # Create context with top-level variables
+                    def parse_nested_json(metadata, fields):
+                        for field in fields:
+                            raw_value = metadata.get(field)
+                            if isinstance(raw_value, str):
+                                try:
+                                    parsed = json.loads(raw_value)
+                                    metadata[field] = parsed if isinstance(parsed, dict) else {}
+                                except json.JSONDecodeError:
+                                    metadata[field] = {}
+                        return metadata
+
+                    def normalize_values(metadata):
+                        for key, value in metadata.items():
+                            if isinstance(value, str) and value.strip().lower() in ["n/a", "null", "none"]:
+                                metadata[key] = None
+                        return metadata
+
+                    def preprocess_model(model):
+                        metadata = model.get("metadata", {})
+                        # Parse specific fields
+                        metadata = parse_nested_json(metadata,
+                                                     ["architecture", "dataset", "framework", "training_config", "file",
+                                                      "git"])
+                        # Normalize values like "N/A"
+                        metadata = normalize_values(metadata)
+                        model["metadata"] = metadata
+                        return model
+
+                    # Apply preprocessing to each result
+                    cleaned_results = [preprocess_model(model) for model in results]
+
+                    # Build context
                     context = {
-                        'intent': intent,
-                        'query': query_text,
-                        'results': results,
-                        'parsed_query': parsed_query,
-                        # Add timeframe information if this is a metadata query for a specific month
-                        'timeframe': parsed_query.get('parameters', {}).get('filters', {}).get('created_month', None)
+                        "intent": parsed_query.get("intent", "unknown"),
+                        "query": query_text,
+                        "results": cleaned_results,
+                        "parsed_query": parsed_query,
+                        "timeframe": parsed_query.get("parameters", {}).get("filters", {}).get("created_month", None),
                     }
 
                     return context
@@ -754,7 +783,7 @@ def start_ui(components, host="localhost", port=8000):
                     llm_response = llm_interface.generate_response(
                         prompt=rendered_prompt,
                         temperature=0.5,
-                        max_tokens=30000
+                        max_tokens=31000
                     )
 
                     print("Printing LLM Response...")
@@ -775,7 +804,7 @@ def start_ui(components, host="localhost", port=8000):
                         fallback_response = llm_interface.generate_response(
                             prompt=fallback_prompt,
                             temperature=0.5,
-                            max_tokens=30000
+                            max_tokens=31000
                         )
                         print("\nFallback Response:")
                         print(fallback_response)

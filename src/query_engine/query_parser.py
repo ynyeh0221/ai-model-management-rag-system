@@ -98,8 +98,10 @@ class QueryParser:
                 - unknown: Intent is unclear
 
                 IMPORTANT:
-                - If the query includes time references like "created in April", "models from 2022", or "last modified in March", classify the intent as **metadata**.
-                - Do NOT classify time-based queries as retrieval unless they are clearly asking for model capabilities.
+                - Do NOT classify a query as 'comparison' just because it includes a dataset name like "CIFAR" or "ImageNet".
+                - If the query includes a dataset name, treat it as 'retrieval' unless there's a clear comparison between models.
+                - Do not treat dataset names (CIFAR, MNIST, etc.) as model identifiers.
+                - If a query includes time references like "created in April", "models from 2022", or "last modified in March", classify it as **metadata**.
 
                 Query: {query}
 
@@ -211,7 +213,8 @@ class QueryParser:
         self.intent_patterns = {
             QueryIntent.RETRIEVAL: [
                 r"find|get|retrieve|show|display|tell me about|information on|details of",
-                r"what (is|are)|how (is|are)|where (is|are)|when (was|were)"
+                r"what (is|are)|how (is|are)|where (is|are)|when (was|were)",
+                r"(find|get|list|show|retrieve)\s+(models|model)\s+(trained on|using|with)\s+\w+"
             ],
             QueryIntent.COMPARISON: [
                 r"compare|versus|vs\.?|difference between|similarities between|better than",
@@ -559,57 +562,54 @@ class QueryParser:
         """
         Extract mentions of model IDs or names from query text.
 
-        Args:
-            query_text: The query text to extract from
-
         Returns:
-            List of model identifiers
+            List of valid model identifiers (excluding known dataset names and architectures)
         """
         model_ids = []
 
-        # Define a list of generic architecture terms that should not be treated as model IDs
-        generic_architectures = [
+        # Common datasets to exclude from model_id
+        COMMON_DATASETS = {
+            "cifar", "cifar10", "cifar-10", "cifar100", "imagenet", "mnist",
+            "fashion-mnist", "coco", "cityscapes", "voc", "svhn", "celeba",
+            "librispeech", "wikitext", "squad", "glue", "webtext", "laion", "ms coco"
+        }
+
+        # Generic architectures to exclude
+        GENERIC_ARCH = {
             "cnn", "rnn", "lstm", "transformer", "gan", "vae", "mlp",
             "diffusion", "autoencoder", "bert", "gpt"
-        ]
+        }
 
         # Try to extract explicit model_id mentions
         for match in re.finditer(self.model_id_pattern, query_text.lower()):
             model_id = match.group(2)
-            # Only add if it's not a generic architecture term
-            if model_id.lower() not in generic_architectures:
+            if model_id.lower() not in GENERIC_ARCH and model_id.lower() not in COMMON_DATASETS:
                 model_ids.append(model_id)
 
-        # Handle "X model" pattern (where X is the model name)
+        # Handle "<name> model" patterns
         model_suffix_pattern = r'(\w+)\s+model\b'
         for match in re.finditer(model_suffix_pattern, query_text.lower()):
             model_id = match.group(1)
-            # Only add if it's not a generic architecture term
-            if model_id.lower() not in generic_architectures:
+            if model_id.lower() not in GENERIC_ARCH and model_id.lower() not in COMMON_DATASETS:
                 model_ids.append(model_id)
 
-        # Check for model family mentions
+        # Named entity recognition fallback
         doc = self.nlp(query_text)
         for ent in doc.ents:
-            if ent.label_ in ["ORG", "PRODUCT"]:
-                # Only add if it's not a generic architecture term
-                if ent.text.lower() not in generic_architectures:
-                    model_ids.append(ent.text)
+            if ent.label_ in ["ORG", "PRODUCT"] and ent.text.lower() not in COMMON_DATASETS:
+                model_ids.append(ent.text)
 
-        # Check for common model family keywords
+        # Check for model family keywords
         for family in self.model_families:
-            # Skip generic architecture terms
-            if family.lower() in generic_architectures:
+            if family.lower() in COMMON_DATASETS:
                 continue
-
             matches = re.finditer(r'\b' + re.escape(family) + r'[-_]?(\d+|v\d+)?\b', query_text.lower())
             for match in matches:
                 model_id = match.group(0)
-                # Only add if it's not a generic architecture term
-                if model_id.lower() not in generic_architectures:
+                if model_id.lower() not in GENERIC_ARCH and model_id.lower() not in COMMON_DATASETS:
                     model_ids.append(model_id)
 
-        # Deduplicate and clean
+        # Deduplicate
         return list(set(model_ids))
 
     def _extract_comparison_parameters(self, query_text: str) -> Dict[str, Any]:

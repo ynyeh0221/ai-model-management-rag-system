@@ -142,16 +142,16 @@ class SearchDispatcher:
 
             # Extract search parameters
             try:
-                requested_limit = int(parameters.get('limit', 100))
+                requested_limit = int(parameters.get('limit', 20))
                 if requested_limit <= 0:
-                    requested_limit = 100
+                    requested_limit = 20
             except (TypeError, ValueError):
-                requested_limit = 10  # Default to 10 for any conversion errors
+                requested_limit = 20  # Default to 20 for any conversion errors
 
             self.logger.debug(f"Using requested_limit: {requested_limit}")
 
             # Use a higher limit for the initial search to account for multiple chunks per model
-            search_limit = requested_limit * 100
+            search_limit = requested_limit * 150
             filters = parameters.get('filters', {})
 
             # Prepare Chroma query for chunks
@@ -333,7 +333,7 @@ class SearchDispatcher:
             embedding_time = (time.time() - embedding_start) * 1000
 
             # Extract search parameters
-            limit = parameters.get('limit', 100)
+            limit = parameters.get('limit', 20)
             style_tags = parameters.get('style_tags', [])
             prompt_terms = parameters.get('prompt_terms', "")
             resolution = parameters.get('resolution', None)
@@ -569,7 +569,7 @@ class SearchDispatcher:
         try:
             # Extract search parameters
             filters = parameters.get('filters', {})
-            limit = parameters.get('limit', 100)
+            limit = parameters.get('limit', 20)
 
             # If query mentions a specific month, add it to filters
             if "april" in query.lower():
