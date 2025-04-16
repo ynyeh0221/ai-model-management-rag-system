@@ -25,7 +25,7 @@ async def inspect_collection(manager: ChromaManager, collection_name: str, limit
 
 
 async def main(args):
-    # 初始化嵌入器和 ChromaManager
+    # Initialize embedders nad  ChromaManager
     text_embedder = TextEmbedder()
     image_embedder = ImageEmbedder()
     manager = ChromaManager(text_embedder=text_embedder, image_embedder=image_embedder)
