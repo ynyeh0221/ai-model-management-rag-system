@@ -941,38 +941,32 @@ class ChromaManager:
         except Exception as e:
             self.logger.error(f"Error counting documents in {collection_name}: {e}", exc_info=True)
             raise
-    
+
     async def get_collection_stats(self, collection_name: str = "model_scripts") -> Dict[str, Any]:
         """
         Get statistics for a collection.
-        
+
         Args:
             collection_name: Name of the collection
-            
+
         Returns:
             Dict with collection statistics
         """
         try:
-            # Get the collection
             collection = self.get_collection(collection_name)
-            
-            # Get collection count
             count = await self._run_in_executor(collection.count)
-            
-            # Get collection metadata
-            # Note: Chroma doesn't provide direct API for this, so we're simulating
+
             collection_info = {
                 "name": collection_name,
                 "count": count,
                 "description": "Collection for " + collection_name.replace("_", " "),
                 "embedding_function": (
-                    self.embedding_model_name if "image" not in collection_name
-                    else self.image_embedding_model_name
+                    "text_embedder" if "image" not in collection_name else "image_embedder"
                 )
             }
-            
+
             return collection_info
-            
+
         except Exception as e:
             self.logger.error(f"Error getting stats for collection {collection_name}: {e}", exc_info=True)
             raise

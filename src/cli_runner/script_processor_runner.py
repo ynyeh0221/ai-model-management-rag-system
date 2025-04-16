@@ -45,6 +45,9 @@ class ScriptProcessorRunner:
 
         logger.info(f"Found {len(script_files)} potential model script files after filtering")
 
+        total_files = len(script_files)
+        processed_count = 0
+
         # Process files in parallel using a thread pool
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
             future_to_file = {executor.submit(self.process_single_script, file_path, components): file_path
@@ -52,15 +55,20 @@ class ScriptProcessorRunner:
 
             for future in concurrent.futures.as_completed(future_to_file):
                 file_path = future_to_file[future]
+                processed_count += 1
                 try:
                     result = future.result()
                     if result:
                         document_id, success = result
-                        logger.info(f"Processed {file_path} with ID {document_id}: {'Success' if success else 'Failed'}")
+                        logger.info(
+                            f"Processed {file_path} with ID {document_id}: {'Success' if success else 'Failed'}")
                     else:
                         logger.warning(f"Skipped {file_path}: Not a model script")
                 except Exception as e:
                     logger.error(f"Error processing {file_path}: {str(e)}")
+
+                progress = (processed_count / total_files) * 100
+                logger.info(f"[Progress] {processed_count}/{total_files} files processed ({progress:.1f}%)")
 
         logger.info("Model script processing completed")
 
@@ -93,7 +101,7 @@ class ScriptProcessorRunner:
         metadata = metadata_extractor.extract_metadata(file_path)
 
         # 3. Split into chunks for processing
-        chunks = code_parser.split_ast_and_subsplit_chunks(parse_result["content"], chunk_size=500, overlap=100)
+        chunks = code_parser.split_ast_and_subsplit_chunks(file_content=parse_result["content"], file_path=file_path, chunk_size=5000, overlap=1000)
 
         file_path_obj = Path(file_path)
         folder_name = file_path_obj.parent.name
@@ -165,8 +173,6 @@ class ScriptProcessorRunner:
         access_metadata = access_control.get_document_permissions(metadata_document)
         metadata_document["metadata"]["access_control"] = access_metadata
 
-        # Create metadata embedding
-
         # Create metadata embedding content
         metadata_content = {
             "title": model_id,
@@ -201,23 +207,22 @@ class ScriptProcessorRunner:
         # Process and store code chunks
         chunk_documents = []
         for i, chunk_obj in enumerate(chunks):
-            if isinstance(chunk_obj, dict):
-                chunk_text = chunk_obj.get("text", "")
-                chunk_metadata = {k: v for k, v in chunk_obj.items() if k != "text"}
-            else:
-                chunk_text = chunk_obj
-                chunk_metadata = {}
+            chunk_text = chunk_obj.get("text", "")
+            if not isinstance(chunk_text, str):
+                logging.warning(f"Invalid chunk text type for chunk {i}. Skipping.")
+                continue
 
             chunk_document = {
                 "id": f"model_chunk_{model_id}_{i}",
                 "$schema_version": "1.0.0",
                 "content": chunk_text,
                 "metadata": {
-                    **chunk_metadata,  # <- store offset, type, etc.
                     "model_id": model_id,
                     "chunk_id": i,
                     "total_chunks": len(chunks),
-                    "metadata_doc_id": metadata_document["id"]  # Reference to metadata document
+                    "metadata_doc_id": metadata_document["id"],
+                    "offset": chunk_obj.get("offset", 0),
+                    "type": chunk_obj.get("type", "code"),
                 }
             }
 

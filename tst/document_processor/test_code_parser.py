@@ -171,7 +171,19 @@ eval_dataset = "CIFAR-10-test"
             batch_size = 64
         """)
 
-        chunks = self.parser.split_ast_and_subsplit_chunks(structured_code, chunk_size=250, overlap=50)
+        # Create a temporary test file
+        temp_test_file = os.path.join(self.temp_dir.name, "structured_test.py")
+        with open(temp_test_file, 'w') as f:
+            f.write(structured_code)
+
+        # Use the actual file path in the function call
+        chunks = self.parser.split_ast_and_subsplit_chunks(
+            file_content=structured_code,
+            file_path=temp_test_file,
+            chunk_size=250,
+            overlap=50
+        )
+
         self.assertGreaterEqual(len(chunks), 3)
         for chunk in chunks:
             self.assertIn("text", chunk)
