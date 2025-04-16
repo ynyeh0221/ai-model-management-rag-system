@@ -151,12 +151,16 @@ class CodeParser:
             '    "hardware_used": "GPU"\n'
             '  }\n'
             "}\n\n"
+            "⚠️ ALL fields must be included exactly as shown, even if you have to use placeholder values.\n"
             "🟡 If you cannot confidently extract a field, use \"unknown\", null, or a placeholder value.\n"
             "✅ Do not include any additional fields — **only return the fields shown above**.\n"
             "❌ Do not return metadata like 'visualization', 'id', 'tags', or any other fields.\n\n"
             "Respond only with <thinking>...</thinking> followed by the valid JSON. "
             "No markdown, no extra comments, and no content outside the JSON structure."
         )
+
+        required_fields = ["description", "framework", "architecture", "dataset", "training_config"]
+        training_config_fields = ["batch_size", "learning_rate", "optimizer", "epochs", "hardware_used"]
 
         for attempt in range(max_retries):
             try:
@@ -167,12 +171,93 @@ class CodeParser:
                     temperature=0,
                     max_tokens=50000
                 )
-                print(f"partial metadata response: {response}")
+                print(f"partial metadata response (attempt {attempt + 1}): {response}")
                 raw = response.get("content", "").strip()
                 raw = re.sub(r"<thinking>.*?</thinking>", "", raw, flags=re.DOTALL).strip()
                 json_candidate = re.search(r"\{.*\}", raw, re.DOTALL)
+
                 if json_candidate:
                     parsed = json.loads(json_candidate.group())
+
+                    # Validate that all required fields are present
+                    missing_fields = [field for field in required_fields if field not in parsed]
+                    missing_tc_fields = []
+                    if "training_config" in parsed and isinstance(parsed["training_config"], dict):
+                        missing_tc_fields = [field for field in training_config_fields
+                                             if field not in parsed["training_config"]]
+
+                    # Handle variants of "training_config" key
+                    if "training_config" not in parsed:
+                        # Check for variant keys
+                        variant_keys = [key for key in parsed.keys()
+                                        if key.lower().replace("_", "") == "trainingconfig"]
+
+                        if variant_keys:
+                            # Found a variant key, normalize it
+                            variant_key = variant_keys[0]
+                            parsed["training_config"] = parsed.pop(variant_key)
+                            missing_fields = [f for f in missing_fields if f != "training_config"]
+
+                    # Normalize training_config subfields if needed
+                    if "training_config" in parsed and isinstance(parsed["training_config"], dict):
+                        tc = parsed["training_config"]
+
+                        # Map variant field names to standard field names
+                        field_map = {
+                            "batchsize": "batch_size",
+                            "batch": "batch_size",
+                            "learningrate": "learning_rate",
+                            "lr": "learning_rate",
+                            "numepochs": "epochs",
+                            "epoch": "epochs",
+                            "hardware": "hardware_used",
+                            "gpu": "hardware_used"
+                        }
+
+                        # Process the field mapping
+                        for variant, standard in field_map.items():
+                            if variant in tc and standard not in tc:
+                                tc[standard] = tc.pop(variant)
+
+                        # Recheck for missing fields after normalization
+                        missing_tc_fields = [field for field in training_config_fields
+                                             if field not in tc]
+
+                    # If fields are still missing after normalization, retry
+                    if missing_fields or missing_tc_fields:
+                        fields_str = ", ".join(missing_fields)
+                        tc_fields_str = ", ".join(missing_tc_fields)
+                        print(
+                            f"[Retry {attempt + 1}] Missing fields: {fields_str}, Missing training_config fields: {tc_fields_str}")
+
+                        # If it's the last attempt, add default values to missing fields
+                        if attempt == max_retries - 1:
+                            for field in missing_fields:
+                                if field == "description":
+                                    parsed["description"] = "Unknown model purpose"
+                                elif field == "framework":
+                                    parsed["framework"] = {"name": "unknown", "version": "unknown"}
+                                elif field == "architecture":
+                                    parsed["architecture"] = {"type": "unknown"}
+                                elif field == "dataset":
+                                    parsed["dataset"] = {"name": "unknown"}
+                                elif field == "training_config":
+                                    parsed["training_config"] = {
+                                        "batch_size": None,
+                                        "learning_rate": None,
+                                        "optimizer": None,
+                                        "epochs": None,
+                                        "hardware_used": None
+                                    }
+
+                            if "training_config" in parsed and isinstance(parsed["training_config"], dict):
+                                for field in missing_tc_fields:
+                                    parsed["training_config"][field] = None
+                        else:
+                            # Not the last attempt, so try again
+                            continue
+
+                    # At this point we have a valid structure
                     json_result = {
                         "metadata": parsed,
                         "source_offset": chunk_offset,
@@ -181,11 +266,28 @@ class CodeParser:
                     print(f"parsed partial metadata response: {json_result}")
                     return json_result
                 else:
-                    print(f"[Retry {attempt+1}] No valid JSON object found in LLM response.")
+                    print(f"[Retry {attempt + 1}] No valid JSON object found in LLM response.")
             except Exception as e:
-                print(f"[Retry {attempt+1}] Chunk metadata extraction failed: {e}")
+                print(f"[Retry {attempt + 1}] Chunk metadata extraction failed: {e}")
 
-        return {}
+        # After all retries, return a basic structure with default values
+        return {
+            "metadata": {
+                "description": "Unknown model purpose",
+                "framework": {"name": "unknown", "version": "unknown"},
+                "architecture": {"type": "unknown"},
+                "dataset": {"name": "unknown"},
+                "training_config": {
+                    "batch_size": None,
+                    "learning_rate": None,
+                    "optimizer": None,
+                    "epochs": None,
+                    "hardware_used": None
+                }
+            },
+            "source_offset": chunk_offset,
+            "source_preview": chunk_text[:120]
+        }
 
     def merge_partial_metadata(self, partials: list) -> dict:
         allowed_keys = {
@@ -231,11 +333,23 @@ class CodeParser:
         if not self.llm_interface:
             return merged_metadata
 
+        # Define required fields and structure
+        required_fields = ["description", "framework", "architecture", "dataset", "training_config"]
+        training_config_fields = ["batch_size", "learning_rate", "optimizer", "epochs", "hardware_used"]
+
         system_prompt = (
             "You are a metadata consistency checker.\n"
-            "Given a possibly noisy JSON object, return a cleaned version.\n"
-            "Ensure values are consistent and fields are valid.\n"
-            "Never add values not present unless resolving a clear contradiction.\n"
+            "Given a possibly noisy JSON object, return a cleaned version that strictly follows the required structure.\n\n"
+            "⚠️ The output **must include all of the following fields**:\n"
+            "- description (string)\n"
+            "- framework (object with name and version)\n"
+            "- architecture (object with type)\n"
+            "- dataset (object with name)\n"
+            "- training_config (object with batch_size, learning_rate, optimizer, epochs, and hardware_used)\n\n"
+            "If any of these fields are missing in the input, add them with placeholder values like 'unknown' or null.\n"
+            "Ensure all training_config fields (batch_size, learning_rate, optimizer, epochs, hardware_used) are present.\n"
+            "Normalize any variant field names to the standard names listed above.\n"
+            "Never add values not present in the input unless resolving a clear contradiction or fixing missing required fields.\n"
         )
 
         for attempt in range(max_retries):
@@ -252,12 +366,75 @@ class CodeParser:
                 json_candidate = re.search(r"\{.*\}", raw, re.DOTALL)
                 if json_candidate:
                     json_result = json.loads(json_candidate.group())
-                    print(f"final consistency response: {json_result}")
+
+                    # Validate that all required fields are present
+                    missing_fields = [field for field in required_fields if field not in json_result]
+                    missing_tc_fields = []
+                    if "training_config" in json_result and isinstance(json_result["training_config"], dict):
+                        missing_tc_fields = [field for field in training_config_fields
+                                             if field not in json_result["training_config"]]
+
+                    # If fields are still missing, add defaults
+                    if missing_fields or missing_tc_fields:
+                        print(
+                            f"[Verifier] Adding missing fields: {missing_fields}, Missing TC fields: {missing_tc_fields}")
+
+                        for field in missing_fields:
+                            if field == "description":
+                                json_result["description"] = merged_metadata.get(
+                                    "description") or "Unknown model purpose"
+                            elif field == "framework":
+                                json_result["framework"] = merged_metadata.get("framework") or {"name": "unknown",
+                                                                                                "version": "unknown"}
+                            elif field == "architecture":
+                                json_result["architecture"] = merged_metadata.get("architecture") or {"type": "unknown"}
+                            elif field == "dataset":
+                                json_result["dataset"] = merged_metadata.get("dataset") or {"name": "unknown"}
+                            elif field == "training_config":
+                                json_result["training_config"] = merged_metadata.get("training_config") or {
+                                    "batch_size": None,
+                                    "learning_rate": None,
+                                    "optimizer": None,
+                                    "epochs": None,
+                                    "hardware_used": None
+                                }
+
+                        if "training_config" in json_result and isinstance(json_result["training_config"], dict):
+                            orig_tc = merged_metadata.get("training_config", {})
+                            for field in missing_tc_fields:
+                                json_result["training_config"][field] = orig_tc.get(field, None)
+
+                    print(f"final consistency result: {json_result}")
                     return json_result
                 else:
-                    print(f"[Verifier Retry {attempt+1}] No valid JSON object found in response.")
+                    print(f"[Verifier Retry {attempt + 1}] No valid JSON object found in response.")
             except Exception as e:
-                print(f"[Verifier Retry {attempt+1}] Metadata post-clean failed: {e}")
+                print(f"[Verifier Retry {attempt + 1}] Metadata post-clean failed: {e}")
+
+        # If all retries fail, ensure the original metadata has all required fields
+        for field in required_fields:
+            if field not in merged_metadata:
+                if field == "description":
+                    merged_metadata["description"] = "Unknown model purpose"
+                elif field == "framework":
+                    merged_metadata["framework"] = {"name": "unknown", "version": "unknown"}
+                elif field == "architecture":
+                    merged_metadata["architecture"] = {"type": "unknown"}
+                elif field == "dataset":
+                    merged_metadata["dataset"] = {"name": "unknown"}
+                elif field == "training_config":
+                    merged_metadata["training_config"] = {
+                        "batch_size": None,
+                        "learning_rate": None,
+                        "optimizer": None,
+                        "epochs": None,
+                        "hardware_used": None
+                    }
+
+        if "training_config" in merged_metadata and isinstance(merged_metadata["training_config"], dict):
+            for field in training_config_fields:
+                if field not in merged_metadata["training_config"]:
+                    merged_metadata["training_config"][field] = None
 
         return merged_metadata
 
