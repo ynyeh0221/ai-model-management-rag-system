@@ -1,5 +1,6 @@
 import unittest
 from unittest.mock import patch, mock_open, MagicMock
+
 from src.colab_generator.colab_api_client import ColabAPIClient, AuthenticationError
 
 FAKE_CREDS_JSON = '{"type": "service_account", "project_id": "demo"}'

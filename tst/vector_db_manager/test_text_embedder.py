@@ -1,8 +1,10 @@
 import os
-import unittest
 import tempfile
-import numpy as np
+import unittest
 from unittest.mock import patch
+
+import numpy as np
+
 from src.vector_db_manager.text_embedder import TextEmbedder
 
 

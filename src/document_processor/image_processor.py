@@ -38,10 +38,6 @@ class ImageProcessor:
                         # If date parsing fails, fall back to file creation date
                         pass
 
-                # Perform safety assessment on the image content
-                safety = self.assess_safety(image_path)
-                image_info["safety"] = safety
-
                 # Merge additional metadata if provided
                 if metadata:
                     image_info.update(metadata)
@@ -126,16 +122,6 @@ class ImageProcessor:
         # Save the generated thumbnail to the provided thumbnail_path
         thumbnail.save(thumbnail_path)
         return thumbnail_path
-
-    def assess_safety(self, image_path):
-        """Perform safety assessment on image content."""
-        # Placeholder implementation for safety assessment.
-        # In a production system, this might involve a pre-trained NSFW detection model.
-        safety_assessment = {
-            "nsfw_score": 0.01,       # Simulated low probability of NSFW content
-            "violence_score": 0.005   # Simulated low probability of violent content
-        }
-        return safety_assessment
     
     def extract_exif_data(self, image_path):
         """Extract EXIF data from the image."""

@@ -1,7 +1,8 @@
+import os
 import unittest
 from unittest.mock import patch
+
 import nbformat
-import os
 
 from src.colab_generator.reproducibility_manager import ReproducibilityManager
 

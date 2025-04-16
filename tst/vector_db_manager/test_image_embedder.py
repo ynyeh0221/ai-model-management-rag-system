@@ -1,9 +1,10 @@
 import unittest
+from io import BytesIO
+from unittest.mock import patch, MagicMock
+
 import numpy as np
 import torch
-from unittest.mock import patch, MagicMock
 from PIL import Image
-from io import BytesIO
 
 # Import the ImageEmbedder class
 from src.vector_db_manager.image_embedder import ImageEmbedder

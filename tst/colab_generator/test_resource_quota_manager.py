@@ -1,8 +1,8 @@
-import unittest
-import sqlite3
-import os
-import sys
 import logging
+import os
+import sqlite3
+import sys
+import unittest
 
 # Configure logging for debugging
 logging.basicConfig(level=logging.DEBUG)

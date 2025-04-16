@@ -45,7 +45,6 @@ class TestImageProcessor(unittest.TestCase):
         self.assertIn("size", result)
         self.assertIn("metadata", result)
         self.assertIn("exif", result)
-        self.assertIn("safety", result)
 
         # Check basic properties of the test image
         self.assertEqual(result["size"], (100, 100))
@@ -108,18 +107,6 @@ class TestImageProcessor(unittest.TestCase):
         # Test with invalid image object
         with self.assertRaises(ValueError):
             self.processor.generate_thumbnail(123, self.thumbnail_path)  # Not a path or Image
-
-    def test_assess_safety(self):
-        """Test the safety assessment functionality."""
-        safety = self.processor.assess_safety(self.test_image_path)
-
-        # Check that safety scores are present and within expected ranges
-        self.assertIn("nsfw_score", safety)
-        self.assertIn("violence_score", safety)
-        self.assertGreaterEqual(safety["nsfw_score"], 0)
-        self.assertLessEqual(safety["nsfw_score"], 1)
-        self.assertGreaterEqual(safety["violence_score"], 0)
-        self.assertLessEqual(safety["violence_score"], 1)
 
     def test_extract_exif_data(self):
         """Test EXIF data extraction."""

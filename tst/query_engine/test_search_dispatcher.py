@@ -2,6 +2,7 @@ import unittest
 
 from src.query_engine.search_dispatcher import SearchDispatcher, QueryIntent
 
+
 # --- Dummy Dependencies --- #
 
 class DummyChromaManager:

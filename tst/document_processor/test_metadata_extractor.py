@@ -1,9 +1,9 @@
-import unittest
 import os
-import tempfile
 import shutil
-from unittest.mock import patch, MagicMock
 import sys
+import tempfile
+import unittest
+from unittest.mock import patch, MagicMock
 
 # Add the path to the module being tested
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))

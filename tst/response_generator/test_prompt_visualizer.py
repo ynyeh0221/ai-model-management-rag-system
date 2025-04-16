@@ -1,7 +1,7 @@
+import html
+import json
 import unittest
 from unittest.mock import Mock, MagicMock
-import json
-import html
 
 # Import the class to test
 from src.response_generator.prompt_visualizer import PromptVisualizer

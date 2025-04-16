@@ -41,13 +41,26 @@ class ImageProcessorRunner:
         for ext in supported_extensions:
             image_files.extend(glob.glob(os.path.join(directory_path, f"**/*{ext}"), recursive=True))
 
-        logger.info(f"Found {len(image_files)} image files")
+        # Filter out thumbnail images (files that start with "thumb_")
+        filtered_image_files = []
+        thumbnail_count = 0
+        for file_path in image_files:
+            file_name = Path(file_path).name
+            if file_name.startswith("thumb_"):
+                thumbnail_count += 1
+                logger.info(f"Skipping thumbnail image: {file_path}")
+            else:
+                filtered_image_files.append(file_path)
+
+        logger.info(f"Found {len(image_files)} total image files")
+        logger.info(f"Skipped {thumbnail_count} thumbnail images")
+        logger.info(f"Processing {len(filtered_image_files)} non-thumbnail images")
 
         # Process files in parallel using a thread pool
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_to_file = {executor.submit(self.process_single_image,
                                               file_path,
-                                              components): file_path for file_path in image_files}
+                                              components): file_path for file_path in filtered_image_files}
 
             for future in concurrent.futures.as_completed(future_to_file):
                 file_path = future_to_file[future]
