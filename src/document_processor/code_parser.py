@@ -94,41 +94,30 @@ class CodeParser:
 
     def _extract_llm_metadata(self, code_str: str, max_retries: int = 10) -> dict:
         # Define a threshold to decide if chunking is needed
-        SHORT_SCRIPT_LINE_LIMIT = 100
+        all_chunks = self.split_by_lines(
+            file_content=code_str,
+            chunk_size_in_lines=100,
+            overlap=0,
+        )
+        print(f"Chunk counts: {len(all_chunks)}")
 
-        lines = code_str.splitlines()
+        # Extract summaries from each chunk
+        chunk_summaries = []
+        for chunk in all_chunks:
+            chunk_text = chunk['text']
+            offset = chunk['offset']
+            summary = self.extract_chunk_summary(chunk_text, chunk_offset=offset, max_retries=max_retries)
+            if summary:
+                chunk_summaries.append(summary)
 
-        if len(lines) <= SHORT_SCRIPT_LINE_LIMIT:
-            print("Using full script for LLM metadata extraction.")
-            # For short scripts, we can still use the direct JSON approach
-            final = self.extract_architecture_metadata(chunk_text=code_str, max_retries=max_retries)
-            print(f"Final metadata (full): {final}")
-        else:
-            print(f"Script is large, using chunked extraction with summaries")
-            all_chunks = self.split_by_lines(
-                file_content=code_str,
-                chunk_size=SHORT_SCRIPT_LINE_LIMIT,
-                overlap=0,
-            )
-            print(f"Chunk counts: {len(all_chunks)}")
+        # Merge summaries
+        merged_summary = self.merge_chunk_summaries(chunk_summaries)
+        print(f"Merged summary: {merged_summary}")
 
-            # Extract summaries from each chunk
-            chunk_summaries = []
-            for chunk in all_chunks:
-                chunk_text = chunk['text']
-                offset = chunk['offset']
-                summary = self.extract_chunk_summary(chunk_text, chunk_offset=offset, max_retries=max_retries)
-                if summary:
-                    chunk_summaries.append(summary)
+        # Generate final JSON from the merged summary
+        final = self.generate_metadata_from_summary(merged_summary, max_retries=max_retries)
 
-            # Merge summaries
-            merged_summary = self.merge_chunk_summaries(chunk_summaries)
-            print(f"Merged summary: {merged_summary}")
-
-            # Generate final JSON from the merged summary
-            final = self.generate_metadata_from_summary(merged_summary, max_retries=max_retries)
-
-            print(f"Final metadata (from summaries): {final}")
+        print(f"Final metadata (from summaries): {final}")
 
         final.pop("_trace", None)
         return final
@@ -211,8 +200,14 @@ class CodeParser:
 
         # Combine the summaries into a single document
         merged_summary = self.truncate_string("Combined Code Analysis Summary:\n" + "\n".join(unique_summaries), 12000) # 4,096 tokens ≈ 16,384 characters
-        print(f"Merged summaries: {merged_summary}")
         return merged_summary
+
+    def sanitize_json_string(self, json_str: str) -> str:
+        # Remove JS-style comments
+        json_str = re.sub(r"//.*?$", "", json_str, flags=re.MULTILINE)
+        # Remove trailing commas
+        json_str = re.sub(r",(\s*[}\]])", r"\1", json_str)
+        return json_str
 
     def generate_metadata_from_summary(self, merged_summary: str, max_retries: int = 3) -> dict:
         """Generate structured JSON metadata from the merged summary."""
@@ -253,12 +248,11 @@ class CodeParser:
                 )
                 print(f"metadata generation response (attempt {attempt + 1}): {response}")
                 raw = response.get("content", "").strip()
-                json_candidate = re.search(r"\{.*\}", raw, re.DOTALL)
-
-                if json_candidate:
+                match = re.search(r"\{.*\}", raw, re.DOTALL)
+                if match:
+                    json_str = self.sanitize_json_string(match.group())
                     try:
-                        parsed = json.loads(json_candidate.group())
-                        # Check that the JSON has the required structure
+                        parsed = json.loads(json_str)
                         if self._validate_metadata_structure(parsed):
                             return parsed
                         else:
@@ -579,14 +573,14 @@ class CodeParser:
 
         return chunks
 
-    def split_by_lines(self, file_content: str, chunk_size: int = 500, overlap: int = 100):
+    def split_by_lines(self, file_content: str, chunk_size_in_lines: int = 500, overlap: int = 100):
         """
         Split code into chunks based on lines rather than AST.
         This avoids the problem of AST creating very small chunks.
 
         Args:
             file_content: The content of the file to split
-            chunk_size: Approximate target size of each chunk in lines
+            chunk_size_in_lines: Approximate target size of each chunk in lines
             overlap: Number of lines to overlap between chunks
             min_chunk_length: Minimum character length for a chunk to be included
 
@@ -604,7 +598,7 @@ class CodeParser:
         i = 0
         while i < len(lines):
             # Calculate end of this chunk (with respect to chunk_size)
-            end = min(i + chunk_size, len(lines))
+            end = min(i + chunk_size_in_lines, len(lines))
 
             # Try to find a better splitting point by looking for empty lines
             # or lines that don't start with whitespace (likely a top-level definition)
