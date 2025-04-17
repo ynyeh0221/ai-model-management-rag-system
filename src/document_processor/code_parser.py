@@ -94,7 +94,7 @@ class CodeParser:
 
     def _extract_llm_metadata(self, code_str: str, max_retries: int = 5) -> dict:
         # Define a threshold to decide if chunking is needed
-        SHORT_SCRIPT_LINE_LIMIT = 600
+        SHORT_SCRIPT_LINE_LIMIT = 150
 
         lines = code_str.splitlines()
 
@@ -108,7 +108,7 @@ class CodeParser:
             all_chunks = self.split_by_lines(
                 file_content=code_str,
                 chunk_size=SHORT_SCRIPT_LINE_LIMIT,
-                overlap=50,
+                overlap=0,
             )
             print(f"Chunk counts: {len(all_chunks)}")
 
@@ -146,7 +146,8 @@ class CodeParser:
             "- Architecture: Neural network architecture type\n"
             "- Dataset: Training data used\n"
             "- Training configuration: batch size, learning rate, optimizer, epochs, hardware used\n\n"
-            "Provide a concise, factual summary of what you find. Focus only on what's explicitly in the code. "
+            f"Provide an extremely brief summary in 250 characters or less. Be direct and compact. "
+            "Focus only on what's explicitly in the code. "
             "If you can't find certain information, don't mention that category. Only include information that appears in this code chunk."
         )
 
@@ -157,7 +158,7 @@ class CodeParser:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0,
-                    max_tokens=50000
+                    max_tokens=4000
                 )
                 print(f"chunk summary response (attempt {attempt + 1}): {response}")
                 summary = response.get("content", "").strip()
@@ -180,6 +181,14 @@ class CodeParser:
             "source_preview": chunk_text[:120]
         }
 
+    def clean_empty_lines(self, text: str) -> str:
+        # Split into lines, strip each line, and remove if it's empty
+        lines = text.splitlines()
+        cleaned = [line.rstrip() for line in lines if line.strip() != '']
+
+        # Join lines back with a single newline
+        return '\n'.join(cleaned)
+
     def merge_chunk_summaries(self, chunk_summaries: list) -> str:
         """Merge multiple chunk summaries into a single comprehensive summary."""
         if not chunk_summaries:
@@ -192,13 +201,13 @@ class CodeParser:
         unique_summaries = []
         for summary in summaries:
             if summary and summary not in unique_summaries and summary != "No relevant metadata found in this code chunk.":
-                unique_summaries.append(summary)
+                unique_summaries.append(self.clean_empty_lines(summary))
 
         if not unique_summaries:
             return "No useful metadata found in the code."
 
         # Combine the summaries into a single document
-        merged_summary = "Combined Code Analysis Summary:\n\n" + "\n\n".join(unique_summaries)
+        merged_summary = "Combined Code Analysis Summary:\n" + "\n".join(unique_summaries)
 
         print(f"Merged summaries: {merged_summary}")
         return merged_summary
@@ -238,7 +247,7 @@ class CodeParser:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0,
-                    max_tokens=50000
+                    max_tokens=4000
                 )
                 print(f"metadata generation response (attempt {attempt + 1}): {response}")
                 raw = response.get("content", "").strip()
@@ -368,7 +377,7 @@ class CodeParser:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0,
-                    max_tokens=50000
+                    max_tokens=4000
                 )
                 print(f"Metadata extraction attempt {attempt + 1}: {response}")
                 raw = response.get("content", "").strip()
@@ -471,7 +480,6 @@ class CodeParser:
                                         result[key] = parsed[key]
                                         result["_trace"][key] = source_preview
 
-                        print(f"Final metadata structure: {result}")
                         return result
                     except json.JSONDecodeError as e:
                         print(f"[Retry {attempt + 1}] Invalid JSON: {e}")

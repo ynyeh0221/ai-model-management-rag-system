@@ -29,7 +29,7 @@ from src.vector_db_manager.text_embedder import TextEmbedder
 def initialize_components(config_path="./config"):
     """Initialize all components of the RAG system."""
 
-    llm_interface = LLMInterface(model_name="deepseek-r1:7b", timeout=30000)
+    llm_interface = LLMInterface(model_name="deepseek-llm:7b", timeout=30000)
 
     # Initialize document cli_runner components
     schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
@@ -44,7 +44,7 @@ def initialize_components(config_path="./config"):
     access_control = AccessControlManager(chroma_manager)
     
     # Initialize query engine components
-    query_parser = QueryParser(llm_model_name="deepseek-r1:7b")
+    query_parser = QueryParser(llm_model_name="deepseek-llm:7b")
     search_dispatcher = SearchDispatcher(chroma_manager, text_embedder, image_embedder)
     query_analytics = QueryAnalytics()
     result_reranker = CrossEncoderReranker(device="mps")

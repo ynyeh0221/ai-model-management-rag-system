@@ -16,15 +16,15 @@ class TestLLMInterface(unittest.TestCase):
         Test that during initialization, if the model is already available
         (i.e. returned in the /api/tags response), no pull request is made.
         """
-        # Simulate /api/tags response that includes the desired model "deepseek-r1:7b"
+        # Simulate /api/tags response that includes the desired model "deepseek-llm:7b"
         mock_get_response = MagicMock()
-        mock_get_response.json.return_value = {"models": [{"name": "deepseek-r1:7b"}]}
+        mock_get_response.json.return_value = {"models": [{"name": "deepseek-llm:7b"}]}
         mock_get_response.raise_for_status.return_value = None
         mock_get.return_value = mock_get_response
 
         # Instantiate LLMInterface. The _initialize_client method should
         # detect that the model is present.
-        llm = LLMInterface(provider="ollama", model_name="deepseek-r1:7b")
+        llm = LLMInterface(provider="ollama", model_name="deepseek-llm:7b")
 
         # Verify that no POST call (pull operation) was made.
         mock_post.assert_not_called()
@@ -36,7 +36,7 @@ class TestLLMInterface(unittest.TestCase):
         Test that if the model is not found in the /api/tags response,
         the initialization will attempt to pull the desired model.
         """
-        # Simulate /api/tags response with a model list that does NOT include "deepseek-r1:7b"
+        # Simulate /api/tags response with a model list that does NOT include "deepseek-llm:7b"
         mock_get_response = MagicMock()
         mock_get_response.json.return_value = {"models": [{"name": "other_model"}]}
         mock_get_response.raise_for_status.return_value = None
@@ -47,9 +47,9 @@ class TestLLMInterface(unittest.TestCase):
         mock_post_response.raise_for_status.return_value = None
         mock_post.return_value = mock_post_response
 
-        llm = LLMInterface(provider="ollama", model_name="deepseek-r1:7b")
+        llm = LLMInterface(provider="ollama", model_name="deepseek-llm:7b")
 
-        # The pull endpoint should be called because "deepseek-r1:7b" was not found.
+        # The pull endpoint should be called because "deepseek-llm:7b" was not found.
         mock_post.assert_called_with(
             f"{llm.base_url}/api/pull",
             json={"name": llm.model_name},
@@ -65,11 +65,11 @@ class TestLLMInterface(unittest.TestCase):
         """
         # Simulate initialization response for /api/tags indicating the model is available.
         mock_get_response = MagicMock()
-        mock_get_response.json.return_value = {"models": [{"name": "deepseek-r1:7b"}]}
+        mock_get_response.json.return_value = {"models": [{"name": "deepseek-llm:7b"}]}
         mock_get_response.raise_for_status.return_value = None
         mock_get.return_value = mock_get_response
 
-        llm = LLMInterface(provider="ollama", model_name="deepseek-r1:7b")
+        llm = LLMInterface(provider="ollama", model_name="deepseek-llm:7b")
 
         # Set up the POST response for the generate endpoint.
         mock_post_response = MagicMock()
@@ -92,11 +92,11 @@ class TestLLMInterface(unittest.TestCase):
         """
         # Simulate initialization response indicating that the model is available.
         mock_get_response = MagicMock()
-        mock_get_response.json.return_value = {"models": [{"name": "deepseek-r1:7b"}]}
+        mock_get_response.json.return_value = {"models": [{"name": "deepseek-llm:7b"}]}
         mock_get_response.raise_for_status.return_value = None
         mock_get.return_value = mock_get_response
 
-        llm = LLMInterface(provider="ollama", model_name="deepseek-r1:7b")
+        llm = LLMInterface(provider="ollama", model_name="deepseek-llm:7b")
 
         # Create dummy streaming response lines.
         dummy_lines = [
@@ -126,11 +126,11 @@ class TestLLMInterface(unittest.TestCase):
         """
         # Set up initialization /api/tags response.
         mock_get_response = MagicMock()
-        mock_get_response.json.return_value = {"models": [{"name": "deepseek-r1:7b"}]}
+        mock_get_response.json.return_value = {"models": [{"name": "deepseek-llm:7b"}]}
         mock_get_response.raise_for_status.return_value = None
         mock_get.return_value = mock_get_response
 
-        llm = LLMInterface(provider="ollama", model_name="deepseek-r1:7b")
+        llm = LLMInterface(provider="ollama", model_name="deepseek-llm:7b")
 
         # Set up POST response for the structured chat endpoint.
         structured_response = {"message": {"content": "Structured answer"}}
@@ -164,10 +164,10 @@ class TestLLMInterface(unittest.TestCase):
         # For initialization, patch requests.get so no actual HTTP call is made.
         with patch('requests.get') as mock_get:
             mock_get_response = MagicMock()
-            mock_get_response.json.return_value = {"models": [{"name": "deepseek-r1:7b"}]}
+            mock_get_response.json.return_value = {"models": [{"name": "deepseek-llm:7b"}]}
             mock_get_response.raise_for_status.return_value = None
             mock_get.return_value = mock_get_response
-            llm = LLMInterface(provider="ollama", model_name="deepseek-r1:7b")
+            llm = LLMInterface(provider="ollama", model_name="deepseek-llm:7b")
 
         result = llm.handle_rate_limiting(flaky_function, "input")
         self.assertEqual(result, "Success")
@@ -183,11 +183,11 @@ class TestLLMInterface(unittest.TestCase):
         """
         # Mock for initialization GET to /api/tags
         mock_tags_response = MagicMock()
-        mock_tags_response.json.return_value = {"models": [{"name": "deepseek-r1:7b"}]}
+        mock_tags_response.json.return_value = {"models": [{"name": "deepseek-llm:7b"}]}
         mock_tags_response.raise_for_status.return_value = None
 
         # Mock for GET to /api/show in get_model_info
-        dummy_info = {"name": "deepseek-r1:7b", "version": "1.0"}
+        dummy_info = {"name": "deepseek-llm:7b", "version": "1.0"}
         mock_show_response = MagicMock()
         mock_show_response.json.return_value = dummy_info
         mock_show_response.raise_for_status.return_value = None
@@ -207,7 +207,7 @@ class TestLLMInterface(unittest.TestCase):
         mock_post_response.raise_for_status.return_value = None
         mock_post.return_value = mock_post_response
 
-        llm = LLMInterface(provider="ollama", model_name="deepseek-r1:7b")
+        llm = LLMInterface(provider="ollama", model_name="deepseek-llm:7b")
         info = llm.get_model_info()
         self.assertEqual(info, dummy_info)
 
@@ -216,15 +216,15 @@ class TestLLMInterface(unittest.TestCase):
         """
         Test that list_available_models returns a list of model names.
         """
-        dummy_models = {"models": [{"name": "deepseek-r1:7b"}, {"name": "other_model"}]}
+        dummy_models = {"models": [{"name": "deepseek-llm:7b"}, {"name": "other_model"}]}
         mock_get_response = MagicMock()
         mock_get_response.json.return_value = dummy_models
         mock_get_response.raise_for_status.return_value = None
         mock_get.return_value = mock_get_response
 
-        llm = LLMInterface(provider="ollama", model_name="deepseek-r1:7b")
+        llm = LLMInterface(provider="ollama", model_name="deepseek-llm:7b")
         models = llm.list_available_models()
-        self.assertEqual(models, ["deepseek-r1:7b", "other_model"])
+        self.assertEqual(models, ["deepseek-llm:7b", "other_model"])
 
 if __name__ == "__main__":
     unittest.main()
