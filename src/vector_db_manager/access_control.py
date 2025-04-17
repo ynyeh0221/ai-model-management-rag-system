@@ -1,7 +1,139 @@
 import asyncio
 import json
 
+"""
+# AccessControlManager Documentation
 
+## Overview
+
+The `AccessControlManager` is a Python component that provides fine-grained access control for document-based systems. It allows you to manage who can view or edit documents by attaching permission metadata to documents and enforcing these permissions when accessing documents.
+
+## Key Features
+
+- Permission-based access control (view, edit)
+- Support for user-level and group-level permissions
+- Public access capabilities
+- Query filtering based on permissions
+- Support for both synchronous and asynchronous database operations
+
+## Core Concepts
+
+### Permission Hierarchy
+
+The system uses a hierarchical permission model:
+- `view`: Basic access to read a document
+- `edit`: Advanced access that includes viewing and modifying a document
+
+### Access Control Storage
+
+Access permissions are stored in document metadata as a JSON structure:
+```json
+{
+  "view": ["user1", "group1", "public"],
+  "edit": ["user2", "group2"]
+}
+```
+
+## Usage Examples
+
+### Initializing the Manager
+
+```python
+from your_db_client import DatabaseClient
+from access_control import AccessControlManager
+
+# Initialize with a database client
+db_client = DatabaseClient(connection_string="your_connection_string")
+acm = AccessControlManager(db_client=db_client)
+```
+
+### Checking Access
+
+```python
+# Check if a user can view a document
+has_access = acm.check_access(document, user_id="user123", permission_type="view")
+
+# Check if a user can edit a document
+can_edit = acm.check_access(document, user_id="user123", permission_type="edit")
+```
+
+### Managing Permissions
+
+```python
+# Grant view access to a user
+acm.grant_access(document_id="doc123", user_id="user456", permission_type="view")
+
+# Revoke edit access from a user
+acm.revoke_access(document_id="doc123", user_id="user789", permission_type="edit")
+
+# Make a document publicly viewable
+acm.set_public_access(document_id="doc123", permission_type="view", public_access=True)
+
+# Make a document private
+acm.set_public_access(document_id="doc123", permission_type="view", public_access=False)
+```
+
+### Filtering Queries
+
+```python
+# Create a filter for database queries to only return documents the user can access
+filter_dict = acm.create_access_filter(user_id="user123")
+
+# Use the filter in a database query
+accessible_documents = db_client.query(filter=filter_dict)
+```
+
+### Getting Accessible Content
+
+```python
+# Get all models accessible to a user
+accessible_models = acm.get_accessible_models(user_id="user123")
+
+# Get all images accessible to a user
+accessible_images = acm.get_accessible_images(user_id="user123")
+```
+
+## Working with Permissions
+
+### Access Control Logic
+
+1. A user has access if they are directly listed in the permission
+2. A user has access if any of their groups are listed in the permission
+3. Everyone has access if "public" is listed in the permission
+4. The "edit" permission automatically includes "view" permission
+
+### Handling Group Memberships
+
+The component checks user group memberships through the `_get_user_groups` method. In a real implementation, this would query a user/group database.
+
+## Handling Asynchronous Operations
+
+The component automatically detects and handles both synchronous and asynchronous database operations:
+
+```python
+# Using with an asynchronous client
+async def main():
+    async_client = AsyncDatabaseClient()
+    acm = AccessControlManager(db_client=async_client)
+    
+    # The component will handle the async nature internally
+    await some_function_that_uses_acm(acm)
+```
+
+## Error Handling
+
+The component includes comprehensive error handling for database operations, JSON parsing errors, and other potential issues.
+
+## Best Practices
+
+1. Always initialize with a database client for full functionality
+2. Use the appropriate permission type for the access level needed
+3. Consider using group permissions for easier management of multiple users
+4. Use public access cautiously, typically only for view permissions
+5. Utilize the access filter for efficient querying of accessible documents
+
+This documentation should help you understand and implement the `AccessControlManager` in your document-based system.
+"""
 class AccessControlManager:
     def __init__(self, db_client=None):
         """
