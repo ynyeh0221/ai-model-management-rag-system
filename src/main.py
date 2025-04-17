@@ -9,7 +9,7 @@ from src.colab_generator.code_generator import CodeGenerator
 from src.colab_generator.colab_api_client import ColabAPIClient
 from src.colab_generator.reproducibility_manager import ReproducibilityManager
 from src.colab_generator.resource_quota_manager import ResourceQuotaManager
-from src.document_processor.code_parser import CodeParser
+from src.document_processor.llm_based_code_parser import CodeParser
 from src.document_processor.image_processor import ImageProcessor
 from src.document_processor.metadata_extractor import MetadataExtractor
 from src.document_processor.schema_validator import SchemaValidator

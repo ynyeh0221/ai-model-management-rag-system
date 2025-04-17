@@ -9,7 +9,7 @@ from unittest.mock import Mock
 
 # Ensure import from parent directory
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.document_processor.code_parser import CodeParser
+from src.document_processor.llm_based_code_parser import CodeParser
 
 
 class TestCodeParser(unittest.TestCase):
