@@ -9,7 +9,7 @@ from unittest.mock import Mock
 
 # Ensure import from parent directory
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.document_processor.llm_based_code_parser import CodeParser
+from src.document_processor.llm_based_code_parser import LLMBasedCodeParser
 
 
 class TestCodeParser(unittest.TestCase):
@@ -32,7 +32,7 @@ class TestCodeParser(unittest.TestCase):
                 }
             })
         }
-        self.parser = CodeParser(llm_interface=mock_llm_interface)
+        self.parser = LLMBasedCodeParser(llm_interface=mock_llm_interface)
         self.temp_dir = tempfile.TemporaryDirectory()
         self.test_file_path = os.path.join(self.temp_dir.name, "test_model.py")
 

@@ -9,7 +9,7 @@ from src.colab_generator.code_generator import CodeGenerator
 from src.colab_generator.colab_api_client import ColabAPIClient
 from src.colab_generator.reproducibility_manager import ReproducibilityManager
 from src.colab_generator.resource_quota_manager import ResourceQuotaManager
-from src.document_processor.llm_based_code_parser import CodeParser
+from src.document_processor.llm_based_code_parser import LLMBasedCodeParser
 from src.document_processor.image_processor import ImageProcessor
 from src.document_processor.metadata_extractor import MetadataExtractor
 from src.document_processor.schema_validator import SchemaValidator
@@ -33,7 +33,7 @@ def initialize_components(config_path="./config"):
 
     # Initialize document cli_runner components
     schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
-    code_parser = CodeParser(schema_validator=schema_validator, llm_interface=llm_interface)
+    code_parser = LLMBasedCodeParser(schema_validator=schema_validator, llm_interface=llm_interface)
     metadata_extractor = MetadataExtractor()
     image_processor = ImageProcessor(schema_validator)
     

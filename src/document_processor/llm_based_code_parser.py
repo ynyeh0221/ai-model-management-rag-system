@@ -137,7 +137,7 @@ Examples:
     print(f"Dataset: {metadata['dataset']['name']}")
     print(f"Description: {metadata['description']}")
 """
-class CodeParser:
+class LLMBasedCodeParser:
     def __init__(self, schema_validator=None, llm_interface=None):
         self.schema_validator = schema_validator
         self.llm_interface = llm_interface
