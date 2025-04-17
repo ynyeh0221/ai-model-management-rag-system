@@ -1,4 +1,3 @@
-# main.py
 import argparse
 import os
 
@@ -104,12 +103,16 @@ def main():
     process_scripts_parser.add_argument("directory", help="Directory containing model scripts")
 
     # Process single model script command
-    process_scripts_parser = subparsers.add_parser("process-single-script", help="Process a single model script")
-    process_scripts_parser.add_argument("file_path", help="Absolute path to the model script file")
+    process_single_script_parser = subparsers.add_parser("process-single-script", help="Process a single model script")
+    process_single_script_parser.add_argument("file_path", help="Absolute path to target model script file")
 
     # Process images command
     process_images_parser = subparsers.add_parser("process-images", help="Process images")
     process_images_parser.add_argument("directory", help="Directory containing images")
+
+    # Process single image command
+    process_single_image_parser = subparsers.add_parser("process-single-image", help="Process a single image")
+    process_single_image_parser.add_argument("file_path", help="Absolute path to target image")
 
     # Start UI command
     ui_parser = subparsers.add_parser("start-ui", help="Start the user interface")
@@ -128,6 +131,8 @@ def main():
         script_processor_runner.process_single_script(components, args.file_path)
     elif args.command == "process-images":
         image_processor_runner.process_images(components, args.directory)
+    elif args.command == "process-single-image":
+        image_processor_runner.process_single_image(components, args.file_path)
     elif args.command == "start-ui":
         ui_runner.start_ui(components, args.host, args.port)
     else:

@@ -66,7 +66,7 @@ class ScriptProcessorRunner:
 
         # Process files in parallel using a thread pool
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_file = {executor.submit(self.process_single_script, components, file_path): file_path
+            future_to_file = {executor.submit(self.process_single_script, components, file_path, logger): file_path
                               for file_path in script_files}
 
             for future in concurrent.futures.as_completed(future_to_file):
@@ -88,12 +88,13 @@ class ScriptProcessorRunner:
 
         logger.info("Model script processing completed")
 
-    def process_single_script(self, components, file_path):
+    def process_single_script(self, components, file_path, logger=None):
         """Process a single model script file.
 
         Args:
             components: Dictionary containing initialized system components
             file_path: Path to the model script file
+            logger: Logger instance
 
         Returns:
             Tuple of (document_id, success) if processed, None if skipped
@@ -107,8 +108,9 @@ class ScriptProcessorRunner:
         access_control = components["vector_db_manager"]["access_control"]
 
         # Set up logging
-        logging.basicConfig(level=logging.INFO)
-        logger = logging.getLogger("model_script_processor")
+        if logger is None:
+            logging.basicConfig(level=logging.INFO)
+            logger = logging.getLogger("model_script_processor")
 
         # Check if file exists
         if not os.path.isfile(file_path):

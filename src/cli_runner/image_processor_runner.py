@@ -59,8 +59,8 @@ class ImageProcessorRunner:
         # Process files in parallel using a thread pool
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
             future_to_file = {executor.submit(self.process_single_image,
-                                              file_path,
-                                              components): file_path for file_path in filtered_image_files}
+                                              components,
+                                              file_path): file_path for file_path in filtered_image_files}
 
             for future in concurrent.futures.as_completed(future_to_file):
                 file_path = future_to_file[future]
@@ -77,12 +77,13 @@ class ImageProcessorRunner:
 
         logger.info("Image processing completed")
 
-    def process_single_image(self, file_path, components):
+    def process_single_image(self, components, file_path, logger=None):
         """Process a single image file.
 
         Args:
             file_path: Path to the image file
             components: Dictionary containing initialized system components
+            logger: Logger instance
 
         Returns:
             Tuple of (document_id, success) if processed, None if skipped
@@ -93,6 +94,15 @@ class ImageProcessorRunner:
         image_embedder = components["vector_db_manager"]["image_embedder"]
         chroma_manager = components["vector_db_manager"]["chroma_manager"]
         access_control = components["vector_db_manager"]["access_control"]
+
+        # 0. Set up logging and check if image file exists
+        if logger is None:
+            logging.basicConfig(level=logging.INFO)
+            logger = logging.getLogger("image_processor")
+
+        if not os.path.isfile(file_path):
+            logger.error(f"File {file_path} does not exist")
+            return None
 
         # 1. Process the image and extract metadata
         process_result = image_processor.process_image(file_path)
@@ -158,4 +168,5 @@ class ImageProcessorRunner:
             # Pass the loaded image (a PIL Image) and the verified thumbnail_path.
             image_processor.generate_thumbnail(process_result["metadata"].get("image_path"), thumbnail_path)
 
+        logger.info(f"Successfully processed {file_path} with model ID {model_id}")
         return (document_id, True)
