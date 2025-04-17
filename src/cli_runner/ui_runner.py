@@ -253,6 +253,7 @@ class UIRunner:
         table.align = "l"  # Default left alignment for all
         table.align["Rank"] = "c"  # center
         table.align["Score"] = "r"  # right
+        table.align["File Size"] = "r"  # right align file size
 
         # Set max width for columns
         max_width = {
@@ -262,7 +263,7 @@ class UIRunner:
             "Architecture": 20,
             "Dataset": 20,
             "Hardware": 20,
-            "Absolute Path": 40  # Added max width for the path
+            "Absolute Path": 40
         }
 
         for column in max_width:
@@ -291,6 +292,10 @@ class UIRunner:
             score = result.get('score', result.get('similarity',
                                                    result.get('rank_score', result.get('rerank_score', 'N/A'))))
 
+            # Format score to 3 decimal places if it's a number
+            if isinstance(score, (int, float)):
+                score = f"{score:.3f}"
+
             # Get raw metadata
             metadata = result.get('metadata', {}) if isinstance(result.get('metadata'), dict) else {}
 
@@ -307,7 +312,24 @@ class UIRunner:
 
             # Extract file metadata
             file_metadata = parsed_metadata.get('file', {})
-            file_size = file_metadata.get('size_bytes', 'Unknown')
+            size_bytes = file_metadata.get('size_bytes', 'Unknown')
+
+            # Convert file size to MB
+            if isinstance(size_bytes, (int, float)):
+                size_mb = size_bytes / 1048576  # 1024 * 1024
+                if size_mb >= 1:
+                    file_size = f"{size_mb:.2f} MB"
+                else:
+                    # For small files, show in KB
+                    size_kb = size_bytes / 1024
+                    if size_kb >= 1:
+                        file_size = f"{size_kb:.2f} KB"
+                    else:
+                        # For very small files, show in bytes
+                        file_size = f"{size_bytes} bytes"
+            else:
+                file_size = size_bytes  # Keep as "Unknown" or whatever non-numeric value
+
             creation_date = file_metadata.get('creation_date', 'Unknown')
             if isinstance(creation_date, str) and len(creation_date) > 19:
                 creation_date = creation_date[:19]  # Truncate microseconds
