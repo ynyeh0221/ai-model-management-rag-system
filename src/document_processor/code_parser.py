@@ -92,9 +92,9 @@ class CodeParser:
         print(f"updated model_info: {model_info}")
         return model_info
 
-    def _extract_llm_metadata(self, code_str: str, max_retries: int = 5) -> dict:
+    def _extract_llm_metadata(self, code_str: str, max_retries: int = 10) -> dict:
         # Define a threshold to decide if chunking is needed
-        SHORT_SCRIPT_LINE_LIMIT = 150
+        SHORT_SCRIPT_LINE_LIMIT = 120
 
         lines = code_str.splitlines()
 
@@ -146,7 +146,7 @@ class CodeParser:
             "- Architecture: Neural network architecture type\n"
             "- Dataset: Training data used\n"
             "- Training configuration: batch size, learning rate, optimizer, epochs, hardware used\n\n"
-            f"Provide an extremely brief summary in 250 characters or less. Be direct and compact. "
+            f"Provide an extremely brief summary in 200 characters or less. Be direct and compact. "
             "Focus only on what's explicitly in the code. "
             "If you can't find certain information, don't mention that category. Only include information that appears in this code chunk."
         )
@@ -189,6 +189,9 @@ class CodeParser:
         # Join lines back with a single newline
         return '\n'.join(cleaned)
 
+    def truncate_string(self, s, threshold):
+        return s[:threshold] if len(s) > threshold else s
+
     def merge_chunk_summaries(self, chunk_summaries: list) -> str:
         """Merge multiple chunk summaries into a single comprehensive summary."""
         if not chunk_summaries:
@@ -207,8 +210,7 @@ class CodeParser:
             return "No useful metadata found in the code."
 
         # Combine the summaries into a single document
-        merged_summary = "Combined Code Analysis Summary:\n" + "\n".join(unique_summaries)
-
+        merged_summary = self.truncate_string("Combined Code Analysis Summary:\n" + "\n".join(unique_summaries), 12000) # 4,096 tokens ≈ 16,384 characters
         print(f"Merged summaries: {merged_summary}")
         return merged_summary
 

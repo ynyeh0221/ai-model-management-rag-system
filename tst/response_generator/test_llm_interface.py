@@ -47,7 +47,8 @@ class TestLLMInterface(unittest.TestCase):
         mock_post_response.raise_for_status.return_value = None
         mock_post.return_value = mock_post_response
 
-        llm = LLMInterface(provider="ollama", model_name="deepseek-llm:7b")
+        # Initialize LLMInterface with use_gpu=False to avoid adding GPU options
+        llm = LLMInterface(provider="ollama", model_name="deepseek-llm:7b", use_gpu=False)
 
         # The pull endpoint should be called because "deepseek-llm:7b" was not found.
         mock_post.assert_called_with(
@@ -187,7 +188,7 @@ class TestLLMInterface(unittest.TestCase):
         mock_tags_response.raise_for_status.return_value = None
 
         # Mock for GET to /api/show in get_model_info
-        dummy_info = {"name": "deepseek-llm:7b", "version": "1.0"}
+        dummy_info = {"name": "deepseek-llm:7b"}
         mock_show_response = MagicMock()
         mock_show_response.json.return_value = dummy_info
         mock_show_response.raise_for_status.return_value = None
