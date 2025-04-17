@@ -350,8 +350,6 @@ class LLMInterface:
         else:
             return []
 
-
-# Example usage
 if __name__ == "__main__":
     # Configure logging
     logging.basicConfig(
@@ -362,7 +360,7 @@ if __name__ == "__main__":
     # Initialize the interface with Apple Silicon GPU support
     llm = LLMInterface(
         provider="ollama",
-        model_name="deepseek-llm:7b",  # ✅ Correct model that supports GPU
+        model_name="deepseek-llm:7b",
         use_gpu=True,
         gpu_layers=None  # Will default to 99 for max GPU offloading
     )
@@ -387,7 +385,7 @@ if __name__ == "__main__":
     print("Structured Response:", structured_response)
 
     # Check GPU acceleration status
-    print("\n🔍 Checking GPU acceleration status:")
+    print("\nChecking GPU acceleration status:")
     model_info = llm.get_model_info()
 
     if model_info:
@@ -401,8 +399,8 @@ if __name__ == "__main__":
         # Explicit check for GPU layer config
         gpu_layers = details.get("gpu_layers", None)
         if gpu_layers:
-            print(f"✅ Configured to use GPU (gpu_layers = {gpu_layers}). Metal acceleration is likely active.")
+            print(f"Configured to use GPU (gpu_layers = {gpu_layers}). Metal acceleration is likely active.")
         else:
-            print("⚠️ GPU layers not configured in metadata. Metal acceleration may still be active if passed during generation.")
+            print("GPU layers not configured in metadata. Metal acceleration may still be active if passed during generation.")
     else:
-        print("❌ Could not fetch model info.")
+        print("Could not fetch model info.")
