@@ -72,47 +72,54 @@ The system is composed of the following components:
 | Logging           | Elasticsearch, Kibana |
 | Access Control    | JWT, Role-Based Access Control (RBAC) |
 
-## Getting Started
+## Getting Started with AI Model Management RAG System
+
+Based on your GitHub repository and main.py file, here's a corrected "Getting Started" guide that matches your actual repository structure:
 
 ### Clone the Repository
 
 ```bash
-git clone https://github.com/your-org/ai-model-management-rag.git
-cd ai-model-management-rag
+git clone https://github.com/your-org/ai-model-management-rag-system.git
+cd ai-model-management-rag-system
 ```
 
-### Set Up the Backend Environment
+### Set Up the Environment
 
 ```bash
 python -m venv venv
-source venv/bin/activate
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Start the Backend Server
+### Using the Command Line Interface
+
+The system provides several CLI commands:
 
 ```bash
-uvicorn app.main:app --reload
-```
+# Process all model scripts in a directory
+python main.py process-scripts /path/to/scripts
 
-### Start the Frontend
+# Process a single model script
+python main.py process-single-script /path/to/script.py
 
-```bash
-cd frontend
-npm install
-npm run dev
+# Process images in a directory
+python main.py process-images /path/to/images
+
+# Start the user interface
+python main.py start-ui --host localhost --port 8000
 ```
 
 ## Repository Structure
 
-- `document_processor/` – Code and image parsing, metadata extraction
-- `schemas/` – Pydantic and JSON schema definitions
-- `vector_db/` – Embedding generation, vector storage, hybrid search
-- `query_engine/` – Query parsing, intent classification, result ranking
-- `notebook_generator/` – Colab notebook creation and management
-- `prompt_studio/` – Prompt templates, A/B testing, version control
-- `ui/` – React-based user interface
-- `monitoring/` – System metrics, logs, dashboards
+* `cli_runner/` – Command-line interface runners for various functions
+* `document_processor/` – Code and image parsing, metadata extraction, schema validation
+* `vector_db_manager/` – Text and image embedding, ChromaDB integration, access control
+* `query_engine/` – Query parsing, search dispatching, result reranking, analytics
+* `response_generator/` – LLM interface, template management, prompt visualization
+* `colab_generator/` – Colab notebook creation, API client, reproducibility management
+* `config/` – Configuration files including schema registry
+* `templates/` – Prompt templates for the response generator
+* `chroma_db/` – Storage location for the ChromaDB vector database
 
 ## Example Use Cases
 
