@@ -379,7 +379,6 @@ class ChromaManager:
             ids = []
             contents = []
             metadatas = []
-            embeddings_list = []
             
             for document in documents:
                 doc_id = document.get("id", f"{collection_name}_{hash(str(document))}")
