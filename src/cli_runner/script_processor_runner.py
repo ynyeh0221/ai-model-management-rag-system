@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 
+
 class ScriptProcessorRunner:
 
     def __init__(self):
@@ -18,6 +19,21 @@ class ScriptProcessorRunner:
             return dt.replace(microsecond=0).isoformat()
         except Exception:
             return ts  # fallback to original if parsing fails
+
+    def _format_natural_date(self, iso_date: str):
+        """Format ISO date to natural month.
+
+        Args:
+            iso_date: ISO formatted date string
+
+        Returns:
+            Natural month representation
+        """
+        try:
+            dt = datetime.fromisoformat(iso_date)
+            return dt.strftime("%B")  # e.g. "April 2025"
+        except Exception:
+            return "Unknown"
 
     def process_model_scripts(self, components, directory_path):
         """Process model scripts in a directory."""
@@ -72,13 +88,12 @@ class ScriptProcessorRunner:
 
         logger.info("Model script processing completed")
 
-
     def process_single_script(self, components, file_path):
         """Process a single model script file.
 
         Args:
-            file_path: Path to the model script file
             components: Dictionary containing initialized system components
+            file_path: Path to the model script file
 
         Returns:
             Tuple of (document_id, success) if processed, None if skipped
@@ -91,63 +106,97 @@ class ScriptProcessorRunner:
         chroma_manager = components["vector_db_manager"]["chroma_manager"]
         access_control = components["vector_db_manager"]["access_control"]
 
-        # 0. Set up logging and ensure file exists
+        # Set up logging
         logging.basicConfig(level=logging.INFO)
         logger = logging.getLogger("model_script_processor")
 
+        # Check if file exists
         if not os.path.isfile(file_path):
             logger.error(f"File {file_path} does not exist")
-            return
+            return None
 
-        # 1. Parse the code to determine if it's a model script and extract relevant parts
+        # Parse the code to determine if it's a model script
         parse_result = code_parser.parse(file_path)
         if not parse_result or not parse_result.get("is_model_script", False):
             # Not a model script, skip it
             return None
 
-        # 2. Extract metadata
+        # Split into chunks for processing
+        chunks = code_parser.split_ast_and_subsplit_chunks(
+            file_content=parse_result["content"],
+            file_path=file_path,
+            chunk_size=5000,
+            overlap=1000
+        )
+
+        # Extract metadata and prepare metadata document
+        model_id, metadata_document = self._extract_and_prepare_metadata(
+            metadata_extractor,
+            parse_result,
+            file_path,
+            chunks
+        )
+
+        # Validate and store metadata document
+        metadata_stored = self._validate_and_store_metadata(
+            schema_validator,
+            metadata_document,
+            text_embedder,
+            chroma_manager,
+            access_control
+        )
+
+        if not metadata_stored:
+            logger.warning(f"Failed to store metadata for {file_path}")
+            return None, False
+
+        # Process and store code chunks
+        chunk_documents = self._process_and_store_chunks(
+            chunks,
+            model_id,
+            metadata_document["id"],
+            schema_validator,
+            text_embedder,
+            chroma_manager
+        )
+
+        if chunk_documents:
+            logger.info(f"Successfully processed {file_path} with model ID {metadata_document['id']}")
+            return metadata_document["id"], True
+        else:
+            logger.warning(f"Skipped {file_path}: Failed to process model script")
+            return None, False
+
+    def _extract_and_prepare_metadata(self, metadata_extractor, parse_result, file_path, chunks):
+        """Extract metadata and prepare metadata document.
+
+        Args:
+            metadata_extractor: The metadata extractor component
+            parse_result: Result from code parsing
+            file_path: Path to the file
+            chunks: Code chunks
+
+        Returns:
+            Tuple of (model_id, metadata_document)
+        """
+        # Extract metadata
         metadata = metadata_extractor.extract_metadata(file_path)
 
-        # 3. Split into chunks for processing
-        chunks = code_parser.split_ast_and_subsplit_chunks(file_content=parse_result["content"], file_path=file_path, chunk_size=5000, overlap=1000)
-
+        # Prepare model ID
         file_path_obj = Path(file_path)
         folder_name = file_path_obj.parent.name
         file_stem = file_path_obj.stem
         model_id = f"{folder_name}_{file_stem}"
 
-        # Create metadata document first
+        # Format dates
         creation_date_raw = self._clean_iso_timestamp(metadata.get("file", {}).get("creation_date", "N/A"))
         last_modified_raw = self._clean_iso_timestamp(metadata.get("file", {}).get("last_modified_date", "N/A"))
 
-        def format_natural_date(iso_date: str):
-            try:
-                dt = datetime.fromisoformat(iso_date)
-                return dt.strftime("%B")  # e.g. "April 2025"
-            except Exception:
-                return "Unknown"
-
-        creation_natural_month = format_natural_date(creation_date_raw)
-        last_modified_natural_month = format_natural_date(last_modified_raw)
+        creation_natural_month = self._format_natural_date(creation_date_raw)
+        last_modified_natural_month = self._format_natural_date(last_modified_raw)
 
         # Extract additional metadata from LLM parse_result
-        llm_fields = {
-            "description": parse_result.get("description", "No description"),
-            "framework": parse_result.get("framework", {}),
-            "architecture": parse_result.get("architecture", {}),
-            "dataset": parse_result.get("dataset", {}),
-            "training_config": parse_result.get("training_config", {})
-        }
-
-        # Ensure all fields are the correct type
-        if isinstance(llm_fields["framework"], str):
-            llm_fields["framework"] = {"name": llm_fields["framework"], "version": "unknown"}
-        if isinstance(llm_fields["architecture"], str):
-            llm_fields["architecture"] = {"type": llm_fields["architecture"]}
-        if isinstance(llm_fields["dataset"], str):
-            llm_fields["dataset"] = {"name": llm_fields["dataset"]}
-        if not isinstance(llm_fields["training_config"], dict):
-            llm_fields["training_config"] = {}
+        llm_fields = self._extract_llm_fields(parse_result)
 
         # Prepare metadata document
         metadata_document = {
@@ -171,37 +220,63 @@ class ScriptProcessorRunner:
             }
         }
 
+        return model_id, metadata_document
+
+    def _extract_llm_fields(self, parse_result):
+        """Extract and format LLM parsed metadata fields from parse result.
+
+        Args:
+            parse_result: Result from code parsing
+
+        Returns:
+            Dictionary of formatted LLM parsed metadata fields
+        """
+        llm_fields = {
+            "description": parse_result.get("description", "No description"),
+            "framework": parse_result.get("framework", {}),
+            "architecture": parse_result.get("architecture", {}),
+            "dataset": parse_result.get("dataset", {}),
+            "training_config": parse_result.get("training_config", {})
+        }
+
+        # Ensure all fields are the correct type
+        if isinstance(llm_fields["framework"], str):
+            llm_fields["framework"] = {"name": llm_fields["framework"], "version": "unknown"}
+        if isinstance(llm_fields["architecture"], str):
+            llm_fields["architecture"] = {"type": llm_fields["architecture"]}
+        if isinstance(llm_fields["dataset"], str):
+            llm_fields["dataset"] = {"name": llm_fields["dataset"]}
+        if not isinstance(llm_fields["training_config"], dict):
+            llm_fields["training_config"] = {}
+
+        return llm_fields
+
+    def _validate_and_store_metadata(self, schema_validator, metadata_document, text_embedder, chroma_manager,
+                                     access_control):
+        """Validate and store metadata document.
+
+        Args:
+            schema_validator: The schema validator component
+            metadata_document: The metadata document
+            text_embedder: The text embedder component
+            chroma_manager: The chroma manager component
+            access_control: The access control component
+
+        Returns:
+            True if successful, False otherwise
+        """
         # Validate using the metadata schema
         validation_result = schema_validator.validate(metadata_document, "model_metadata_schema")
         if not validation_result["valid"]:
-            logging.warning(f"Schema validation failed for metadata document of {file_path}: {validation_result['errors']}")
-            return None
+            logging.warning(f"Schema validation failed for metadata document: {validation_result['errors']}")
+            return False
 
         # Add access control metadata
         access_metadata = access_control.get_document_permissions(metadata_document)
         metadata_document["metadata"]["access_control"] = access_metadata
 
         # Create metadata embedding content
-        metadata_content = {
-            "title": model_id,
-            "description": f"""
-                Model created in {creation_natural_month}.
-                Created in month: {creation_natural_month}.
-                Created in year: {creation_date_raw[:4]}.
-                Created on {creation_date_raw}.
-                Last modified in {last_modified_natural_month}.
-                Last modified in year: {last_modified_raw[:4]}.
-                Last modified on {last_modified_raw}.
-                Size: {metadata.get("file", {}).get('size_bytes', 'N/A')} bytes.
-    
-                Description: {llm_fields["description"]}.
-                Framework: {llm_fields["framework"]}.
-                Architecture: {llm_fields["architecture"]}.
-                Dataset: {llm_fields["dataset"]}.
-                Training config: {llm_fields["training_config"]}.
-            """
-        }
-
+        metadata_content = self._create_metadata_content(metadata_document)
         metadata_embedding = text_embedder.embed_mixed_content(metadata_content)
 
         # Store metadata document
@@ -212,8 +287,56 @@ class ScriptProcessorRunner:
             embed_content=metadata_embedding
         ))
 
-        # Process and store code chunks
+        return True
+
+    def _create_metadata_content(self, metadata_document):
+        """Create metadata content for embedding.
+
+        Args:
+            metadata_document: The metadata document
+
+        Returns:
+            Dictionary with title and description for embedding
+        """
+        metadata = metadata_document["metadata"]
+
+        return {
+            "title": metadata["model_id"],
+            "description": f"""
+                Model created in {metadata["created_month"]}.
+                Created in month: {metadata["created_month"]}.
+                Created in year: {metadata["created_year"]}.
+                Created on {metadata["created_at"]}.
+                Last modified in {metadata["last_modified_month"]}.
+                Last modified in year: {metadata["last_modified_year"]}.
+                Last modified on {metadata["created_at"]}.
+                Size: {metadata.get("file", {}).get('size_bytes', 'N/A')} bytes.
+
+                Description: {metadata["description"]}.
+                Framework: {metadata["framework"]}.
+                Architecture: {metadata["architecture"]}.
+                Dataset: {metadata["dataset"]}.
+                Training config: {metadata["training_config"]}.
+            """
+        }
+
+    def _process_and_store_chunks(self, chunks, model_id, metadata_doc_id, schema_validator, text_embedder,
+                                  chroma_manager):
+        """Process and store code chunks.
+
+        Args:
+            chunks: Code chunks
+            model_id: Model ID
+            metadata_doc_id: Metadata document ID
+            schema_validator: The schema validator component
+            text_embedder: The text embedder component
+            chroma_manager: The chroma manager component
+
+        Returns:
+            List of processed chunk documents
+        """
         chunk_documents = []
+
         for i, chunk_obj in enumerate(chunks):
             chunk_text = chunk_obj.get("text", "")
             if not isinstance(chunk_text, str):
@@ -228,7 +351,7 @@ class ScriptProcessorRunner:
                     "model_id": model_id,
                     "chunk_id": i,
                     "total_chunks": len(chunks),
-                    "metadata_doc_id": metadata_document["id"],
+                    "metadata_doc_id": metadata_doc_id,
                     "offset": chunk_obj.get("offset", 0),
                     "type": chunk_obj.get("type", "code"),
                 }
@@ -238,7 +361,7 @@ class ScriptProcessorRunner:
             validation_result = schema_validator.validate(chunk_document, "model_chunk_schema")
             if not validation_result["valid"]:
                 logging.warning(
-                    f"Schema validation failed for chunk schema of {file_path}, chunk {i}: {validation_result['errors']}")
+                    f"Schema validation failed for chunk schema, chunk {i}: {validation_result['errors']}")
                 continue
 
             # Create chunk embedding
@@ -254,9 +377,4 @@ class ScriptProcessorRunner:
 
             chunk_documents.append(chunk_document)
 
-        if chunk_documents:
-            logger.info(f"Successfully processed {file_path} with model ID {metadata_document['id''']}")
-            return (metadata_document["id"], True)
-        else:
-            logger.warning(f"Skipped {file_path}: Failed to process model script")
-            return (None, False)
+        return chunk_documents
