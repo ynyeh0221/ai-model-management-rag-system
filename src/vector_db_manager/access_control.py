@@ -5,19 +5,16 @@ import json
 class AccessControlManager:
     def __init__(self, db_client=None):
         """
-        Initialize the AccessControlManager with a database client.
+        Initialize the AccessControlManager with a simplified permission format.
 
         Args:
             db_client: A client connection to the database that stores access control information.
-                      This could be Chroma or an additional metadata database.
         """
         self.db_client = db_client
         # Define permission hierarchy - higher levels include lower levels
         self.permission_hierarchy = {
-            "owner": ["view", "edit", "share", "delete"],
-            "edit": ["view", "edit"],
-            "share": ["view", "share"],
-            "view": ["view"]
+            "edit": ["view", "edit"],  # edit permission includes view permission
+            "view": ["view"]  # view permission only includes itself
         }
 
     def check_access(self, document, user_id, permission_type="view"):
@@ -27,45 +24,35 @@ class AccessControlManager:
         Args:
             document: Document object or dict containing access_control metadata
             user_id: The ID of the user requesting access
-            permission_type: Type of permission to check ("view", "edit", "share", "delete")
+            permission_type: Type of permission to check ("view", "edit")
 
         Returns:
             bool: True if user has the required permission, False otherwise
         """
-        """
-        if not document or "metadata" not in document or "access_control" not in document["metadata"]:
-            # If document has no access control metadata, deny access by default
+        # Get access control information
+        access_control = self._get_access_control(document)
+        if not access_control:
             return False
 
-        access_control = document["metadata"]["access_control"]
-
-        # Owner has all permissions
-        if access_control.get("owner") == user_id:
-            return True
-
-        # Check if user is explicitly mentioned in the specific permission list
-        if permission_type in access_control:
-            permission_list = access_control.get(f"{permission_type}_permissions", [])
-            if user_id in permission_list:
-                return True
-
-        # Check group permissions - check all permission types that would include the requested permission
+        # Check all permission types that would include the requested permission
         for higher_perm, included_perms in self.permission_hierarchy.items():
-            if permission_type in included_perms:
-                group_list = access_control.get(f"{higher_perm}_permissions", [])
+            if permission_type in included_perms and higher_perm in access_control:
+                permission_list = access_control[higher_perm]
+
+                # Check if user is in the permission list
+                if user_id in permission_list:
+                    return True
 
                 # Check if any of the user's groups are in the permission list
                 user_groups = self._get_user_groups(user_id)
-                if any(group in group_list for group in user_groups):
+                if any(group in permission_list for group in user_groups):
                     return True
 
-        # Check for public access for view permission
-        if permission_type == "view" and "public" in access_control.get("view_permissions", []):
-            return True
+                # Check if "public" is in the permission list, which grants access to everyone
+                if "public" in permission_list:
+                    return True
 
         return False
-        """
-        return True
 
     def grant_access(self, document_id, user_id, permission_type="view"):
         """
@@ -74,7 +61,7 @@ class AccessControlManager:
         Args:
             document_id: The ID of the document
             user_id: The ID of the user to grant access to
-            permission_type: Type of permission to grant ("view", "edit", "share", "delete")
+            permission_type: Type of permission to grant ("view", "edit")
 
         Returns:
             bool: True if access was granted successfully, False otherwise
@@ -87,25 +74,25 @@ class AccessControlManager:
         if not document:
             return False
 
-        # Get current access control or initialize if not exists
+        # Get current access control or initialize
         metadata = document.get("metadata", {})
-        access_control = metadata.get("access_control", {
-            "owner": None,
-            "view_permissions": [],
-            "edit_permissions": [],
-            "share_permissions": []
-        })
+        access_control_str = metadata.get("access_control", '{"view": [], "edit": []}')
 
-        # Update the appropriate permission list if user not already in it
-        perm_list_key = f"{permission_type}_permissions"
-        if perm_list_key in access_control:
-            if user_id not in access_control[perm_list_key]:
-                access_control[perm_list_key].append(user_id)
-        else:
-            access_control[perm_list_key] = [user_id]
+        try:
+            access_control = json.loads(access_control_str)
+        except json.JSONDecodeError:
+            access_control = {"view": [], "edit": []}
+
+        # Ensure the permission type exists
+        if permission_type not in access_control:
+            access_control[permission_type] = []
+
+        # Add user to the permission list if not already there
+        if user_id not in access_control[permission_type]:
+            access_control[permission_type].append(user_id)
 
         # Update the document's metadata
-        metadata["access_control"] = access_control
+        metadata["access_control"] = json.dumps(access_control)
         return self._update_document_metadata(document_id, metadata)
 
     def revoke_access(self, document_id, user_id, permission_type="view"):
@@ -115,7 +102,7 @@ class AccessControlManager:
         Args:
             document_id: The ID of the document
             user_id: The ID of the user to revoke access from
-            permission_type: Type of permission to revoke ("view", "edit", "share", "delete")
+            permission_type: Type of permission to revoke ("view", "edit")
 
         Returns:
             bool: True if access was revoked successfully, False otherwise
@@ -130,73 +117,32 @@ class AccessControlManager:
 
         # Get current access control
         metadata = document.get("metadata", {})
-        access_control = metadata.get("access_control", {})
+        access_control_str = metadata.get("access_control", '{"view": [], "edit": []}')
 
-        # Cannot revoke owner permissions
-        if permission_type == "owner" and access_control.get("owner") == user_id:
-            return False
+        try:
+            access_control = json.loads(access_control_str)
+        except json.JSONDecodeError:
+            return False  # Invalid access_control format
 
-        # Remove user from the permission list
-        perm_list_key = f"{permission_type}_permissions"
-        if perm_list_key in access_control and user_id in access_control[perm_list_key]:
-            access_control[perm_list_key].remove(user_id)
+        # Remove user from the permission list if they're in it
+        if permission_type in access_control and user_id in access_control[permission_type]:
+            access_control[permission_type].remove(user_id)
 
         # Update the document's metadata
-        metadata["access_control"] = access_control
+        metadata["access_control"] = json.dumps(access_control)
         return self._update_document_metadata(document_id, metadata)
 
-    def create_access_filter(self, user_id):
+    def set_public_access(self, document_id, permission_type="view", public_access=True):
         """
-        Create a filter for access control in queries.
-        This generates a filter that can be applied to Chroma queries to only return
-        documents the user has permission to view.
-
-        Args:
-            user_id: The ID of the user making the query
-
-        Returns:
-            dict: A filter dictionary that can be passed to Chroma's query method
-        """
-        user_groups = self._get_user_groups(user_id)
-
-        # Create a filter that matches documents where:
-        # 1. The user is the owner
-        # 2. The user is explicitly in view_permissions
-        # 3. Any of the user's groups are in view_permissions
-        # 4. The document is public (has "public" in view_permissions)
-
-        filter_dict = {
-            "$or": [
-                {"metadata.access_control.owner": user_id},
-                {"metadata.access_control.view_permissions": {"$contains": user_id}},
-                {"metadata.access_control.edit_permissions": {"$contains": user_id}},
-                {"metadata.access_control.share_permissions": {"$contains": user_id}},
-                {"metadata.access_control.view_permissions": {"$contains": "public"}}
-            ]
-        }
-
-        # Add group permissions if user belongs to any groups
-        if user_groups:
-            for group in user_groups:
-                filter_dict["$or"].extend([
-                    {"metadata.access_control.view_permissions": {"$contains": group}},
-                    {"metadata.access_control.edit_permissions": {"$contains": group}},
-                    {"metadata.access_control.share_permissions": {"$contains": group}}
-                ])
-
-        return filter_dict
-
-    def transfer_ownership(self, document_id, current_owner_id, new_owner_id):
-        """
-        Transfer ownership of a document from one user to another.
+        Set or remove public access for a document.
 
         Args:
             document_id: The ID of the document
-            current_owner_id: The ID of the current owner
-            new_owner_id: The ID of the new owner
+            permission_type: Type of permission to set public access for ("view", "edit")
+            public_access: True to grant public access, False to revoke it
 
         Returns:
-            bool: True if ownership was transferred successfully, False otherwise
+            bool: True if public access was set/revoked successfully, False otherwise
         """
         if not self.db_client:
             raise ValueError("Database client is required to modify access control")
@@ -206,25 +152,88 @@ class AccessControlManager:
         if not document:
             return False
 
-        # Verify current ownership
+        # Get current access control or initialize
         metadata = document.get("metadata", {})
-        access_control = metadata.get("access_control", {})
+        access_control_str = metadata.get("access_control", '{"view": [], "edit": []}')
 
-        if access_control.get("owner") != current_owner_id:
-            return False  # Only the current owner can transfer ownership
+        try:
+            access_control = json.loads(access_control_str)
+        except json.JSONDecodeError:
+            access_control = {"view": [], "edit": []}
 
-        # Update owner
-        access_control["owner"] = new_owner_id
+        # Ensure the permission type exists
+        if permission_type not in access_control:
+            access_control[permission_type] = []
 
-        # Make sure the new owner has all permissions
-        for perm_type in ["view", "edit", "share"]:
-            perm_key = f"{perm_type}_permissions"
-            if perm_key in access_control and new_owner_id not in access_control[perm_key]:
-                access_control[perm_key].append(new_owner_id)
+        # Add or remove "public" from the permission list
+        if public_access and "public" not in access_control[permission_type]:
+            access_control[permission_type].append("public")
+        elif not public_access and "public" in access_control[permission_type]:
+            access_control[permission_type].remove("public")
 
         # Update the document's metadata
-        metadata["access_control"] = access_control
+        metadata["access_control"] = json.dumps(access_control)
         return self._update_document_metadata(document_id, metadata)
+
+    def create_access_filter(self, user_id):
+        """
+        Create a filter for access control in queries.
+        This generates a filter that can be applied to database queries to only return
+        documents the user has permission to view.
+
+        Args:
+            user_id: The ID of the user making the query
+
+        Returns:
+            dict: A filter dictionary that can be passed to the database query method
+        """
+        user_groups = self._get_user_groups(user_id)
+
+        # Create a filter that matches documents where:
+        # 1. The user is explicitly in any permission list
+        # 2. Any of the user's groups are in any permission list
+        # 3. The document is public (has "public" in any permission list)
+
+        filter_dict = {
+            "$or": [
+                {"metadata.access_control": {"$contains": f'"{user_id}"'}},  # User in any permission list
+                {"metadata.access_control": {"$contains": '"public"'}}  # Public access
+            ]
+        }
+
+        # Add group permissions if user belongs to any groups
+        if user_groups:
+            for group in user_groups:
+                filter_dict["$or"].append(
+                    {"metadata.access_control": {"$contains": f'"{group}"'}}
+                )
+
+        return filter_dict
+
+    def _get_access_control(self, document):
+        """
+        Get access control information from a document.
+
+        Args:
+            document: Document object or dict
+
+        Returns:
+            dict: Access control information, or None if it cannot be retrieved
+        """
+        if not document or "metadata" not in document:
+            return None
+
+        metadata = document["metadata"]
+        if "access_control" not in metadata:
+            return None
+
+        try:
+            if isinstance(metadata["access_control"], dict):
+                return metadata["access_control"]
+            else:
+                return json.loads(metadata["access_control"])
+        except (json.JSONDecodeError, TypeError):
+            return None
 
     def _get_user_groups(self, user_id):
         """
@@ -238,11 +247,6 @@ class AccessControlManager:
         """
         # In a real implementation, this would query a user/group database
         # For now, we'll return a placeholder implementation
-
-        # This could be implemented by:
-        # 1. Querying an identity provider (e.g., LDAP, Okta)
-        # 2. Checking a local database of group memberships
-        # 3. Using a cache for performance
 
         if not self.db_client:
             return []
@@ -342,76 +346,9 @@ class AccessControlManager:
             print(f"Error updating document metadata: {e}")
             return False
 
-    def log_access_attempt(self, document_id, user_id, permission_type, success):
-        """
-        Log an access attempt for security auditing.
-
-        Args:
-            document_id: The ID of the document
-            user_id: The ID of the user
-            permission_type: Type of permission requested
-            success: Whether access was granted
-
-        Returns:
-            bool: True if log was recorded successfully, False otherwise
-        """
-        # In a real implementation, this would write to a secure audit log
-        # Could use a separate database table or logging service
-
-        log_entry = {
-            "timestamp": self._get_current_timestamp(),
-            "document_id": document_id,
-            "user_id": user_id,
-            "permission_type": permission_type,
-            "success": success,
-            "ip_address": self._get_user_ip(user_id)
-        }
-
-        # Example implementation - adapt based on actual logging mechanism
-        try:
-            if hasattr(self.db_client, "log_access"):
-                # Check if log_access is async
-                if asyncio.iscoroutinefunction(self.db_client.log_access):
-                    # Handle async log_access
-                    try:
-                        # Get or create event loop
-                        try:
-                            loop = asyncio.get_event_loop()
-                        except RuntimeError:
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-
-                        # Run the async method
-                        coro = self.db_client.log_access(log_entry)
-                        loop.run_until_complete(coro)
-                    except Exception as e:
-                        print(f"Error running async log_access: {e}")
-                        return False
-                else:
-                    # Synchronous log_access
-                    self.db_client.log_access(log_entry)
-            return True
-        except Exception as e:
-            print(f"Error logging access attempt: {e}")
-            return False
-
-    def _get_current_timestamp(self):
-        """Get the current timestamp in ISO format."""
-        from datetime import datetime
-        return datetime.utcnow().isoformat()
-
-    def _get_user_ip(self, user_id):
-        """Get the IP address of the user's current session."""
-        # This would be implemented based on the application's session management
-        return "0.0.0.0"  # Placeholder
-
-    def get_document_permissions(self, document: dict) -> dict:
+    def get_document_permissions(self, document):
         """
         Determine and return the access control metadata for the document.
-
-        This simple implementation returns a default permission,
-        granting public view rights. In a more complete system, you might
-        check the document's metadata, the current user's role, and other parameters.
 
         Args:
             document (dict): The document for which to determine permissions.
@@ -420,7 +357,12 @@ class AccessControlManager:
             dict: A dictionary representing access control permissions.
                   For example, {"view": ["public"], "edit": []}
         """
-        # For demonstration, we return default permissions.
+        # Try to get access control from document metadata
+        access_control = self._get_access_control(document)
+        if access_control:
+            return access_control
+
+        # If not found, return default permissions
         return {"view": ["public"], "edit": []}
 
     def get_accessible_models(self, user_id):
@@ -496,7 +438,7 @@ class AccessControlManager:
                     except Exception as inner_e:
                         print(f"Error processing model entry: {inner_e}")
                         continue
-            print(accessible_models)
+
             return accessible_models
 
         except Exception as e:
