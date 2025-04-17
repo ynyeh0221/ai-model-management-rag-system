@@ -228,127 +228,37 @@ class ChromaManager:
 
         Returns:
             str: The ID of the added document.
+
+        Note:
+            This method uses collection.upsert internally, which means if a document
+            with the same ID already exists, it will be replaced with the new document.
+            This enables updating existing documents by using the same document_id.
         """
         try:
-            # Convert embed_content to a simple boolean if it's a numpy array or other complex type
-            if not isinstance(embed_content, bool):
-                if isinstance(embed_content, np.ndarray):
-                    # If it's a numpy array, convert using any()
-                    should_embed = embed_content.any()
-                else:
-                    try:
-                        should_embed = bool(embed_content)
-                    except Exception:
-                        should_embed = True
-            else:
-                should_embed = embed_content
+            # Process document ID
+            doc_id = self._get_document_id(document, document_id, collection_name)
 
-            # Use the provided document_id if given, otherwise generate one.
-            if document_id is None:
-                doc_id = document.get("id", f"{collection_name}_{hash(str(document))}")
-            else:
-                doc_id = document_id
-
+            # Process content and metadata
             content = document.get("content", "")
             metadata = document.get("metadata", {})
+            flat_metadata = self._flatten_metadata(metadata)
 
-            # Ensure metadata is a dictionary.
-            if not isinstance(metadata, dict):
-                metadata = {}
-
-            # Flatten nested dictionaries in metadata and handle all complex types
-            flat_metadata = {}
-            for key, value in metadata.items():
-                if key == "model_id" and isinstance(value, str):
-                    flat_metadata[key] = value  # don't double stringify
-                # Safe flattening: only JSON-stringify complex structures
-                elif isinstance(value, dict) or isinstance(value, list):
-                    flat_metadata[key] = json.dumps(value)
-                elif value is None:
-                    flat_metadata[key] = ""
-                elif isinstance(value, (str, int, float, bool)):
-                    flat_metadata[key] = value
-                else:
-                    flat_metadata[key] = str(value)
-
-            flat_metadata["offset"] = document["metadata"].get("offset", -999)
-
-            # Select the appropriate collection.
+            # Get collection and prepare for upsert
             collection = self.get_collection(collection_name)
+            embeddings = await self._generate_embeddings(content, collection_name, embed_content)
 
-            # Determine if content is non-empty
-            has_content = False
-            if isinstance(content, (str, bytes)):
-                has_content = bool(content.strip())
-            elif isinstance(content, np.ndarray):
-                has_content = content.size > 0
-            elif hasattr(content, '__len__'):
-                has_content = len(content) > 0
-            else:
-                try:
-                    has_content = bool(content)
-                except Exception:
-                    has_content = False
-
-            # Initialize embeddings to None
-            embeddings = None
-
-            # Generate embeddings if requested (or if we're in the images collection)
-            if should_embed and (has_content or collection_name == "generated_images"):
-                if collection_name == "generated_images":
-                    embeddings = await self._run_in_executor(
-                        self.image_embedding_function,
-                        ["Image embedding placeholder"]
-                    )
-                else:
-                    embeddings = await self._run_in_executor(
-                        self.text_embedding_function,
-                        [content]
-                    )
-
-            # Build keyword arguments for the add() method based on collection type.
-            if collection_name == "generated_images":
-                # For generated images, expect 'image_path' in metadata.
-                image_path = metadata.get("image_path")
-                if not image_path:
-                    raise ValueError("For 'generated_images' collection, an 'image_path' must be provided in metadata.")
-                # Load the image as a NumPy array.
-                try:
-                    from PIL import Image
-                    with Image.open(image_path) as img:
-                        # Convert the image to a numpy array.
-                        image_np = np.array(img)
-                except Exception as e:
-                    raise ValueError(f"Error loading image from '{image_path}': {e}")
-                add_kwargs = {
-                    "ids": [doc_id],
-                    "images": [image_np],
-                    "embeddings": embeddings,
-                    "metadatas": [flat_metadata] if flat_metadata else None
-                }
-            else:
-                add_kwargs = {
-                    "ids": [doc_id],
-                    "documents": [content] if content else None,
-                    "embeddings": embeddings,
-                    "metadatas": [flat_metadata] if flat_metadata else None
-                }
-
-            # Add the document using the appropriate field.
-            await self._run_in_executor(
-                collection.add,
-                **add_kwargs
+            # Add document to collection
+            await self._upsert_document(
+                collection,
+                doc_id,
+                content,
+                embeddings,
+                flat_metadata,
+                collection_name,
+                document
             )
 
-            self.logger.debug(f"[DEBUG] Saving document {doc_id} with metadata: {flat_metadata}")
-
-            # Immediately fetch it back
-            result = await self.get(
-                collection_name=collection_name,
-                ids=[doc_id],
-                include=["metadatas"]
-            )
-            print(f"[DEBUG] Immediately fetch result back: {result}")
+            self.logger.debug(f"[DEBUG] Saved document {doc_id} with metadata: {flat_metadata}")
 
             return doc_id
 
@@ -356,88 +266,221 @@ class ChromaManager:
             self.logger.error(f"Error adding document to {collection_name}: {e}", exc_info=True)
             raise
 
+    def _get_document_id(self, document: Dict[str, Any], document_id: Optional[str], collection_name: str) -> str:
+        """Generate or use provided document ID."""
+        if document_id is not None:
+            return document_id
+        return document.get("id", f"{collection_name}_{hash(str(document))}")
+
+    def _flatten_metadata(self, metadata: Any) -> Dict[str, Any]:
+        """Flatten nested dictionaries in metadata and handle complex types."""
+        if not isinstance(metadata, dict):
+            return {}
+
+        flat_metadata = {}
+        for key, value in metadata.items():
+            if key == "model_id" and isinstance(value, str):
+                flat_metadata[key] = value  # don't double stringify
+            # Safe flattening: only JSON-stringify complex structures
+            elif isinstance(value, (dict, list)):
+                flat_metadata[key] = json.dumps(value)
+            elif value is None:
+                flat_metadata[key] = ""
+            elif isinstance(value, (str, int, float, bool)):
+                flat_metadata[key] = value
+            else:
+                flat_metadata[key] = str(value)
+
+        flat_metadata["offset"] = metadata.get("offset", -999)
+        return flat_metadata
+
+    async def _generate_embeddings(self, content, collection_name: str, embed_content) -> Optional[List[Any]]:
+        """Generate embeddings based on content and collection type."""
+        # Normalize embed_content to boolean
+        should_embed = self._normalize_embed_flag(embed_content)
+
+        # Check if content exists
+        has_content = self._check_content_exists(content)
+
+        # Generate embeddings if needed
+        if should_embed and (has_content or collection_name == "generated_images"):
+            if collection_name == "generated_images":
+                return await self._run_in_executor(
+                    self.image_embedding_function,
+                    ["Image embedding placeholder"]
+                )
+            else:
+                return await self._run_in_executor(
+                    self.text_embedding_function,
+                    [content]
+                )
+        return None
+
+    def _normalize_embed_flag(self, embed_content) -> bool:
+        """Convert embed_content to a simple boolean."""
+        if not isinstance(embed_content, bool):
+            if isinstance(embed_content, np.ndarray):
+                return embed_content.any()
+            try:
+                return bool(embed_content)
+            except Exception:
+                return True
+        return embed_content
+
+    def _check_content_exists(self, content) -> bool:
+        """Determine if content is non-empty."""
+        if isinstance(content, (str, bytes)):
+            return bool(content.strip())
+        elif isinstance(content, np.ndarray):
+            return content.size > 0
+        elif hasattr(content, '__len__'):
+            return len(content) > 0
+        else:
+            try:
+                return bool(content)
+            except Exception:
+                return False
+
+    async def _upsert_document(self, collection, doc_id: str, content, embeddings,
+                               flat_metadata: Dict[str, Any], collection_name: str,
+                               document: Dict[str, Any]) -> None:
+        """Upsert document into collection with appropriate fields."""
+        if collection_name == "generated_images":
+            add_kwargs = self._prepare_image_upsert_args(doc_id, flat_metadata, embeddings, document)
+        else:
+            add_kwargs = {
+                "ids": [doc_id],
+                "documents": [content] if content else None,
+                "embeddings": embeddings,
+                "metadatas": [flat_metadata] if flat_metadata else None
+            }
+
+        await self._run_in_executor(
+            collection.upsert,
+            **add_kwargs
+        )
+
+    def _prepare_image_upsert_args(self, doc_id: str, flat_metadata: Dict[str, Any],
+                                   embeddings, document: Dict[str, Any]) -> Dict[str, Any]:
+        """Prepare arguments for upserting images."""
+        metadata = document.get("metadata", {})
+        image_path = metadata.get("image_path")
+
+        if not image_path:
+            raise ValueError("For 'generated_images' collection, an 'image_path' must be provided in metadata.")
+
+        # Load the image as a NumPy array
+        try:
+            from PIL import Image
+            with Image.open(image_path) as img:
+                image_np = np.array(img)
+        except Exception as e:
+            raise ValueError(f"Error loading image from '{image_path}': {e}")
+
+        return {
+            "ids": [doc_id],
+            "images": [image_np],
+            "embeddings": embeddings,
+            "metadatas": [flat_metadata] if flat_metadata else None
+        }
+
     async def add_documents(self, documents: List[Dict[str, Any]],
-                          collection_name: str = "model_scripts") -> List[str]:
+                            collection_name: str = "model_scripts") -> List[str]:
         """
         Add multiple documents to the specified collection in batch.
-        
+
         Args:
             documents: List of documents to add
             collection_name: Name of the collection to add to
-            
+
         Returns:
             List[str]: IDs of the added documents
+
+        Note:
+            This method uses collection.upsert internally for batch operations, which means
+            if documents with the same IDs already exist, they will be replaced with the new
+            documents. This enables updating existing documents in bulk.
         """
         try:
             if not documents:
                 return []
-            
+
             # Select the appropriate collection
             collection = self.get_collection(collection_name)
-            
-            # Extract document components
-            ids = []
-            contents = []
-            metadatas = []
-            
-            for document in documents:
-                doc_id = document.get("id", f"{collection_name}_{hash(str(document))}")
-                content = document.get("content", "")
-                metadata = document.get("metadata", {})
-                
-                # Validate metadata
-                if not isinstance(metadata, dict):
-                    metadata = {}
 
-                # Flatten metadata like in add_document
-                flat_metadata = {}
-                for key, value in metadata.items():
-                    if isinstance(value, dict):
-                        flat_metadata[key] = json.dumps(value)
-                    elif isinstance(value, list):
-                        flat_metadata[key] = json.dumps(value)
-                    elif value is None:
-                        flat_metadata[key] = ""
-                    elif isinstance(value, (str, int, float, bool)):
-                        flat_metadata[key] = value
-                    else:
-                        flat_metadata[key] = str(value)
-                
-                ids.append(doc_id)
-                contents.append(content)
-                metadatas.append(flat_metadata)
-
-                self.logger.debug(f"[DEBUG] Saving document {doc_id} with metadata: {flat_metadata}")
+            # Process documents in batch
+            processed_docs = self._process_documents_batch(documents, collection_name)
 
             # Generate embeddings in batch
-            if collection_name == "generated_images":
-                # Placeholder for image embeddings
-                batch_embeddings = await self._run_in_executor(
-                    self.image_embedding_function,
-                    ["Image embedding placeholder"] * len(documents)
-                )
-            else:
-                batch_embeddings = await self._run_in_executor(
-                    self.text_embedding_function,
-                    contents
-                )
-            
+            batch_embeddings = await self._generate_batch_embeddings(
+                processed_docs["contents"],
+                collection_name,
+                len(documents)
+            )
+
             # Add the documents to the collection
             await self._run_in_executor(
-                collection.add,
-                ids=ids,
-                documents=contents,
+                collection.upsert,
+                ids=processed_docs["ids"],
+                documents=processed_docs["contents"],
                 embeddings=batch_embeddings,
-                metadatas=metadatas
+                metadatas=processed_docs["metadatas"]
             )
-            
+
             self.logger.debug(f"Added {len(documents)} documents to collection {collection_name}")
-            
-            return ids
-            
+
+            return processed_docs["ids"]
+
         except Exception as e:
             self.logger.error(f"Error adding documents to {collection_name}: {e}", exc_info=True)
             raise
+
+    def _process_documents_batch(self, documents: List[Dict[str, Any]],
+                                 collection_name: str) -> Dict[str, List]:
+        """Process a batch of documents to prepare for upsert."""
+        ids = []
+        contents = []
+        metadatas = []
+
+        for document in documents:
+            # Get document ID
+            doc_id = self._get_document_id(document, None, collection_name)
+
+            # Extract content and metadata
+            content = document.get("content", "")
+            metadata = document.get("metadata", {})
+
+            # Flatten metadata
+            flat_metadata = self._flatten_metadata(metadata)
+
+            # Collect document components
+            ids.append(doc_id)
+            contents.append(content)
+            metadatas.append(flat_metadata)
+
+            self.logger.debug(f"[DEBUG] Prepared document {doc_id} with metadata: {flat_metadata}")
+
+        return {
+            "ids": ids,
+            "contents": contents,
+            "metadatas": metadatas
+        }
+
+    async def _generate_batch_embeddings(self, contents: List[str],
+                                         collection_name: str,
+                                         batch_size: int) -> List[Any]:
+        """Generate embeddings for a batch of documents."""
+        if collection_name == "generated_images":
+            # Placeholder for image embeddings
+            return await self._run_in_executor(
+                self.image_embedding_function,
+                ["Image embedding placeholder"] * batch_size
+            )
+        else:
+            return await self._run_in_executor(
+                self.text_embedding_function,
+                contents
+            )
 
     async def search(self, query: str,
                      collection_name: str = "model_scripts",
@@ -593,6 +636,8 @@ class ChromaManager:
                 collection.get,
                 **get_args
             )
+
+            print(f"Get results: {results}")
 
             # Process results into a more user-friendly format
             processed_results = self._process_search_results(results, include)

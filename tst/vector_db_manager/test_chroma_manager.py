@@ -25,7 +25,7 @@ class DummyCollection:
         self.metadata = metadata or {}
         self.docs = {}  # Store documents as a dict keyed by doc id
 
-    def add(self, ids, documents, embeddings, metadatas):
+    def upsert(self, ids, documents, embeddings, metadatas):
         # Simulate adding documents.
         for i, doc_id in enumerate(ids):
             self.docs[doc_id] = {
