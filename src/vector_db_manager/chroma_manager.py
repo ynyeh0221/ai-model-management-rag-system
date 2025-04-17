@@ -257,6 +257,8 @@ class ChromaManager:
                 collection_name,
                 document
             )
+            # Immediately fetch back for verification
+            await self.get(collection_name, [doc_id])
 
             self.logger.debug(f"[DEBUG] Saved document {doc_id} with metadata: {flat_metadata}")
 

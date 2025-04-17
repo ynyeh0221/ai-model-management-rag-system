@@ -144,16 +144,16 @@ class SearchDispatcher:
 
             # Extract search parameters
             try:
-                requested_limit = int(parameters.get('limit', 20))
+                requested_limit = int(parameters.get('limit', 10))
                 if requested_limit <= 0:
-                    requested_limit = 20
+                    requested_limit = 10
             except (TypeError, ValueError):
-                requested_limit = 20  # Default to 20 for any conversion errors
+                requested_limit = 10  # Default to 10 for any conversion errors
 
             self.logger.debug(f"Using requested_limit: {requested_limit}")
 
             # Use a higher limit for the initial search to account for multiple chunks per model
-            search_limit = requested_limit * 150
+            search_limit = requested_limit * 80
             filters = parameters.get('filters', {})
 
             # Apply access control filter if access control manager is available and user_id is provided
@@ -369,7 +369,7 @@ class SearchDispatcher:
             embedding_time = (time.time() - embedding_start) * 1000
 
             # Extract search parameters
-            limit = parameters.get('limit', 20)
+            limit = parameters.get('limit', 10)
             style_tags = parameters.get('style_tags', [])
             prompt_terms = parameters.get('prompt_terms', "")
             resolution = parameters.get('resolution', None)
@@ -659,7 +659,7 @@ class SearchDispatcher:
 
             # Extract search parameters
             filters = parameters.get('filters', {})
-            limit = parameters.get('limit', 20)
+            limit = parameters.get('limit', 10)
 
             # If query mentions a specific month, add it to filters
             if "april" in query.lower():

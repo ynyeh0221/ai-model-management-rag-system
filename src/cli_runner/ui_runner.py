@@ -232,12 +232,131 @@ class UIRunner:
         else:
             return items_to_rerank
 
+    def _display_reranked_results_pretty(self, reranked_results):
+        """
+        Display reranked search results in a nicely formatted table with detailed model metadata.
+
+        Creates and prints a table showing comprehensive information from reranked results
+        with proper column alignment and truncation for long values.
+
+        Args:
+            reranked_results (list): List of reranked search result dictionaries to display.
+        """
+        import json
+
+        table = PrettyTable()
+        table.field_names = ["Rank", "Model ID", "Score", "File Size", "Creation Date", "Last Modified",
+                             "Absolute Path", "Description", "Framework", "Architecture", "Dataset",
+                             "Batch Size", "Learning Rate", "Optimizer", "Epochs", "Hardware"]
+
+        # Align columns
+        table.align = "l"  # Default left alignment for all
+        table.align["Rank"] = "c"  # center
+        table.align["Score"] = "r"  # right
+
+        # Set max width for columns
+        max_width = {
+            "Model ID": 30,
+            "Description": 50,
+            "Framework": 20,
+            "Architecture": 20,
+            "Dataset": 20,
+            "Hardware": 20,
+            "Absolute Path": 40  # Added max width for the path
+        }
+
+        for column in max_width:
+            table.max_width[column] = max_width[column]
+
+        # Helper function to parse JSON string fields
+        def parse_nested_json(metadata, fields):
+            parsed_metadata = metadata.copy()
+            for field in fields:
+                raw_value = parsed_metadata.get(field)
+                if isinstance(raw_value, str):
+                    try:
+                        parsed = json.loads(raw_value)
+                        parsed_metadata[field] = parsed if isinstance(parsed, dict) else {}
+                    except json.JSONDecodeError:
+                        parsed_metadata[field] = {}
+            return parsed_metadata
+
+        for i, result in enumerate(reranked_results):
+            rank = i + 1
+
+            # Get basic fields
+            model_id = result.get('model_id', result.get('id', f'Item {rank}'))
+
+            # Get score from various possible fields
+            score = result.get('score', result.get('similarity',
+                                                   result.get('rank_score', result.get('rerank_score', 'N/A'))))
+
+            # Get raw metadata
+            metadata = result.get('metadata', {}) if isinstance(result.get('metadata'), dict) else {}
+
+            # Parse JSON string fields in metadata
+            parsed_metadata = parse_nested_json(
+                metadata,
+                ['file', 'framework', 'architecture', 'dataset', 'training_config', 'git']
+            )
+
+            # Extract description
+            description = parsed_metadata.get('description', 'Unknown')
+            if description == "N/A":
+                description = "Unknown"
+
+            # Extract file metadata
+            file_metadata = parsed_metadata.get('file', {})
+            file_size = file_metadata.get('size_bytes', 'Unknown')
+            creation_date = file_metadata.get('creation_date', 'Unknown')
+            if isinstance(creation_date, str) and len(creation_date) > 19:
+                creation_date = creation_date[:19]  # Truncate microseconds
+
+            last_modified = file_metadata.get('last_modified_date', 'Unknown')
+            if isinstance(last_modified, str) and len(last_modified) > 19:
+                last_modified = last_modified[:19]  # Truncate microseconds
+
+            # Extract absolute path
+            absolute_path = file_metadata.get('absolute_path', 'Unknown')
+
+            # Extract framework
+            framework_metadata = parsed_metadata.get('framework', {})
+            framework_name = framework_metadata.get('name', 'Unknown')
+            framework_version = framework_metadata.get('version', '')
+            framework = framework_name
+            if framework_version and framework_version.lower() not in ['unknown', 'unspecified']:
+                framework += f" {framework_version}"
+
+            # Extract architecture and dataset
+            architecture_metadata = parsed_metadata.get('architecture', {})
+            architecture = architecture_metadata.get('type', 'Unknown')
+
+            dataset_metadata = parsed_metadata.get('dataset', {})
+            dataset = dataset_metadata.get('name', 'Unknown')
+
+            # Extract training config
+            training_config = parsed_metadata.get('training_config', {})
+            batch_size = training_config.get('batch_size', 'Unknown')
+            learning_rate = training_config.get('learning_rate', 'Unknown')
+            optimizer = training_config.get('optimizer', 'Unknown')
+            epochs = training_config.get('epochs', 'Unknown')
+            hardware = training_config.get('hardware_used', 'Unknown')
+
+            # Add row to table
+            table.add_row([
+                rank, model_id, score, file_size, creation_date, last_modified,
+                absolute_path, description, framework, architecture, dataset,
+                batch_size, learning_rate, optimizer, epochs, hardware
+            ])
+
+        print(table)
+
     def _generate_query_response(self, query_text, reranked_results, parsed_query, template_manager, llm_interface):
         """
         Generate a response to the query using the appropriate template.
 
-        Selects a template based on query type, renders it with context,
-        and generates a response using an LLM.
+        Prints reranked results in a pretty table, then uses a simplified template
+        to generate thinking steps and analysis.
 
         Args:
             query_text (str): The original query text.
@@ -246,6 +365,12 @@ class UIRunner:
             template_manager (object): Component for rendering templates.
             llm_interface (object): Component for generating LLM responses.
         """
+
+        print("\nGenerating response with thinking steps and analysis...")
+
+        # Print reranked results in a pretty table
+        self._display_reranked_results_pretty(reranked_results)
+
         # Select template based on query type
         if parsed_query["type"] == "comparison":
             template_id = "model_comparison"
@@ -254,25 +379,25 @@ class UIRunner:
         else:
             template_id = "general_query"
 
-        print("Generating response...")
-
         # Prepare context for template
         context = self._prepare_template_context(query_text, reranked_results, parsed_query)
-        print(f"context: {context}")
+        # Print context for debug
+        # print(f"context: {context}")
 
         try:
             # Try to render the template with the context
             rendered_prompt = template_manager.render_template(template_id, context)
-            print(f"prompt: {rendered_prompt}")
+            # Print rendered prompt for debug
+            # print(f"prompt: {rendered_prompt}")
 
             # Generate response using LLM interface
             llm_response = llm_interface.generate_response(
                 prompt=rendered_prompt,
                 temperature=0.5,
-                max_tokens=31000
+                max_tokens=4000
             )
 
-            print("Printing LLM Response...")
+            print("\nLLM Response:")
             self._print_llm_content(llm_response)
 
         except Exception as e:
@@ -363,7 +488,7 @@ class UIRunner:
             fallback_response = llm_interface.generate_response(
                 prompt=fallback_prompt,
                 temperature=0.5,
-                max_tokens=31000
+                max_tokens=4000
             )
             print("\nFallback Response:")
             print(fallback_response)
