@@ -94,7 +94,7 @@ class CodeParser:
 
     def _extract_llm_metadata(self, code_str: str, max_retries: int = 10) -> dict:
         # Define a threshold to decide if chunking is needed
-        SHORT_SCRIPT_LINE_LIMIT = 120
+        SHORT_SCRIPT_LINE_LIMIT = 100
 
         lines = code_str.splitlines()
 
