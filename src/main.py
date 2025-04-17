@@ -103,6 +103,10 @@ def main():
     process_scripts_parser = subparsers.add_parser("process-scripts", help="Process model scripts")
     process_scripts_parser.add_argument("directory", help="Directory containing model scripts")
 
+    # Process single model script command
+    process_scripts_parser = subparsers.add_parser("process-single-script", help="Process a single model script")
+    process_scripts_parser.add_argument("file_path", help="Absolute path to the model script file")
+
     # Process images command
     process_images_parser = subparsers.add_parser("process-images", help="Process images")
     process_images_parser.add_argument("directory", help="Directory containing images")
@@ -120,6 +124,8 @@ def main():
     # Execute command
     if args.command == "process-scripts":
         script_processor_runner.process_model_scripts(components, args.directory)
+    elif args.command == "process-single-script":
+        script_processor_runner.process_single_script(components, args.file_path)
     elif args.command == "process-images":
         image_processor_runner.process_images(components, args.directory)
     elif args.command == "start-ui":

@@ -50,7 +50,7 @@ class ScriptProcessorRunner:
 
         # Process files in parallel using a thread pool
         with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_file = {executor.submit(self.process_single_script, file_path, components): file_path
+            future_to_file = {executor.submit(self.process_single_script, components, file_path): file_path
                               for file_path in script_files}
 
             for future in concurrent.futures.as_completed(future_to_file):
@@ -73,7 +73,7 @@ class ScriptProcessorRunner:
         logger.info("Model script processing completed")
 
 
-    def process_single_script(self, file_path, components):
+    def process_single_script(self, components, file_path):
         """Process a single model script file.
 
         Args:
@@ -90,6 +90,14 @@ class ScriptProcessorRunner:
         text_embedder = components["vector_db_manager"]["text_embedder"]
         chroma_manager = components["vector_db_manager"]["chroma_manager"]
         access_control = components["vector_db_manager"]["access_control"]
+
+        # 0. Set up logging and ensure file exists
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger("model_script_processor")
+
+        if not os.path.isfile(file_path):
+            logger.error(f"File {file_path} does not exist")
+            return
 
         # 1. Parse the code to determine if it's a model script and extract relevant parts
         parse_result = code_parser.parse(file_path)
@@ -246,4 +254,9 @@ class ScriptProcessorRunner:
 
             chunk_documents.append(chunk_document)
 
-        return (metadata_document["id"], True) if chunk_documents else (None, False)
+        if chunk_documents:
+            logger.info(f"Successfully processed {file_path} with model ID {metadata_document['id''']}")
+            return (metadata_document["id"], True)
+        else:
+            logger.warning(f"Skipped {file_path}: Failed to process model script")
+            return (None, False)

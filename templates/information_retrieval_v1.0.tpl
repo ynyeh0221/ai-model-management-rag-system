@@ -103,7 +103,7 @@ Explain your *method* — how you are interpreting and parsing the fields **only
 
 ### Step 2: List the Top 10 Most Relevant Models
 
-From the list above, identify **up to 20 models** most relevant to this query:
+From the list above, identify **up to 10 models** most relevant to this query:
 
 > `{{ query }}`
 
