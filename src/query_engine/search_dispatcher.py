@@ -228,9 +228,6 @@ class SearchDispatcher:
                         if table_name not in model_results[model_id]['tables']:
                             model_results[model_id]['tables'].append(table_name)
 
-                        # Update model metadata with this table's metadata
-                        model_results[model_id]['metadata'].update(metadata)
-
                         # Update the weighted distance (lower is better)
                         # We use a weighted average based on table weights
                         tables = model_results[model_id]['tables']
@@ -244,7 +241,7 @@ class SearchDispatcher:
                         # First time seeing this model, initialize its entry
                         model_results[model_id] = {
                             'model_id': model_id,
-                            'metadata': metadata.copy(),
+                            'metadata': dict(),
                             'distance': weighted_distance,
                             'tables': [table_name],
                             'match_source': 'metadata'
@@ -292,7 +289,7 @@ class SearchDispatcher:
                     # This is a new model found only in chunks
                     model_results[model_id] = {
                         'model_id': model_id,
-                        'metadata': metadata,
+                        'metadata': dict(),
                         'distance': distance * 0.8,  # Chunk matches are weighted at 80%
                         'tables': ["chunks"],
                         'match_source': 'chunks'
@@ -305,7 +302,7 @@ class SearchDispatcher:
             # Limit to requested number of results
             output_list = output_list[:requested_limit]
 
-            # STEP 3 (COMBINED): Fetch complete metadata for all models in the final output list
+            # STEP 3: Fetch complete metadata for all models in the final output list
             try:
                 # Get the list of model IDs in the final output
                 final_model_ids = [model.get('model_id') for model in output_list if model.get('model_id') != 'unknown']
@@ -314,6 +311,8 @@ class SearchDispatcher:
                     # Create metadata fetch tasks for each table
                     complete_metadata_tasks = []
                     for table_name in table_weights.keys():
+                        if table_name == 'model_descriptions':
+                            continue
                         complete_metadata_tasks.append(self.chroma_manager.get(
                             collection_name=table_name,
                             where={"model_id": {"$in": final_model_ids}},
@@ -356,7 +355,7 @@ class SearchDispatcher:
                     # Get model description from metadata first as a fallback
                     fallback_description = ""
                     if 'metadata' in model_data and isinstance(model_data['metadata'], dict):
-                        fallback_description = model_data['metadata'].get('description', "")
+                        fallback_description = "No model description found"
 
                     # Use a safer approach - don't use the original query for chunk search
                     try:
@@ -377,7 +376,7 @@ class SearchDispatcher:
                             collection_name="model_descriptions",
                             query=query,  # Use the same query to find the most relevant chunks
                             where={"model_id": {"$eq": model_id}},  # Only search chunks for this specific model
-                            limit=2,  # Get top 2 chunks
+                            limit=1,  # Get top 1 chunks
                             include=["metadatas"]  # Only include metadata
                         )
 

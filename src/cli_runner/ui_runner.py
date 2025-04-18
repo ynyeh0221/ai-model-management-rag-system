@@ -181,10 +181,15 @@ class UIRunner:
             user_id=self.user_id
         ))
 
-        print(f"search_results: {search_results}")
+        # print(f"search_results: {search_results}")
         # Process and rerank search results
         reranked_results = self._process_search_results(search_results, reranker, parsed_query, query_text)
-        print(f"Reranked results: {reranked_results}")
+
+        def remove_field(dict_list, field_to_remove):
+            return [{k: v for k, v in item.items() if k != field_to_remove} for item in dict_list]
+        reranked_results = remove_field(reranked_results, "content")
+
+        # print(f"Reranked results: {reranked_results}")
 
         # Generate response using appropriate template
         self._generate_query_response(query_text, reranked_results, parsed_query, template_manager, llm_interface)
@@ -213,6 +218,18 @@ class UIRunner:
 
         # Extract the items from the search results
         items_to_rerank = search_results['items']
+        # Loop through each item and add the content field
+        for item in items_to_rerank:
+            item['content'] = item.get('merged_description', '') + \
+                              ", created_month: " + item.get("metadata", {}).get('created_month', '') + \
+                              ", created_year: " + item.get("metadata", {}).get('created_year', '') + \
+                              ", last_modified_month: " + item.get("metadata", {}).get('last_modified_month', '') + \
+                              ", last_modified_year: " + item.get("metadata", {}).get('last_modified_year', '') + \
+                              ", file size: " + item.get("metadata", {}).get("file", {}) + \
+                              ", framework: " + item.get("metadata", {}).get('framework', '') + \
+                              ", architecture: " + item.get("metadata", {}).get('architecture', '') + \
+                              ", dateset: " + item.get("metadata", {}).get('dataset', '') + \
+                              ", training_config: " + item.get("metadata", {}).get('training_config', {})
 
         if reranker and items_to_rerank:
             print(f"Sending {len(items_to_rerank)} items to reranker")
@@ -237,7 +254,7 @@ class UIRunner:
         from prettytable import PrettyTable, ALL
 
         table = PrettyTable()
-        table.field_names = ["Rank", "Model ID", "Score", "Size", "Created", "Modified",
+        table.field_names = ["Rank", "Model ID", "Score", "Distance", "Size", "Created", "Modified",
                              "Path", "Description", "Framework", "Arch", "Dataset",
                              "Batch", "LR", "Optimizer", "Epochs", "HW"]
 
@@ -252,6 +269,7 @@ class UIRunner:
             "Rank": 4,
             "Model ID": 15,
             "Score": 6,
+            "Distance": 6,
             "Size": 7,
             "Created": 10,
             "Modified": 10,
@@ -300,6 +318,13 @@ class UIRunner:
             # Format score to 3 decimal places if it's a number
             if isinstance(score, (int, float)):
                 score = f"{score:.3f}"
+
+            # Get distance
+            distance = result.get('distance', 'N/A')
+
+            # Format distance to 3 decimal places if it's a number
+            if isinstance(distance, (int, float)):
+                distance = f"{distance:.3f}"
 
             # Get raw metadata
             metadata = result.get('metadata', {}) if isinstance(result.get('metadata'), dict) else {}
@@ -380,7 +405,7 @@ class UIRunner:
 
             # Add row to table
             table.add_row([
-                rank, model_id, score, file_size, creation_date, last_modified,
+                rank, model_id, score, distance, file_size, creation_date, last_modified,
                 absolute_path, description, framework, architecture, dataset,
                 batch_size, learning_rate, optimizer, epochs, hardware
             ])
