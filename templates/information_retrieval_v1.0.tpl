@@ -30,23 +30,14 @@ MODEL #{{ loop.index }}:
 {% endif %}
 {% endfor %}
 
-Please analyze these models using the following two-step approach:
-
-### Step 1: Your Thinking Process
-<thinking>
-- Explain your thought process for analyzing these models
-- Which query terms match which models and why?
-- Identify which fields are useful and which are missing
-- Consider how the models relate to the query `{{ query }}`
-{% if intent %}- How well do the results satisfy the {{ intent }} intent?{% endif %}
-</thinking>
-
-### Step 2: Final Analysis
-Based only on the models you've analyzed, provide factual insights:
+### Final Analysis
+Based only on the models you've analyzed, provide factual insights and explain your reasoning:
+- Clearly explain your thought process while analyzing the data
+- Mention which fields were useful or missing
 - Most common datasets, architectures, or frameworks
 - Typical completeness of metadata
 - Any observed strengths or weaknesses
-- How well the results match the query intent
+- How well the results match the query `{{ query }}`{% if intent %} and satisfy the intent `{{ intent }}`{% endif %}
 - Suggested follow-up queries that might yield better results
 
 Stick strictly to what's present in the data — no speculation.

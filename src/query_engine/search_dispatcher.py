@@ -129,6 +129,7 @@ class SearchDispatcher:
     async def handle_text_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle a text search query for model scripts and metadata.
+        First search metadata, then search chunks for additional matches.
         Returns a single result per unique model_id.
         """
         self.logger.debug(f"Handling text search: {query}")
@@ -138,184 +139,172 @@ class SearchDispatcher:
             # Get user_id from parameters for access control
             user_id = parameters.get('user_id')
 
-            # Generate embedding for the query
-            embedding_start = time.time()
-            embedding_time = (time.time() - embedding_start) * 1000
-
             # Extract search parameters
             try:
-                requested_limit = int(parameters.get('limit', 10))
+                requested_limit = int(parameters.get('limit', 20))
                 if requested_limit <= 0:
-                    requested_limit = 10
+                    requested_limit = 20
             except (TypeError, ValueError):
-                requested_limit = 10  # Default to 10 for any conversion errors
+                requested_limit = 20
 
             self.logger.debug(f"Using requested_limit: {requested_limit}")
 
-            # Use a higher limit for the initial search to account for multiple chunks per model
-            search_limit = requested_limit * 80
+            # Define a higher limit for chunk searches
+            chunk_search_limit = requested_limit * 100
             filters = parameters.get('filters', {})
 
-            # Apply access control filter if access control manager is available and user_id is provided
+            # Apply access control filter if needed
             if self.access_control_manager and user_id:
                 access_filter = self.access_control_manager.create_access_filter(user_id)
-
-                # Merge access control filter with existing filters
                 if filters:
-                    # If both have conditions, combine with $and
+                    # Ensure these get properly combined with $and
                     filters = {
                         "$and": [
-                            filters,
-                            access_filter
+                            filters if "$and" not in filters else {"$and": filters["$and"]},
+                            access_filter if "$and" not in access_filter else {"$and": access_filter["$and"]}
                         ]
                     }
                 else:
-                    # If no existing filters, just use access filter
                     filters = access_filter
 
-            # Prepare Chroma query for chunks
-            search_params = {
+            # Translate filters to Chroma format properly handling compound conditions
+            chroma_filters = self._translate_filters_to_chroma(filters)
+
+            # STEP 1: Search metadata table directly
+            metadata_search_start = time.time()
+            metadata_search_params = {
                 'query': query,
-                'where': self._translate_filters_to_chroma(filters),
-                'limit': search_limit,
+                'where': chroma_filters,
+                'limit': requested_limit,
                 'include': ["metadatas", "documents", "distances"]
             }
 
-            # Execute vector search on code chunks
-            search_start = time.time()
+            metadata_results = await self.chroma_manager.search(
+                collection_name="model_scripts_metadata",
+                **metadata_search_params
+            )
+            metadata_search_time = (time.time() - metadata_search_start) * 1000
+
+            # Process results and create output list, keyed by model_id for deduplication
+            output_models = {}
+            for idx, result in enumerate(metadata_results.get('results', [])):
+                metadata = result.get('metadata', {})
+                model_id = metadata.get('model_id', 'unknown')
+
+                # Only add if passes access control
+                if self.access_control_manager and user_id:
+                    if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
+                        continue
+
+                output_models[model_id] = {
+                    'id': result.get('id'),
+                    'model_id': model_id,
+                    'metadata': metadata,
+                    'match_source': 'metadata'
+                }
+
+            # STEP 2: Search chunks table
+            chunks_search_start = time.time()
+            chunks_search_params = {
+                'query': query,
+                'where': chroma_filters,
+                'limit': chunk_search_limit,
+                'include': ["metadatas", "documents", "distances"]
+            }
+
             chunk_results = await self.chroma_manager.search(
                 collection_name="model_scripts_chunks",
-                **search_params
+                **chunks_search_params
             )
-            search_time = (time.time() - search_start) * 1000
+            chunks_search_time = (time.time() - chunks_search_start) * 1000
 
-            # Group results by model_id
-            model_groups = {}
+            # Collect model_ids from chunks that aren't already in our output
+            new_model_ids = set()
+            for result in chunk_results.get('results', []):
+                # Get metadata for access control check
+                metadata = result.get('metadata', {})
+                model_id = metadata.get('model_id', 'unknown')
 
-            for idx, result in enumerate(chunk_results.get('results', [])):
-                # Extract model_id from metadata
-                model_id = result.get('metadata', {}).get('model_id', 'unknown')
-                metadata_doc_id = result.get('metadata', {}).get('metadata_doc_id', None)
+                # Apply access control check to each chunk before adding its model_id
+                if self.access_control_manager and user_id:
+                    if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
+                        continue
 
-                # Initialize group if this is the first chunk from this model
-                if model_id not in model_groups:
-                    model_groups[model_id] = {
-                        'model_id': model_id,
-                        'metadata_doc_id': metadata_doc_id,
-                        'chunks': [],
-                        'metadata': None  # Will be populated later
+                # If we already have this model from metadata search, do nothing
+                if model_id not in output_models:
+                    # This is a new model - add to our set of models to fetch metadata for
+                    new_model_ids.add(model_id)
+
+            # STEP 3: For new model_ids found in chunks, fetch their metadata
+            if new_model_ids:
+                # Create a where clause to fetch metadata by model_id
+                where_clause = {"model_id": {"$in": list(new_model_ids)}}
+
+                # Apply access control if needed
+                if self.access_control_manager and user_id:
+                    access_filter = self.access_control_manager.create_access_filter(user_id)
+                    where_clause = {
+                        "$and": [
+                            where_clause,
+                            access_filter
+                        ]
                     }
 
-                # Add this chunk to the model's group
-                chunk_idx = len(model_groups[model_id]['chunks'])
-                model_groups[model_id]['chunks'].append({
-                    'id': result.get('id'),
-                    'metadata': result.get('metadata', {}),
-                    'content': result.get('document', ""),
-                    'chunk_idx': chunk_idx
-                })
+                # Fetch metadata for these models
+                additional_metadata = await self.chroma_manager.get(
+                    collection_name="model_scripts_metadata",
+                    where=where_clause,
+                    include=["metadatas"]
+                )
 
-            # Fetch metadata for all models found - directly query the metadata collection
-            model_ids = list(model_groups.keys())
-            if model_ids:
-                # First, try to fetch by metadata_doc_ids if available
-                metadata_doc_ids = [group['metadata_doc_id'] for group in model_groups.values()
-                                    if group['metadata_doc_id']]
+                # Process the metadata and add to output
+                for result in additional_metadata.get('results', []):
+                    metadata = result.get('metadata', {})
+                    model_id = metadata.get('model_id')
 
-                if metadata_doc_ids:
-                    # Apply access control to metadata query if needed
-                    metadata_query_params = {
-                        'collection_name': "model_scripts_metadata",
-                        'ids': metadata_doc_ids,
-                        'include': ["metadatas"]
-                    }
+                    # If we haven't already added this model (sanity check)
+                    if model_id and model_id not in output_models:
+                        # Make one more explicit access control check before adding
+                        if self.access_control_manager and user_id:
+                            if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
+                                continue
 
-                    # Add access filter if applicable
-                    if self.access_control_manager and user_id:
-                        metadata_query_params['where'] = self.access_control_manager.create_access_filter(user_id)
-
-                    metadata_results = await self.chroma_manager.get(**metadata_query_params)
-
-                    # Map metadata to models by metadata_doc_id
-                    for result in metadata_results.get('results', []):
-                        result_id = result.get('id')
-                        # Find which model group this metadata belongs to
-                        for model_id, group in model_groups.items():
-                            if group['metadata_doc_id'] == result_id:
-                                group['metadata'] = result.get('metadata', {})
-
-                # For any model without metadata, try to fetch by model_id
-                models_without_metadata = [model_id for model_id, group in model_groups.items()
-                                           if group['metadata'] is None]
-
-                if models_without_metadata:
-                    # Create a where clause to fetch metadata by model_id
-                    where_clause = {"model_id": {"$in": models_without_metadata}}
-
-                    # Combine with access control filter if applicable
-                    if self.access_control_manager and user_id:
-                        access_filter = self.access_control_manager.create_access_filter(user_id)
-                        where_clause = {
-                            "$and": [
-                                where_clause,
-                                access_filter
-                            ]
+                        # Add to output models - no need to track chunks
+                        output_models[model_id] = {
+                            'id': result.get('id'),
+                            'model_id': model_id,
+                            'metadata': metadata,
+                            'match_source': 'chunks'
                         }
 
-                    additional_metadata = await self.chroma_manager.get(
-                        collection_name="model_scripts_metadata",
-                        where=where_clause,
-                        include=["metadatas"]
-                    )
+            # Convert the dictionary to a list and sort by match source
+            output_list = list(output_models.values())
+            output_list.sort(key=lambda x: 0 if x['match_source'] == 'metadata' else 1)
 
-                    # Map these results by model_id
-                    for result in additional_metadata.get('results', []):
-                        result_model_id = result.get('metadata', {}).get('model_id')
-                        if result_model_id in model_groups:
-                            model_groups[result_model_id]['metadata'] = result.get('metadata', {})
+            # Limit to requested number of results
+            output_list = output_list[:requested_limit]
 
-            # Post-process the results to apply additional access control checks
-            if self.access_control_manager and user_id:
-                # Filter out models the user doesn't have permission to view
-                for model_id in list(model_groups.keys()):
-                    model_data = model_groups[model_id]
-                    if model_data['metadata']:
-                        # Check if user has access to this model
-                        if not self.access_control_manager.check_access(
-                                {'metadata': model_data['metadata']}, user_id, "view"
-                        ):
-                            # User doesn't have access, remove from results
-                            del model_groups[model_id]
-
-            # Convert groups to a list
-            model_list = list(model_groups.values())
-
-            # Limit to requested number of models
-            model_list = model_list[:requested_limit]
-
-            # Prepare unique model items list - one entry per model
+            # Prepare final result items
             items = []
-            for rank, model in enumerate(model_list):
-                # Create a single result item per model
-                metadata = model['metadata'] or {}
-
-                # Create a consolidated item
-                item = {
-                    'id': model['metadata_doc_id'],
-                    'model_id': model['model_id'],
-                    'metadata': metadata,
+            for rank, model in enumerate(output_list):
+                items.append({
+                    'id': model.get('id'),
+                    'model_id': model.get('model_id'),
+                    'metadata': model.get('metadata', {}),
                     'rank': rank + 1,
-                    'chunk_count': len(model['chunks'])
-                }
-                items.append(item)
+                    'match_source': model.get('match_source')
+                })
+
+            # Calculate performance metrics
+            total_search_time = metadata_search_time + chunks_search_time
+            total_time = (time.time() - start_time) * 1000
 
             # Log performance metrics if analytics available
             if self.analytics and 'query_id' in parameters:
                 self.analytics.log_performance_metrics(
                     query_id=parameters['query_id'],
-                    embedding_time_ms=int(embedding_time),
-                    search_time_ms=int(search_time),
-                    total_time_ms=int((time.time() - start_time) * 1000)
+                    search_time_ms=int(total_search_time),
+                    total_time_ms=int(total_time)
                 )
 
             return {
@@ -323,11 +312,12 @@ class SearchDispatcher:
                 'type': 'text_search',
                 'items': items,
                 'total_found': len(items),
-                'total_models': len(model_groups),
+                'total_models': len(output_models),
                 'performance': {
-                    'embedding_time_ms': embedding_time,
-                    'search_time_ms': search_time,
-                    'total_time_ms': (time.time() - start_time) * 1000
+                    'metadata_search_time_ms': metadata_search_time,
+                    'chunks_search_time_ms': chunks_search_time,
+                    'total_search_time_ms': total_search_time,
+                    'total_time_ms': total_time
                 }
             }
 
@@ -369,7 +359,7 @@ class SearchDispatcher:
             embedding_time = (time.time() - embedding_start) * 1000
 
             # Extract search parameters
-            limit = parameters.get('limit', 10)
+            limit = parameters.get('limit', 20)
             style_tags = parameters.get('style_tags', [])
             prompt_terms = parameters.get('prompt_terms', "")
             resolution = parameters.get('resolution', None)
@@ -659,7 +649,7 @@ class SearchDispatcher:
 
             # Extract search parameters
             filters = parameters.get('filters', {})
-            limit = parameters.get('limit', 10)
+            limit = parameters.get('limit', 20)
 
             # If query mentions a specific month, add it to filters
             if "april" in query.lower():
@@ -1223,47 +1213,43 @@ class SearchDispatcher:
             self.logger.warning("Filters received as list instead of dictionary. Converting to empty dict.")
             return {}
 
-        chroma_filters = {}
+        # Handle case where we already have a properly structured filter (with $and, $or, etc.)
+        if len(filters) == 1 and list(filters.keys())[0].startswith('$'):
+            return filters
 
-        # Handle direct mappings
-        for key, value in filters.items():
-            # Skip nested filters for separate handling
+        # Handle multiple top-level filter conditions
+        # ChromaDB expects them to be wrapped with an operator like $and
+        if len(filters) > 1:
+            conditions = []
+            for key, value in filters.items():
+                # Skip nested operators for separate handling
+                if isinstance(value, dict) and any(op.startswith('$') for op in value.keys()):
+                    conditions.append({key: value})
+                # Handle list values
+                elif isinstance(value, list):
+                    conditions.append({key: {"$in": value}})
+                # Handle simple values
+                else:
+                    conditions.append({key: {"$eq": value}})
+
+            return {"$and": conditions}
+
+        # Handle single filter condition
+        if len(filters) == 1:
+            key, value = next(iter(filters.items()))
+
+            # Handle nested operator filters
             if isinstance(value, dict) and any(op.startswith('$') for op in value.keys()):
-                continue
+                return filters
 
             # Handle list values
             if isinstance(value, list):
-                chroma_filters[key] = {"$in": value}
-            else:
-                chroma_filters[key] = {"$eq": value}
+                return {key: {"$in": value}}
 
-        # Handle operator-based filters
-        for key, operators in filters.items():
-            if not isinstance(operators, dict):
-                continue
+            # Handle simple values
+            return {key: {"$eq": value}}
 
-            for op, value in operators.items():
-                if op == "$eq":
-                    chroma_filters[key] = {"$eq": value}
-                elif op == "$ne":
-                    chroma_filters[key] = {"$ne": value}
-                elif op == "$gt":
-                    chroma_filters[key] = {"$gt": value}
-                elif op == "$gte":
-                    chroma_filters[key] = {"$gte": value}
-                elif op == "$lt":
-                    chroma_filters[key] = {"$lt": value}
-                elif op == "$lte":
-                    chroma_filters[key] = {"$lte": value}
-                elif op == "$in":
-                    chroma_filters[key] = {"$in": value}
-                elif op == "$nin":
-                    chroma_filters[key] = {"$nin": value}
-                elif op == "$contains":
-                    # Special handling for string contains
-                    chroma_filters[key] = {"$contains": value}
-
-        return chroma_filters
+        return {}
 
     def _sanitize_parameters(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """

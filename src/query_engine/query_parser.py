@@ -235,16 +235,25 @@ class QueryParser:
                 r"\b(metadata|schema|fields|properties|attributes)\b",
                 r"\bwhat (fields|properties|attributes)\b.*",
                 r"\b(structure|organization) of\b.*",
-                # Add patterns for time-range queries
-                r"(created|made|developed|built|trained) (in|on|during|between) (\w+|\d+)",
-                r"(from|since|before|after) (\w+|\d+) (to|until|through) (\w+|\d+)",
-                r"models? from (\w+|\d+)",
-                r"in (January|February|March|April|May|June|July|August|September|October|November|December)",
-                r"created (last|this) (month|year|week)",
-                r"built in (Q[1-4]|quarter [1-4])",
-                r"created in (Q[1-4]|quarter [1-4])",
-                r"from (20\d\d|the \d0s)"
+
+                # Month-based date references
+                r"\b(created|built|developed|made|trained|modified|updated)\s+(in|on|during)\s+(January|February|March|April|May|June|July|August|September|October|November|December)\b",
+                r"\b(models|model)\s+(from|created in|built in|made in|developed in|trained in|modified in|updated in)\s+(January|February|March|April|May|June|July|August|September|October|November|December)\b",
+                r"\b(in|during)\s+(January|February|March|April|May|June|July|August|September|October|November|December)\b",
+
+                # Quarter references
+                r"\b(created|built|developed|made|trained)\s+in\s+(Q[1-4]|quarter\s+[1-4])\b",
+                r"\b(models|model)\s+from\s+(Q[1-4]|quarter\s+[1-4])\b",
+
+                # Year-based or general time expressions
+                r"\b(created|modified|updated)\s+(after|before|between|since|in)\s+(20\d{2}|\d{4})\b",
+                r"\b(models|model)\s+(from|created in|modified in|built in)\s+(20\d{2}|\d{4})\b",
+                r"\b(last|this)\s+(month|year|week|quarter)\b",
+
+                # Full range expressions
+                r"\b(from|since|after|before|between)\s+(20\d{2}|\d{4}|\w+)\s+(to|until|through)?\s*(20\d{2}|\d{4}|\w+)?\b"
             ]
+
         }
 
         # Parameter extraction patterns
@@ -336,12 +345,22 @@ class QueryParser:
                 self.logger.warning(f"LangChain classification failed: {e}")
 
         # Step 2: Rule-based pattern matching (ordered by priority)
+
+        # Check for metadata first - MODIFIED: Moving this check before comparison
+        if any(re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.METADATA]):
+            return QueryIntent.METADATA, "Metadata-related keywords found in query."
+
+        # Check for month references - ADDED: Explicit month check
+        months = ["january", "february", "march", "april", "may", "june",
+                  "july", "august", "september", "october", "november", "december"]
+        if any(month in query_lower for month in months) and any(time_term in query_lower for time_term in
+                                                                 ["created", "built", "developed", "made", "trained",
+                                                                  "modified", "updated", "from"]):
+            return QueryIntent.METADATA, "Month-based time reference found."
+
         if len(model_mentions) > 1 and any(
                 re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.COMPARISON]):
             return QueryIntent.COMPARISON, "Multiple model mentions and comparison keywords detected."
-
-        if any(re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.METADATA]):
-            return QueryIntent.METADATA, "Metadata-related keywords found in query."
 
         if any(re.search(p, query_lower) for p in self.intent_patterns[QueryIntent.NOTEBOOK]):
             return QueryIntent.NOTEBOOK, "Query suggests generating or working with a notebook."
@@ -409,7 +428,7 @@ class QueryParser:
         Extract parameters from a query based on its intent.
 
         Args:
-            query_text: The query text to extract parameters from
+            query_text: The query text to extract from
             intent: The query intent, if already classified
 
         Returns:
@@ -418,93 +437,59 @@ class QueryParser:
         if intent is None:
             intent, reason = self.classify_intent(query_text)
 
-        # Initialize parameters
         parameters = {}
         query_lower = query_text.lower()
 
-        # Define generic architecture terms that should not be added to filters
-        generic_terms = {
-            "cnn", "convolutional", "neural network", "deep learning",
-            "rnn", "recurrent", "lstm", "transformer", "attention",
-            "diffusion", "gan", "generative adversarial", "vae",
-            "variational", "autoencoder", "bert", "gpt", "mlp"
-        }
+        # Initialize or retrieve existing filters
+        filters = parameters.get("filters", {})
 
-        # Direct time-based detection for metadata queries
-        if intent == QueryIntent.METADATA:
-            filters = {}
+        # Defensive enhancement: always try to detect month/year references
+        months = [
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december"
+        ]
+        for month in months:
+            if month in query_lower:
+                filters["created_month"] = month.capitalize()
+                break
 
-            # Look for month mentions
-            months = ["january", "february", "march", "april", "may", "june",
-                      "july", "august", "september", "october", "november", "december"]
+        # Extract 4-digit year if mentioned
+        year_pattern = r"(20\d{2})"
+        year_match = re.search(year_pattern, query_text)
+        if year_match:
+            filters["created_year"] = year_match.group(1)
 
-            for month in months:
-                if month in query_lower:
-                    filters["created_month"] = month.capitalize()
-                    break
-
-            # Look for year mentions
-            year_pattern = r"(20\d\d)"
-            year_match = re.search(year_pattern, query_text)
-            if year_match:
-                filters["created_year"] = year_match.group(1)
-
-            # Add filters to parameters if any were found
-            if filters:
-                parameters["filters"] = filters
-
-        # Try LangChain extraction if available and appropriate
+        # Try LangChain extraction if available
         if self.use_langchain:
             try:
                 import json
-                try:
-                    raw_result = self.param_chain.invoke({"query": query_text})
-
-                    # Find the first opening brace
-                    json_start = raw_result.find('{')
-                    if json_start == -1:
-                        self.logger.warning("No opening brace found in LLM output.")
-                        return {}
-
+                raw_result = self.param_chain.invoke({"query": query_text})
+                json_start = raw_result.find('{')
+                if json_start != -1:
                     json_str = raw_result[json_start:].strip()
                     decoder = json.JSONDecoder()
                     params, idx = decoder.raw_decode(json_str)
-                    # Add post-processing step to clean parameters
                     cleaned_params = self._clean_llm_parameters(params)
 
-                    self.logger.debug(f"Original LLM params: {params}")
-                    self.logger.debug(f"Cleaned params: {cleaned_params}")
+                    if "filters" in cleaned_params:
+                        filters.update(cleaned_params["filters"])
+                        cleaned_params.pop("filters")
 
-                    # Merge with our parameters
-                    for key, value in cleaned_params.items():
-                        parameters[key] = value
-
-                except json.JSONDecodeError as e:
-                    self.logger.warning(f"Failed to parse LangChain parameter result as JSON: {e}")
-                except Exception as e:
-                    self.logger.error(f"Error using LangChain for parameter extraction: {e}")
-
+                    parameters.update(cleaned_params)
             except Exception as e:
-                self.logger.error(f"Error using LangChain for parameter extraction: {e}")
-                # Continue with rule-based approach
+                self.logger.warning(f"LangChain parameter extraction failed: {e}")
 
-        # Extract filters (start with existing or create new)
-        filters = parameters.get("filters", {})
-
-        # Extract metrics of interest
-        metrics = []
-        for match in re.finditer(self.metric_pattern, query_text.lower()):
-            metrics.append(match.group(1))
+        # Extract metrics if mentioned
+        metrics = [match.group(1) for match in re.finditer(self.metric_pattern, query_lower)]
         if metrics:
             parameters["metrics"] = metrics
 
-        # Process other filter patterns
+        # Rule-based filters (architecture, framework, etc.)
         for filter_name, pattern in self.filter_patterns.items():
-            for match in re.finditer(pattern, query_text.lower()):
+            for match in re.finditer(pattern, query_lower):
                 if filter_name == "architecture":
-                    # Only add if it's a specific architecture, not a generic term
                     arch_value = match.group(1)
-                    if arch_value not in generic_terms:
+                    if arch_value not in self.model_families:
                         filters["architecture"] = arch_value
                 elif filter_name == "framework":
                     filters["framework"] = match.group(1)
@@ -520,35 +505,36 @@ class QueryParser:
                         "value": match.group(3)
                     }
 
-        # Add model_ids to filters if appropriate
-        model_ids = self._extract_model_mentions(query_text)
-        if model_ids:
-            # Filter out generic architecture terms
-            valid_model_ids = [mid for mid in model_ids if mid.lower() not in generic_terms]
-            if valid_model_ids:
-                if len(valid_model_ids) == 1:
-                    filters["model_id"] = valid_model_ids[0]
-                else:
-                    filters["model_id"] = valid_model_ids
+        generic_terms = {
+            "cnn", "convolutional", "neural network", "deep learning",
+            "rnn", "recurrent", "lstm", "transformer", "attention",
+            "diffusion", "gan", "generative adversarial", "vae",
+            "variational", "autoencoder", "bert", "gpt", "mlp"
+        }
 
-        # Only add filters to parameters if there are any
+        model_ids = self._extract_model_mentions(query_text)
+        valid_model_ids = [mid for mid in model_ids if mid.lower() not in generic_terms]
+
+        if valid_model_ids:
+            filters["model_id"] = valid_model_ids[0] if len(valid_model_ids) == 1 else valid_model_ids
+
         if filters:
             parameters["filters"] = filters
 
-        # Extract result limit
-        limit_match = re.search(self.limit_pattern, query_text.lower())
+        # Result limit
+        limit_match = re.search(self.limit_pattern, query_lower)
         if limit_match:
             parameters["limit"] = int(limit_match.group(2))
 
-        # Extract sorting criteria
-        sort_match = re.search(self.sort_pattern, query_text.lower())
+        # Sort
+        sort_match = re.search(self.sort_pattern, query_lower)
         if sort_match:
             parameters["sort_by"] = {
                 "field": sort_match.group(3),
                 "order": sort_match.group(4) if sort_match.group(4) else "descending"
             }
 
-        # Add intent-specific parameter extraction
+        # Intent-specific
         if intent == QueryIntent.COMPARISON:
             parameters.update(self._extract_comparison_parameters(query_text))
         elif intent == QueryIntent.NOTEBOOK:
