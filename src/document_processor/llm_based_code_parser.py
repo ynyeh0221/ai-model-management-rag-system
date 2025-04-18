@@ -215,10 +215,10 @@ class LLMBasedCodeParser:
 
         return "\n".join(lines)
 
-    def remove_import_lines(self, code: str) -> str:
+    def _remove_import_lines(self, code: str) -> str:
         filtered_lines = [
             line for line in code.splitlines()
-            if not line.strip().startswith("import") and not line.strip().startswith("from")
+            if not line.strip().lower().startswith("import") and not line.strip().lower().startswith("from")
         ]
         return "\n".join(filtered_lines)
 
@@ -240,7 +240,7 @@ class LLMBasedCodeParser:
         # STEP 5: Feed merged summary to LLM for structured metadata generation
         summary_and_ast = summary.get("summary", "") + ", " + ast_digest
         final = self.generate_metadata_from_summary(summary_and_ast, max_retries=max_retries)
-        final['chunk_descriptions'] = [self.remove_import_lines(summary_and_ast)]
+        final['chunk_descriptions'] = [self._remove_import_lines(summary_and_ast)]
         final.pop("description", None)
         final.pop("_trace", None)
 
