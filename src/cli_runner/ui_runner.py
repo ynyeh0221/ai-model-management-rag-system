@@ -189,8 +189,6 @@ class UIRunner:
             return [{k: v for k, v in item.items() if k != field_to_remove} for item in dict_list]
         reranked_results = remove_field(reranked_results, "content")
 
-        # print(f"Reranked results: {reranked_results}")
-
         # Generate response using appropriate template
         self._generate_query_response(query_text, reranked_results, parsed_query, template_manager, llm_interface)
 

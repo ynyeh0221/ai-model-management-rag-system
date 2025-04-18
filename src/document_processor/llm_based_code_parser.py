@@ -222,36 +222,90 @@ class LLMBasedCodeParser:
         print(f"updated model_info: {model_info}")
         return model_info
 
-    def _extract_llm_metadata(self, code_str: str, max_retries: int = 15) -> dict:
-        # Define a threshold to decide if chunking is needed
-        all_chunks = self.split_by_lines(
-            file_content=code_str,
-            chunk_size_in_lines=150,
-            overlap=0,
+    def generate_ast_summary(self, code_str: str, file_path: str = "<unknown>") -> str:
+        """
+        Parse code using AST and generate a human-readable digest of the code structure.
+        Useful for LLM-friendly summarization.
+        """
+        try:
+            tree = ast.parse(code_str, filename=file_path)
+        except SyntaxError as e:
+            return f"# Failed to parse AST: {e}"
+
+        lines = []
+
+        class CodeSummaryVisitor(ast.NodeVisitor):
+            def visit_Import(self, node):
+                names = [alias.name for alias in node.names]
+                lines.append(f"Import: {', '.join(names)}")
+
+            def visit_ImportFrom(self, node):
+                module = node.module or ""
+                names = [alias.name for alias in node.names]
+                lines.append(f"From {module} import {', '.join(names)}")
+
+            def visit_Assign(self, node):
+                targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+                try:
+                    value = ast.unparse(node.value)
+                except Exception:
+                    value = "<complex_expression>"
+                for t in targets:
+                    if any(k in t.lower() for k in ["batch", "lr", "epoch", "optimizer", "device", "model", "train"]):
+                        lines.append(f"Variable: {t} = {value}")
+
+            def visit_ClassDef(self, node):
+                bases = [getattr(b, "id", getattr(b, "attr", "object")) for b in node.bases]
+                docstring = ast.get_docstring(node)
+                lines.append(f"\nClass: {node.name} (inherits from {', '.join(bases)})")
+                if docstring:
+                    lines.append(f"  Docstring: {docstring.strip()}")
+
+            def visit_FunctionDef(self, node):
+                args = [arg.arg for arg in node.args.args]
+                defaults = [ast.unparse(d) if hasattr(ast, "unparse") else repr(d) for d in node.args.defaults]
+                pad = [None] * (len(args) - len(defaults))
+                arg_pairs = [f"{a}={d}" if d else a for a, d in zip(args, pad + defaults)]
+                docstring = ast.get_docstring(node)
+                lines.append(f"\nFunction: {node.name}({', '.join(arg_pairs)})")
+                if docstring:
+                    lines.append(f"  Docstring: {docstring.strip()}")
+
+        visitor = CodeSummaryVisitor()
+        visitor.visit(tree)
+
+        return "\n".join(lines)
+
+    def remove_import_lines(self, code: str) -> str:
+        filtered_lines = [
+            line for line in code.splitlines()
+            if not line.strip().startswith("import") and not line.strip().startswith("from")
+        ]
+        return "\n".join(filtered_lines)
+
+    def _extract_llm_metadata(self, code_str: str, file_path: str = "<unknown>", max_retries: int = 15) -> dict:
+        # STEP 1: Generate AST digest/summary
+        ast_digest = self.clean_empty_lines(self.generate_ast_summary(code_str, file_path=file_path))
+        print(f"Total AST digest: {ast_digest}")
+
+        # STEP 3: Extract natural-language summary for each digest chunk
+        summary = self.extract_chunk_summary(
+            chunk_text=ast_digest,
+            chunk_offset=0,
+            max_retries=max_retries
         )
-        print(f"Chunk counts: {len(all_chunks)}")
 
-        # Extract summaries from each chunk
-        chunk_summaries = []
-        for chunk in all_chunks:
-            chunk_text = chunk['text']
-            offset = chunk['offset']
-            summary = self.extract_chunk_summary(chunk_text, chunk_offset=offset, max_retries=max_retries)
-            if summary:
-                chunk_summaries.append(summary)
+        # STEP 4: Merge summaries into a single doc
+        print(f"Summary from AST digest: {summary}")
 
-        # Merge summaries
-        merged_summary = self.merge_chunk_summaries(chunk_summaries)
-        print(f"Merged summary: {merged_summary}")
-
-        # Generate final JSON from the merged summary
-        final = self.generate_metadata_from_summary(merged_summary, max_retries=max_retries)
-        final['chunk_descriptions'] = [chunk["summary"] for chunk in chunk_summaries if "summary" in chunk]
-        del final["description"]
-
-        print(f"Final metadata (from summaries): {final}")
-
+        # STEP 5: Feed merged summary to LLM for structured metadata generation
+        summary_and_ast = summary.get("summary", "") + ", " + ast_digest
+        final = self.generate_metadata_from_summary(summary_and_ast, max_retries=max_retries)
+        final['chunk_descriptions'] = [self.remove_import_lines(summary_and_ast)]
+        final.pop("description", None)
         final.pop("_trace", None)
+
+        print(f"Final metadata (from AST summary): {final}")
         return final
 
     def extract_chunk_summary(self, chunk_text: str, chunk_offset: int = 0, max_retries: int = 3) -> dict:
@@ -260,16 +314,16 @@ class LLMBasedCodeParser:
             return {}
 
         system_prompt = (
-            "You are a code analysis assistant. "
-            "Analyze the following Python code chunk and extract any information relevant to the following metadata categories:\n\n"
-            "- Description: What the model or code does\n"
-            "- Framework: ML framework (like PyTorch, TensorFlow) and version\n"
-            "- Architecture: Neural network architecture type\n"
-            "- Dataset: Training data used\n"
+            "You are an expert machine learning metadata extractor. "
+            "You will be given a structured summary of a Python ML script extracted via AST (abstract syntax tree). "
+            "From that, extract metadata explicitly mentioned, including:\n"
+            "- Description of what the model does\n"
+            "- Framework name (like PyTorch, TensorFlow) and version if available\n"
+            "- Neural network architecture (e.g. Transformer, CNN, RNN, etc.)\n"
+            "- Dataset name (e.g. FashionMNIST)\n"
             "- Training configuration: batch size, learning rate, optimizer, epochs, hardware used\n\n"
-            f"Provide a brief summary in 200 characters or less. Be direct and compact. "
-            "Focus only on what's explicitly in the code. "
-            "If you can't find certain information, don't mention that category. Only include information that appears in this code chunk."
+            "Provide a **natural language summary under 300 characters** that captures all extractable info.\n"
+            "Use compact, direct language. ONLY include details that appear in the input."
         )
 
         for attempt in range(max_retries):
@@ -281,7 +335,6 @@ class LLMBasedCodeParser:
                     temperature=0,
                     max_tokens=4000
                 )
-                print(f"chunk summary response (attempt {attempt + 1}): {response}")
                 summary = response.get("content", "").strip()
 
                 if summary:
