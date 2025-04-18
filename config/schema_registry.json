@@ -2,7 +2,7 @@
   "registry_name": "MySchemaRegistry",
   "schemas": [
     {
-      "schema_id": "model_metadata_schema",
+      "schema_id": "model_file_schema",
       "schema_version": "1.0.0",
       "schema_definition": {
         "type": "object",
@@ -12,57 +12,228 @@
           "metadata": {
             "type": "object",
             "properties": {
-              "model_id": { "type": "string" },
-              "description": { "type": "string" },
-              "created_at": { "type": "string" },
-              "created_month": { "type": "string" },
-              "created_year": { "type": "string" },
-              "last_modified_month": { "type": "string" },
-              "last_modified_year": { "type": "string" },
-              "total_chunks": { "type": "integer" },
-              "file": { "type": "object" },
-              "framework": {
+              "model_id": {"type": "string"},
+              "file": {
                 "type": "object",
                 "properties": {
-                  "name": { "type": ["string", "null"] },
-                  "version": { "type": ["string", "null"] }
-                },
-                "required": ["name"]
-              },
-              "architecture": {
-                "type": "object",
-                "properties": {
-                  "type": { "type": ["string", "null"] }
-                },
-                "required": ["type"]
-              },
-              "dataset": {
-                "type": "object",
-                "properties": {
-                  "name": { "type": ["string", "null"] }
-                },
-                "required": ["name"]
-              },
-              "training_config": {
-                "type": "object",
-                "properties": {
-                  "batch_size": { "type": ["integer", "null"] },
-                  "learning_rate": { "type": ["number", "null"] },
-                  "optimizer": { "type": ["string", "null"] },
-                  "epochs": { "type": ["integer", "null"] },
-                  "hardware_used": { "type": ["string", "null"] }
+                  "size_bytes": {"type": ["integer", "null"]},
+                  "creation_date": {"type": ["string", "null"]},
+                  "last_modified_date": {"type": ["string", "null"]},
+                  "file_extension": {"type": ["string", "null"]},
+                  "absolute_path": {"type": ["string", "null"]}
                 }
               },
-              "access_control": { "type": "object" }
+              "access_control": {"type": "object"}
             },
-            "required": ["model_id"],
-            "additionalProperties": true
+            "required": ["model_id", "file"]
           }
         },
         "required": ["id", "content", "metadata"]
       },
-      "description": "Schema for model metadata documents",
-      "updated_date": "2025-04-14T00:00:00"
+      "description": "Schema for model file metadata",
+      "updated_date": "2025-04-17T00:00:00"
+    },
+    {
+      "schema_id": "model_date_schema",
+      "schema_version": "1.0.0",
+      "schema_definition": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "content": {"type": "string"},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model_id": {"type": "string"},
+              "created_at": {"type": "string"},
+              "created_month": {"type": "string"},
+              "created_year": {"type": "string"},
+              "last_modified_month": {"type": "string"},
+              "last_modified_year": {"type": "string"},
+              "access_control": {"type": "object"}
+            },
+            "required": ["model_id"]
+          }
+        },
+        "required": ["id", "content", "metadata"]
+      },
+      "description": "Schema for model date information",
+      "updated_date": "2025-04-17T00:00:00"
+    },
+    {
+      "schema_id": "model_git_schema",
+      "schema_version": "1.0.0",
+      "schema_definition": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "content": {"type": "string"},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model_id": {"type": "string"},
+              "git": {
+                "type": "object",
+                "properties": {
+                  "creation_date": {"type": ["string", "null"]},
+                  "last_modified_date": {"type": ["string", "null"]},
+                  "commit_count": {"type": ["integer", "null"]}
+                }
+              },
+              "access_control": {"type": "object"}
+            },
+            "required": ["model_id", "git"]
+          }
+        },
+        "required": ["id", "content", "metadata"]
+      },
+      "description": "Schema for model git information",
+      "updated_date": "2025-04-17T00:00:00"
+    },
+    {
+      "schema_id": "model_frameworks_schema",
+      "schema_version": "1.0.0",
+      "schema_definition": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "content": {"type": "string"},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model_id": {"type": "string"},
+              "framework": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": ["string", "null"]},
+                  "version": {"type": ["string", "null"]}
+                },
+                "required": ["name"]
+              },
+              "access_control": {"type": "object"}
+            },
+            "required": ["model_id", "framework"]
+          }
+        },
+        "required": ["id", "content", "metadata"]
+      },
+      "description": "Schema for model frameworks information",
+      "updated_date": "2025-04-17T00:00:00"
+    },
+    {
+      "schema_id": "model_datasets_schema",
+      "schema_version": "1.0.0",
+      "schema_definition": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "content": {"type": "string"},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model_id": {"type": "string"},
+              "dataset": {
+                "type": "object",
+                "properties": {
+                  "name": {"type": ["string", "null"]}
+                },
+                "required": ["name"]
+              },
+              "access_control": {"type": "object"}
+            },
+            "required": ["model_id", "dataset"]
+          }
+        },
+        "required": ["id", "content", "metadata"]
+      },
+      "description": "Schema for model datasets information",
+      "updated_date": "2025-04-17T00:00:00"
+    },
+    {
+      "schema_id": "model_training_configs_schema",
+      "schema_version": "1.0.0",
+      "schema_definition": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "content": {"type": "string"},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model_id": {"type": "string"},
+              "training_config": {
+                "type": "object",
+                "properties": {
+                  "batch_size": {"type": ["integer", "null"]},
+                  "learning_rate": {"type": ["number", "null"]},
+                  "optimizer": {"type": ["string", "null"]},
+                  "epochs": {"type": ["integer", "null"]},
+                  "hardware_used": {"type": ["string", "null"]}
+                }
+              },
+              "access_control": {"type": "object"}
+            },
+            "required": ["model_id", "training_config"]
+          }
+        },
+        "required": ["id", "content", "metadata"]
+      },
+      "description": "Schema for model training configurations",
+      "updated_date": "2025-04-17T00:00:00"
+    },
+    {
+      "schema_id": "model_architectures_schema",
+      "schema_version": "1.0.0",
+      "schema_definition": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "content": {"type": "string"},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model_id": {"type": "string"},
+              "architecture": {
+                "type": "object",
+                "properties": {
+                  "type": {"type": ["string", "null"]}
+                },
+                "required": ["type"]
+              },
+              "access_control": {"type": "object"}
+            },
+            "required": ["model_id", "architecture"]
+          }
+        },
+        "required": ["id", "content", "metadata"]
+      },
+      "description": "Schema for model architecture information",
+      "updated_date": "2025-04-17T00:00:00"
+    },
+    {
+      "schema_id": "model_descriptions_schema",
+      "schema_version": "1.0.0",
+      "schema_definition": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "content": {"type": "string"},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model_id": {"type": "string"},
+              "description": {"type": "string"},
+              "total_chunks": {"type": "integer"},
+              "offset": {"type": "integer"},
+              "access_control": {"type": "object"}
+            },
+            "required": ["model_id", "description", "total_chunks"]
+          }
+        },
+        "required": ["id", "content", "metadata"]
+      },
+      "description": "Schema for model descriptions",
+      "updated_date": "2025-04-17T00:00:00"
     },
     {
       "schema_id": "model_chunk_schema",

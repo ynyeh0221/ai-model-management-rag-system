@@ -77,8 +77,9 @@ class ChromaManager:
         try:
             # Define default collections
             default_collections = {
+                # Original collections for backward compatibility
                 "model_scripts_metadata": {
-                    "description": "Collection for model metadata",
+                    "description": "Collection for model metadata (legacy)",
                     "embedding_function": self.text_embedding_function,
                     "metadata_schema": {
                         "model_id": "string",
@@ -122,6 +123,78 @@ class ChromaManager:
                         "target_id": "string",
                         "relation_type": "string"
                     }
+                },
+
+                # New collections for separated metadata
+                "model_file": {
+                    "description": "Collection for model file metadata",
+                    "embedding_function": self.text_embedding_function,
+                    "metadata_schema": {
+                        "model_id": "string",
+                        "file": "string"  # Stored as JSON string
+                    }
+                },
+                "model_date": {
+                    "description": "Collection for model date information",
+                    "embedding_function": self.text_embedding_function,
+                    "metadata_schema": {
+                        "model_id": "string",
+                        "created_at": "string",
+                        "created_month": "string",
+                        "created_year": "string",
+                        "last_modified_month": "string",
+                        "last_modified_year": "string"
+                    }
+                },
+                "model_git": {
+                    "description": "Collection for model git information",
+                    "embedding_function": self.text_embedding_function,
+                    "metadata_schema": {
+                        "model_id": "string",
+                        "git": "string"  # Stored as JSON string
+                    }
+                },
+                "model_frameworks": {
+                    "description": "Collection for model frameworks information",
+                    "embedding_function": self.text_embedding_function,
+                    "metadata_schema": {
+                        "model_id": "string",
+                        "framework": "string"  # Stored as JSON string
+                    }
+                },
+                "model_datasets": {
+                    "description": "Collection for model datasets information",
+                    "embedding_function": self.text_embedding_function,
+                    "metadata_schema": {
+                        "model_id": "string",
+                        "dataset": "string"  # Stored as JSON string
+                    }
+                },
+                "model_training_configs": {
+                    "description": "Collection for model training configurations",
+                    "embedding_function": self.text_embedding_function,
+                    "metadata_schema": {
+                        "model_id": "string",
+                        "training_config": "string"  # Stored as JSON string
+                    }
+                },
+                "model_architectures": {
+                    "description": "Collection for model architecture information",
+                    "embedding_function": self.text_embedding_function,
+                    "metadata_schema": {
+                        "model_id": "string",
+                        "architecture": "string"  # Stored as JSON string
+                    }
+                },
+                "model_descriptions": {
+                    "description": "Collection for model descriptions",
+                    "embedding_function": self.text_embedding_function,
+                    "metadata_schema": {
+                        "model_id": "string",
+                        "description": "string",
+                        "total_chunks": "number",
+                        "offset": "number"
+                    }
                 }
             }
 
@@ -136,7 +209,7 @@ class ChromaManager:
                 # Cache the collection for later use
                 self.collections[name] = collection
 
-            self.logger.info(f"Initialized {len(default_collections)} default collections")
+            self.logger.info(f"Initialized {len(default_collections)} collections")
 
         except Exception as e:
             self.logger.error(f"Error initializing default collections: {e}", exc_info=True)

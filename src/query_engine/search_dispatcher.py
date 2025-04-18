@@ -129,8 +129,7 @@ class SearchDispatcher:
     async def handle_text_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle a text search query for model scripts and metadata.
-        First search metadata, then search chunks for additional matches.
-        Returns a single result per unique model_id.
+        Query multiple metadata tables and merge results.
         """
         self.logger.debug(f"Handling text search: {query}")
         start_time = time.time()
@@ -147,17 +146,14 @@ class SearchDispatcher:
             except (TypeError, ValueError):
                 requested_limit = 20
 
-            self.logger.debug(f"Using requested_limit: {requested_limit}")
-
             # Define a higher limit for chunk searches
-            chunk_search_limit = requested_limit * 100
+            chunk_search_limit = requested_limit * 10
             filters = parameters.get('filters', {})
 
             # Apply access control filter if needed
             if self.access_control_manager and user_id:
                 access_filter = self.access_control_manager.create_access_filter(user_id)
                 if filters:
-                    # Ensure these get properly combined with $and
                     filters = {
                         "$and": [
                             filters if "$and" not in filters else {"$and": filters["$and"]},
@@ -167,119 +163,192 @@ class SearchDispatcher:
                 else:
                     filters = access_filter
 
-            # Translate filters to Chroma format properly handling compound conditions
+            # Translate filters to Chroma format
             chroma_filters = self._translate_filters_to_chroma(filters)
 
-            # STEP 1: Search metadata table directly
-            metadata_search_start = time.time()
-            metadata_search_params = {
-                'query': query,
-                'where': chroma_filters,
-                'limit': requested_limit,
-                'include': ["metadatas", "documents", "distances"]
+            # Define metadata tables to search
+            metadata_tables = [
+                "model_descriptions",
+                "model_architectures",
+                "model_frameworks",
+                "model_datasets",
+                "model_training_configs",
+                "model_date",
+                "model_file",
+                "model_git"
+            ]
+
+            # Table weights for relevance calculation
+            table_weights = {
+                "model_descriptions": 0.30,
+                "model_architectures": 0.20,
+                "model_frameworks": 0.15,
+                "model_datasets": 0.15,
+                "model_training_configs": 0.10,
+                "model_date": 0.05,
+                "model_file": 0.03,
+                "model_git": 0.02
             }
 
-            metadata_results = await self.chroma_manager.search(
-                collection_name="model_scripts_metadata",
-                **metadata_search_params
-            )
-            metadata_search_time = (time.time() - metadata_search_start) * 1000
+            # STEP 1: Search primary tables for model info
+            # We'll focus on description and architecture first as they're most important
+            metadata_search_start = time.time()
 
-            # Process results and create output list, keyed by model_id for deduplication
-            output_models = {}
-            for idx, result in enumerate(metadata_results.get('results', [])):
+            # Start with model_descriptions as it's most relevant
+            primary_results = await self.chroma_manager.search(
+                collection_name="model_descriptions",
+                query=query,
+                where=chroma_filters,
+                limit=requested_limit * 3,  # Get more results to ensure coverage
+                include=["metadatas", "documents", "distances"]
+            )
+
+            # Process results and create model dictionary keyed by model_id
+            model_results = {}
+
+            # Process primary table results
+            for result in primary_results.get('results', []):
                 metadata = result.get('metadata', {})
                 model_id = metadata.get('model_id', 'unknown')
+                distance = result.get('distance', 1.0)
 
-                # Only add if passes access control
+                # Apply access control
                 if self.access_control_manager and user_id:
                     if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
                         continue
 
-                output_models[model_id] = {
-                    'id': result.get('id'),
-                    'model_id': model_id,
-                    'metadata': metadata,
-                    'match_source': 'metadata'
-                }
+                # Initialize model data
+                if model_id not in model_results:
+                    model_results[model_id] = {
+                        'model_id': model_id,
+                        'metadata': {},
+                        'distance': distance * table_weights.get("model_descriptions", 0.3),
+                        'tables': ["model_descriptions"],
+                        'match_source': 'metadata'
+                    }
 
-            # STEP 2: Search chunks table
+                # Add metadata from this table
+                model_results[model_id]['metadata'].update(metadata)
+
+            # STEP 2: For each found model, fetch metadata from other tables
+            model_ids = list(model_results.keys())
+
+            # Only fetch additional metadata if we have models
+            if model_ids:
+                for table in metadata_tables[1:]:  # Skip descriptions as we already searched it
+                    # Skip if we have no models to search for
+                    if not model_ids:
+                        continue
+
+                    table_results = await self.chroma_manager.get(
+                        collection_name=table,
+                        where={"model_id": {"$in": model_ids}},
+                        include=["metadatas"]
+                    )
+
+                    # Process results
+                    for result in table_results.get('results', []):
+                        metadata = result.get('metadata', {})
+                        model_id = metadata.get('model_id', 'unknown')
+
+                        # Skip if model not in our results (shouldn't happen)
+                        if model_id not in model_results:
+                            continue
+
+                        # Add metadata from this table
+                        model_results[model_id]['metadata'].update(metadata)
+                        model_results[model_id]['tables'].append(table)
+
+                        # Adjust distance based on table match (more tables = better match)
+                        current_distance = model_results[model_id]['distance']
+                        weight = table_weights.get(table, 0.1)
+                        model_results[model_id][
+                            'distance'] -= weight * 0.1  # Slightly improve score for each table match
+
+            metadata_search_time = (time.time() - metadata_search_start) * 1000
+
+            # STEP 3: Search chunks table
             chunks_search_start = time.time()
-            chunks_search_params = {
-                'query': query,
-                'where': chroma_filters,
-                'limit': chunk_search_limit,
-                'include': ["metadatas", "documents", "distances"]
-            }
-
             chunk_results = await self.chroma_manager.search(
                 collection_name="model_scripts_chunks",
-                **chunks_search_params
+                query=query,
+                where=chroma_filters,
+                limit=chunk_search_limit,
+                include=["metadatas", "documents", "distances"]
             )
             chunks_search_time = (time.time() - chunks_search_start) * 1000
 
-            # Collect model_ids from chunks that aren't already in our output
-            new_model_ids = set()
+            # Process chunk results
             for result in chunk_results.get('results', []):
-                # Get metadata for access control check
                 metadata = result.get('metadata', {})
                 model_id = metadata.get('model_id', 'unknown')
+                distance = result.get('distance', 1.0)
 
-                # Apply access control check to each chunk before adding its model_id
+                # Apply access control
                 if self.access_control_manager and user_id:
                     if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
                         continue
 
-                # If we already have this model from metadata search, do nothing
-                if model_id not in output_models:
-                    # This is a new model - add to our set of models to fetch metadata for
-                    new_model_ids.add(model_id)
-
-            # STEP 3: For new model_ids found in chunks, fetch their metadata
-            if new_model_ids:
-                # Create a where clause to fetch metadata by model_id
-                where_clause = {"model_id": {"$in": list(new_model_ids)}}
-
-                # Apply access control if needed
-                if self.access_control_manager and user_id:
-                    access_filter = self.access_control_manager.create_access_filter(user_id)
-                    where_clause = {
-                        "$and": [
-                            where_clause,
-                            access_filter
-                        ]
+                # If we already have this model, update its match source and distance
+                if model_id in model_results:
+                    model_results[model_id]['match_source'] = 'metadata+chunks'
+                    # Chunks are important evidence, so improve score significantly
+                    model_results[model_id]['distance'] = 0.7 * model_results[model_id]['distance'] + 0.3 * (
+                                distance * 0.8)
+                else:
+                    # This is a new model found only in chunks
+                    # We'll need to fetch its metadata
+                    model_results[model_id] = {
+                        'model_id': model_id,
+                        'metadata': metadata,
+                        'distance': distance * 0.8,  # Chunk matches are weighted at 80%
+                        'tables': ["chunks"],
+                        'match_source': 'chunks'
                     }
 
-                # Fetch metadata for these models
-                additional_metadata = await self.chroma_manager.get(
-                    collection_name="model_scripts_metadata",
-                    where=where_clause,
+            # STEP 4: For models found only in chunks, fetch their metadata
+            chunks_only_models = [model_id for model_id, data in model_results.items()
+                                  if data['match_source'] == 'chunks']
+
+            if chunks_only_models:
+                # First fetch from descriptions as it has most important metadata
+                desc_results = await self.chroma_manager.get(
+                    collection_name="model_descriptions",
+                    where={"model_id": {"$in": chunks_only_models}},
                     include=["metadatas"]
                 )
 
-                # Process the metadata and add to output
-                for result in additional_metadata.get('results', []):
+                # Process and update metadata
+                for result in desc_results.get('results', []):
                     metadata = result.get('metadata', {})
-                    model_id = metadata.get('model_id')
+                    model_id = metadata.get('model_id', 'unknown')
 
-                    # If we haven't already added this model (sanity check)
-                    if model_id and model_id not in output_models:
-                        # Make one more explicit access control check before adding
-                        if self.access_control_manager and user_id:
-                            if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
-                                continue
+                    if model_id in model_results:
+                        model_results[model_id]['metadata'].update(metadata)
+                        model_results[model_id]['tables'].append("model_descriptions")
 
-                        # Add to output models - no need to track chunks
-                        output_models[model_id] = {
-                            'id': result.get('id'),
-                            'model_id': model_id,
-                            'metadata': metadata,
-                            'match_source': 'chunks'
-                        }
+                # Then fetch other important metadata selectively to avoid overloading
+                important_tables = ["model_architectures", "model_frameworks", "model_datasets"]
 
-            # Convert the dictionary to a list and sort by match source
-            output_list = list(output_models.values())
-            output_list.sort(key=lambda x: 0 if x['match_source'] == 'metadata' else 1)
+                for table in important_tables:
+                    table_results = await self.chroma_manager.get(
+                        collection_name=table,
+                        where={"model_id": {"$in": chunks_only_models}},
+                        include=["metadatas"]
+                    )
+
+                    # Process results
+                    for result in table_results.get('results', []):
+                        metadata = result.get('metadata', {})
+                        model_id = metadata.get('model_id', 'unknown')
+
+                        if model_id in model_results:
+                            model_results[model_id]['metadata'].update(metadata)
+                            model_results[model_id]['tables'].append(table)
+
+            # Convert to list and sort by distance (lower is better)
+            output_list = list(model_results.values())
+            output_list.sort(key=lambda x: x['distance'])
 
             # Limit to requested number of results
             output_list = output_list[:requested_limit]
@@ -288,11 +357,12 @@ class SearchDispatcher:
             items = []
             for rank, model in enumerate(output_list):
                 items.append({
-                    'id': model.get('id'),
+                    'id': f"model_metadata_{model.get('model_id')}",
                     'model_id': model.get('model_id'),
                     'metadata': model.get('metadata', {}),
                     'rank': rank + 1,
-                    'match_source': model.get('match_source')
+                    'match_source': model.get('match_source'),
+                    'distance': model.get('distance')
                 })
 
             # Calculate performance metrics
@@ -312,7 +382,7 @@ class SearchDispatcher:
                 'type': 'text_search',
                 'items': items,
                 'total_found': len(items),
-                'total_models': len(output_models),
+                'total_models': len(model_results),
                 'performance': {
                     'metadata_search_time_ms': metadata_search_time,
                     'chunks_search_time_ms': chunks_search_time,
@@ -323,6 +393,211 @@ class SearchDispatcher:
 
         except Exception as e:
             self.logger.error(f"Error in text search: {e}", exc_info=True)
+            raise
+
+    async def handle_metadata_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Handle a metadata-specific search query across multiple metadata tables.
+        """
+        self.logger.debug(f"Handling metadata search: {query}")
+        start_time = time.time()
+
+        try:
+            # Get user_id from parameters for access control
+            user_id = parameters.get('user_id')
+
+            # Extract search parameters
+            filters = parameters.get('filters', {})
+            limit = parameters.get('limit', 20)
+
+            # If query mentions a specific month, add it to filters
+            month_filter = None
+            if "april" in query.lower():
+                month_filter = {"created_month": {"$eq": "April"}}
+            elif "march" in query.lower():
+                month_filter = {"created_month": {"$eq": "March"}}
+            # Add more month checks as needed
+
+            # Convert filters to Chroma format
+            chroma_filters = self._translate_filters_to_chroma(filters)
+
+            # Apply month filter specifically to model_date table if needed
+            date_specific_filters = None
+            if month_filter:
+                if chroma_filters:
+                    date_specific_filters = {
+                        "$and": [chroma_filters, month_filter]
+                    }
+                else:
+                    date_specific_filters = month_filter
+
+            # Apply access control filter if applicable
+            if self.access_control_manager and user_id:
+                access_filter = self.access_control_manager.create_access_filter(user_id)
+
+                if chroma_filters:
+                    chroma_filters = {
+                        "$and": [chroma_filters, access_filter]
+                    }
+                else:
+                    chroma_filters = access_filter
+
+                if date_specific_filters:
+                    date_specific_filters = {
+                        "$and": [date_specific_filters, access_filter]
+                    }
+
+            # Define metadata tables to search with their relevance weights
+            metadata_tables = {
+                "model_descriptions": 0.25,
+                "model_architectures": 0.15,
+                "model_frameworks": 0.15,
+                "model_datasets": 0.15,
+                "model_training_configs": 0.15
+            }
+
+            # Add date table if we have month filters (with higher weight)
+            if month_filter:
+                metadata_tables["model_date"] = 0.30  # Higher priority since we're filtering by month
+            else:
+                metadata_tables["model_date"] = 0.10
+
+            # Add remaining tables with lower weights
+            metadata_tables["model_file"] = 0.03
+            metadata_tables["model_git"] = 0.02
+
+            # Start with most relevant table (either descriptions or dates if month filter exists)
+            search_start = time.time()
+            model_results = {}
+
+            # Start with date table if we have month filters
+            if month_filter:
+                # Get models matching the month filter
+                date_results = await self.chroma_manager.get(
+                    collection_name="model_date",
+                    where=date_specific_filters,
+                    limit=limit * 3,
+                    include=["metadatas"]
+                )
+
+                # Process models from date table
+                for result in date_results.get('results', []):
+                    metadata = result.get('metadata', {})
+                    model_id = metadata.get('model_id', 'unknown')
+
+                    # Apply access control check
+                    if self.access_control_manager and user_id:
+                        if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
+                            continue
+
+                    # Add to model results
+                    if model_id not in model_results:
+                        model_results[model_id] = {
+                            'model_id': model_id,
+                            'metadata': {},
+                            'relevance_score': metadata_tables["model_date"],  # Start with date table weight
+                            'tables': ["model_date"]
+                        }
+
+                    # Add metadata from this table
+                    model_results[model_id]['metadata'].update(metadata)
+            else:
+                # Start with descriptions table if no month filter
+                desc_results = await self.chroma_manager.get(
+                    collection_name="model_descriptions",
+                    where=chroma_filters,
+                    limit=limit * 3,
+                    include=["metadatas"]
+                )
+
+                # Process models from descriptions table
+                for result in desc_results.get('results', []):
+                    metadata = result.get('metadata', {})
+                    model_id = metadata.get('model_id', 'unknown')
+
+                    # Apply access control check
+                    if self.access_control_manager and user_id:
+                        if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
+                            continue
+
+                    # Add to model results
+                    if model_id not in model_results:
+                        model_results[model_id] = {
+                            'model_id': model_id,
+                            'metadata': {},
+                            'relevance_score': metadata_tables["model_descriptions"],  # Start with desc table weight
+                            'tables': ["model_descriptions"]
+                        }
+
+                    # Add metadata from this table
+                    model_results[model_id]['metadata'].update(metadata)
+
+            # Get list of model IDs we found
+            model_ids = list(model_results.keys())
+
+            # If we have models, fetch their metadata from other tables
+            if model_ids:
+                # Determine which tables we still need to fetch from
+                remaining_tables = [t for t in metadata_tables.keys()
+                                    if t != "model_date" and t != "model_descriptions"]
+
+                # Fetch from each remaining table
+                for table in remaining_tables:
+                    table_results = await self.chroma_manager.get(
+                        collection_name=table,
+                        where={"model_id": {"$in": model_ids}},
+                        include=["metadatas"]
+                    )
+
+                    # Process results
+                    for result in table_results.get('results', []):
+                        metadata = result.get('metadata', {})
+                        model_id = metadata.get('model_id', 'unknown')
+
+                        # Skip if model not in our results (shouldn't happen)
+                        if model_id not in model_results:
+                            continue
+
+                        # Add metadata from this table
+                        model_results[model_id]['metadata'].update(metadata)
+                        model_results[model_id]['tables'].append(table)
+
+                        # Increase relevance score based on table weight
+                        model_results[model_id]['relevance_score'] += metadata_tables.get(table, 0.1)
+
+            search_time = (time.time() - search_start) * 1000
+
+            # Convert to list and sort by relevance score (higher is better)
+            output_list = list(model_results.values())
+            output_list.sort(key=lambda x: x['relevance_score'], reverse=True)
+
+            # Limit to requested number of results
+            output_list = output_list[:limit]
+
+            # Prepare final result items
+            items = []
+            for idx, model in enumerate(output_list):
+                items.append({
+                    'id': f"model_metadata_{model.get('model_id')}",
+                    'model_id': model.get('model_id'),
+                    'metadata': model.get('metadata', {}),
+                    'rank': idx + 1,
+                    'relevance_score': model.get('relevance_score')
+                })
+
+            return {
+                'success': True,
+                'type': 'metadata_search',
+                'items': items,
+                'total_found': len(items),
+                'performance': {
+                    'search_time_ms': search_time,
+                    'total_time_ms': (time.time() - start_time) * 1000
+                }
+            }
+
+        except Exception as e:
+            self.logger.error(f"Error in metadata search: {e}", exc_info=True)
             raise
 
     async def handle_image_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
@@ -629,123 +904,98 @@ class SearchDispatcher:
             self.logger.error(f"Error in notebook request: {e}", exc_info=True)
             raise
 
-    async def handle_metadata_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Handle a metadata-specific search query.
-
-        Args:
-            query: The processed query text
-            parameters: Dictionary of extracted parameters
-
-        Returns:
-            Dictionary containing metadata search results
-        """
-        self.logger.debug(f"Handling metadata search: {query}")
-        start_time = time.time()
-
+    # Helper methods for the search functions
+    async def _search_metadata_table(self, table_name, query, filters, limit, weight):
+        """Search a specific metadata table and return weighted results."""
         try:
-            # Get user_id from parameters for access control
-            user_id = parameters.get('user_id')
+            search_params = {
+                'query': query,
+                'where': filters,
+                'limit': limit,
+                'include': ["metadatas", "documents", "distances"]
+            }
 
-            # Extract search parameters
-            filters = parameters.get('filters', {})
-            limit = parameters.get('limit', 20)
+            results = await self.chroma_manager.search(
+                collection_name=table_name,
+                **search_params
+            )
 
-            # If query mentions a specific month, add it to filters
-            if "april" in query.lower():
-                if not filters:
-                    filters = {}
-                filters["created_month"] = {"$eq": "April"}
-            elif "march" in query.lower():
-                if not filters:
-                    filters = {}
-                filters["created_month"] = {"$eq": "March"}
-            # Add more month checks as needed
+            # Add the table name and weight to the results
+            return {
+                'table_name': table_name,
+                'weight': weight,
+                'results': results.get('results', [])
+            }
+        except Exception as e:
+            self.logger.error(f"Error searching metadata table {table_name}: {e}")
+            return {
+                'table_name': table_name,
+                'weight': weight,
+                'results': []
+            }
 
-            # Convert filters to Chroma format
-            where_conditions = []
+    async def _get_metadata_table(self, table_name, filters, limit, weight):
+        """Get data from a specific metadata table based on filters."""
+        try:
+            get_params = {
+                'where': filters,
+                'limit': limit,
+                'include': ["metadatas"]
+            }
 
-            for key, value in filters.items():
-                if isinstance(value, dict) and any(op.startswith('$') for op in value.keys()):
-                    # Already has operators
-                    where_conditions.append({key: value})
-                elif isinstance(value, list):
-                    # List values become $in operators
-                    where_conditions.append({key: {"$in": value}})
-                else:
-                    # Simple values become $eq operators
-                    where_conditions.append({key: {"$eq": value}})
+            results = await self.chroma_manager.get(
+                collection_name=table_name,
+                **get_params
+            )
 
-            # Create a proper $and query if we have multiple conditions
-            chroma_filters = {}
-            if len(where_conditions) > 1:
-                chroma_filters = {"$and": where_conditions}
-            elif len(where_conditions) == 1:
-                chroma_filters = where_conditions[0]
+            # Add the table name and weight to the results
+            return {
+                'table_name': table_name,
+                'weight': weight,
+                'results': results.get('results', [])
+            }
+        except Exception as e:
+            self.logger.error(f"Error getting metadata from table {table_name}: {e}")
+            return {
+                'table_name': table_name,
+                'weight': weight,
+                'results': []
+            }
+
+    async def _fetch_model_metadata_by_id(self, table_name, model_id, user_id=None):
+        """Fetch metadata for a specific model from a specific table."""
+        try:
+            # Prepare filters to get model metadata
+            filters = {'model_id': {'$eq': model_id}}
 
             # Apply access control filter if applicable
             if self.access_control_manager and user_id:
                 access_filter = self.access_control_manager.create_access_filter(user_id)
+                filters = {
+                    "$and": [
+                        filters,
+                        access_filter
+                    ]
+                }
 
-                # Merge access control filter with existing filters
-                if chroma_filters:
-                    # If both have conditions, combine with $and
-                    chroma_filters = {
-                        "$and": [
-                            chroma_filters,
-                            access_filter
-                        ]
-                    }
-                else:
-                    # If no existing filters, just use access filter
-                    chroma_filters = access_filter
-
-            # Execute metadata search
-            search_start = time.time()
-            print(f"chroma_filters: {chroma_filters}")
-            metadata_results = await self.chroma_manager.get(
-                collection_name="model_scripts_metadata",
-                limit=limit,
-                where=chroma_filters,
+            # Fetch model metadata from specific table
+            result = await self.chroma_manager.get(
+                collection_name=table_name,
+                where=filters,
                 include=["metadatas"]
             )
-            search_time = (time.time() - search_start) * 1000
 
-            # Process results with additional access control check
-            items = []
-            for idx, result in enumerate(metadata_results.get('results', [])):
-                metadata = result.get('metadata', {})
-
-                # Apply additional access control check if needed
-                if self.access_control_manager and user_id:
-                    # Check if user has access to this model
-                    if not self.access_control_manager.check_access(
-                            {'metadata': metadata}, user_id, "view"
-                    ):
-                        # Skip this result if user doesn't have access
-                        continue
-
-                items.append({
-                    'id': result.get('id'),
-                    'metadata': metadata,
-                    'rank': idx + 1,
-                    'model_id': metadata.get('model_id', 'unknown')
-                })
-
-            return {
-                'success': True,
-                'type': 'metadata_search',
-                'items': items,
-                'total_found': len(items),
-                'performance': {
-                    'search_time_ms': search_time,
-                    'total_time_ms': (time.time() - start_time) * 1000
-                }
-            }
+            # Return the first result if available
+            if result and result.get('results'):
+                metadata = result['results'][0].get('metadata', {})
+                # Create a single top-level field for this table's data to avoid conflicts
+                table_key = table_name.replace('model_', '')  # e.g., "model_frameworks" becomes "frameworks"
+                return {'metadata': {table_key: metadata}}
 
         except Exception as e:
-            self.logger.error(f"Error in metadata search: {e}", exc_info=True)
-            raise
+            self.logger.error(f"Error fetching model metadata for {model_id} from {table_name}: {e}")
+
+        return None
 
     async def handle_fallback_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """

@@ -345,26 +345,39 @@ class LLMBasedCodeParser:
             return self._create_default_metadata()
 
         system_prompt = (
-            "You are a metadata extractor for machine learning code. "
+            "⚠️ The \"description\" field MUST contain AT LEAST 300 characters. This is MANDATORY and NON-NEGOTIABLE.\n"
+            "⚠️ Use the exact sentence structure given below for the \"description\" field. All placeholders must be filled.\n\n"
+            "You are a metadata extractor for machine learning code.\n"
             "Based on the following code analysis summary, create a structured representation of the model metadata.\n\n"
-            "⚠️ The output **must strictly follow this exact JSON structure**:\n"
+            "🔴 Do not begin generating the JSON unless you are confident the \"description\" field is complete, "
+            "at least 300 characters long, and follows the required format exactly.\n\n"
+            "⚠️ The output MUST strictly follow this exact JSON structure:\n\n"
+            "```json\n"
             "{\n"
-            '  "description": "Short summary of what the model does",\n'
-            '  "framework": { "name": "...", "version": "..." },\n'
-            '  "architecture": { "type": "..." },\n'
-            '  "dataset": { "name": "..." },\n'
-            '  "training_config": {\n'
-            '    "batch_size": 32,\n'
-            '    "learning_rate": 0.001,\n'
-            '    "optimizer": "Adam",\n'
-            '    "epochs": 10,\n'
-            '    "hardware_used": "GPU"\n'
-            '  }\n'
-            "}\n\n"
-            "⚠️ ALL fields must be included exactly as shown, even if you have to use placeholder values.\n"
+            "  \"description\": \"This model is a [architecture type] designed to [specific purpose]. "
+            "It is trained on the [dataset name] dataset which [brief dataset description]. "
+            "The architecture employs [list 2-3 key components] to [explain how they work together]. "
+            "The implementation uses [framework] and is optimized for [specific application or outcome]. "
+            "The training process includes [mention 1-2 notable training details].\",\n"
+            "  \"framework\": { \"name\": \"...\", \"version\": \"...\" },\n"
+            "  \"architecture\": { \"type\": \"...\" },\n"
+            "  \"dataset\": { \"name\": \"...\" },\n"
+            "  \"training_config\": {\n"
+            "    \"batch_size\": 32,\n"
+            "    \"learning_rate\": 0.001,\n"
+            "    \"optimizer\": \"Adam\",\n"
+            "    \"epochs\": 10,\n"
+            "    \"hardware_used\": \"GPU\"\n"
+            "  }\n"
+            "}\n"
+            "```\n\n"
             "🟡 If you cannot confidently extract a field, use \"unknown\", null, or a placeholder value.\n"
-            "✅ Do not include any additional fields — **only return the fields shown above**.\n"
-            "Respond only with valid JSON. No extra text, comments, or explanation."
+            "✅ Do not include any additional fields — ONLY return the fields shown above.\n"
+            "✅ Return valid JSON only. Do NOT include extra text, comments, or explanations.\n"
+            "✅ After generating the JSON, double-check that the \"description\" field:\n"
+            "- Is at least 300 characters long\n"
+            "- Follows the sentence structure exactly\n"
+            "- Has no missing or placeholder text\n"
         )
 
         for attempt in range(max_retries):
