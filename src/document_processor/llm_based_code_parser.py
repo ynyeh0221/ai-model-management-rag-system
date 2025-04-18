@@ -213,8 +213,8 @@ class LLMBasedCodeParser:
                 "hardware_used": None
             }
 
-        desc = self.llm_metadata_cache.get("description")
-        model_info["description"] = desc if isinstance(desc, str) else "N/A"
+        desc = self.llm_metadata_cache.get("chunk_descriptions")
+        model_info["chunk_descriptions"] = desc if len(desc) > 0 else []
 
         model_info["is_model_script"] = True
         model_info["content"] = file_content
@@ -222,11 +222,11 @@ class LLMBasedCodeParser:
         print(f"updated model_info: {model_info}")
         return model_info
 
-    def _extract_llm_metadata(self, code_str: str, max_retries: int = 10) -> dict:
+    def _extract_llm_metadata(self, code_str: str, max_retries: int = 15) -> dict:
         # Define a threshold to decide if chunking is needed
         all_chunks = self.split_by_lines(
             file_content=code_str,
-            chunk_size_in_lines=100,
+            chunk_size_in_lines=150,
             overlap=0,
         )
         print(f"Chunk counts: {len(all_chunks)}")
@@ -246,6 +246,8 @@ class LLMBasedCodeParser:
 
         # Generate final JSON from the merged summary
         final = self.generate_metadata_from_summary(merged_summary, max_retries=max_retries)
+        final['chunk_descriptions'] = [chunk["summary"] for chunk in chunk_summaries if "summary" in chunk]
+        del final["description"]
 
         print(f"Final metadata (from summaries): {final}")
 
@@ -265,7 +267,7 @@ class LLMBasedCodeParser:
             "- Architecture: Neural network architecture type\n"
             "- Dataset: Training data used\n"
             "- Training configuration: batch size, learning rate, optimizer, epochs, hardware used\n\n"
-            f"Provide an extremely brief summary in 200 characters or less. Be direct and compact. "
+            f"Provide a brief summary in 200 characters or less. Be direct and compact. "
             "Focus only on what's explicitly in the code. "
             "If you can't find certain information, don't mention that category. Only include information that appears in this code chunk."
         )

@@ -75,9 +75,9 @@ class ScriptProcessorRunner:
                 try:
                     result = future.result()
                     if result:
-                        document_id, success = result
+                        model_id, success = result
                         logger.info(
-                            f"Processed {file_path} with ID {document_id}: {'Success' if success else 'Failed'}")
+                            f"Processed {file_path} with ID {model_id}: {'Success' if success else 'Failed'}")
                     else:
                         logger.warning(f"Skipped {file_path}: Not a model script")
                 except Exception as e:
@@ -97,7 +97,7 @@ class ScriptProcessorRunner:
             logger: Logger instance
 
         Returns:
-            Tuple of (document_id, success) if processed, None if skipped
+            Tuple of (model_id, success) if processed, None if skipped
         """
         # Extract required components
         code_parser = components["document_processor"]["code_parser"]
@@ -131,18 +131,17 @@ class ScriptProcessorRunner:
             overlap=1000
         )
 
-        # Extract metadata and prepare metadata document
-        model_id, metadata_document = self._extract_and_prepare_metadata(
+        # Extract metadata and prepare metadata documents for different tables
+        model_id, metadata_documents = self._extract_and_prepare_metadata(
             metadata_extractor,
             parse_result,
-            file_path,
-            chunks
+            file_path
         )
 
-        # Validate and store metadata document
-        metadata_stored = self._validate_and_store_metadata(
+        # Validate and store metadata documents in different tables
+        metadata_stored = self._validate_and_store_metadata_documents(
             schema_validator,
-            metadata_document,
+            metadata_documents,
             text_embedder,
             chroma_manager,
             access_control
@@ -152,34 +151,32 @@ class ScriptProcessorRunner:
             logger.warning(f"Failed to store metadata for {file_path}")
             return None, False
 
-        # Process and store code chunks
         chunk_documents = self._process_and_store_chunks(
             chunks,
             model_id,
-            metadata_document["id"],
+            metadata_documents["model_date"]["id"],
             schema_validator,
             text_embedder,
             chroma_manager
         )
 
         if chunk_documents:
-            logger.info(f"Successfully processed {file_path} with model ID {metadata_document['id']}")
-            return metadata_document["id"], True
+            logger.info(f"Successfully processed {file_path} with model ID {model_id}")
+            return model_id, True
         else:
             logger.warning(f"Skipped {file_path}: Failed to process model script")
             return None, False
 
-    def _extract_and_prepare_metadata(self, metadata_extractor, parse_result, file_path, chunks):
-        """Extract metadata and prepare metadata document.
+    def _extract_and_prepare_metadata(self, metadata_extractor, parse_result, file_path):
+        """Extract metadata and prepare metadata documents for different tables.
 
         Args:
             metadata_extractor: The metadata extractor component
             parse_result: Result from code parsing
             file_path: Path to the file
-            chunks: Code chunks
 
         Returns:
-            Tuple of (model_id, metadata_document)
+            Tuple of (model_id, metadata_documents_dict)
         """
         # Extract metadata
         metadata = metadata_extractor.extract_metadata(file_path)
@@ -200,29 +197,132 @@ class ScriptProcessorRunner:
         # Extract additional metadata from LLM parse_result
         llm_fields = self._extract_llm_fields(parse_result)
 
-        # Prepare metadata document
-        metadata_document = {
-            "id": f"model_metadata_{model_id}",
-            "$schema_version": "1.0.0",
-            "content": f"Model: {model_id}",  # Simple summary for embedding
-            "metadata": {
-                **metadata,
-                "model_id": model_id,
-                "description": llm_fields["description"],
-                "framework": llm_fields["framework"],
-                "architecture": llm_fields["architecture"],
-                "dataset": llm_fields["dataset"],
-                "training_config": llm_fields["training_config"],
-                "created_at": creation_date_raw,
-                "created_month": creation_natural_month,
-                "created_year": creation_date_raw[:4],
-                "last_modified_month": last_modified_natural_month,
-                "last_modified_year": last_modified_raw[:4],
-                "total_chunks": len(chunks)
+        # Extract other fields that might be in the metadata
+        offset = metadata.get("offset", -999)
+
+        # Get chunk descriptions from parse_result
+        chunk_descriptions = parse_result.get("chunk_descriptions", [])
+
+        # Create individual model_descriptions documents for each chunk
+        model_descriptions_documents = {}
+        for i, description in enumerate(chunk_descriptions):
+            doc_id = f"model_descriptions_{model_id}_chunk_{i}"
+            model_descriptions_documents[doc_id] = {
+                "id": doc_id,
+                "$schema_version": "1.0.0",
+                "content": f"Description for chunk {i} of model {model_id}",
+                "metadata": {
+                    "model_id": model_id,
+                    "chunk_id": i,
+                    "total_chunks": len(chunk_descriptions),
+                    "offset": offset,
+                    "description": description
+                }
             }
+
+        # Prepare metadata documents for different tables
+        metadata_documents = {
+            # 1. Model file information
+            "model_file": {
+                "id": f"model_file_{model_id}",
+                "$schema_version": "1.0.0",
+                "content": f"Model file: {model_id}",
+                "metadata": {
+                    "model_id": model_id,
+                    "file": metadata.get("file", {})
+                }
+            },
+
+            # 2. Model date information
+            "model_date": {
+                "id": f"model_date_{model_id}",
+                "$schema_version": "1.0.0",
+                "content": f"Model date: {model_id}",
+                "metadata": {
+                    "model_id": model_id,
+                    "created_at": creation_date_raw,
+                    "created_month": creation_natural_month,
+                    "created_year": creation_date_raw[:4] if creation_date_raw != "N/A" else "N/A",
+                    "last_modified_month": last_modified_natural_month,
+                    "last_modified_year": last_modified_raw[:4] if last_modified_raw != "N/A" else "N/A"
+                }
+            },
+
+            # 3. Model git information
+            "model_git": {
+                "id": f"model_git_{model_id}",
+                "$schema_version": "1.0.0",
+                "content": f"Model git: {model_id}",
+                "metadata": {
+                    "model_id": model_id,
+                    "git": metadata.get("git", {})
+                }
+            },
+
+            # 4. Model frameworks information
+            "model_frameworks": {
+                "id": f"model_frameworks_{model_id}",
+                "$schema_version": "1.0.0",
+                "content": f"Model frameworks: {model_id}",
+                "metadata": {
+                    "model_id": model_id,
+                    "framework": llm_fields["framework"]
+                }
+            },
+
+            # 5. Model datasets information
+            "model_datasets": {
+                "id": f"model_datasets_{model_id}",
+                "$schema_version": "1.0.0",
+                "content": f"Model datasets: {model_id}",
+                "metadata": {
+                    "model_id": model_id,
+                    "dataset": llm_fields["dataset"]
+                }
+            },
+
+            # 6. Model training configs information
+            "model_training_configs": {
+                "id": f"model_training_configs_{model_id}",
+                "$schema_version": "1.0.0",
+                "content": f"Model training configs: {model_id}",
+                "metadata": {
+                    "model_id": model_id,
+                    "training_config": llm_fields["training_config"]
+                }
+            },
+
+            # 7. Model architectures information
+            "model_architectures": {
+                "id": f"model_architectures_{model_id}",
+                "$schema_version": "1.0.0",
+                "content": f"Model architectures: {model_id}",
+                "metadata": {
+                    "model_id": model_id,
+                    "architecture": llm_fields["architecture"]
+                }
+            },
+
+            "model_descriptions": []  # List of chunk descriptions
         }
 
-        return model_id, metadata_document
+        # Add all model_descriptions documents
+        for i, description in enumerate(chunk_descriptions):
+            doc_id = f"model_descriptions_{model_id}_chunk_{i}"
+            metadata_documents["model_descriptions"].append({
+                "id": doc_id,
+                "$schema_version": "1.0.0",
+                "content": f"Description for chunk {i} of model {model_id}",
+                "metadata": {
+                    "model_id": model_id,
+                    "chunk_id": i,
+                    "total_chunks": len(chunk_descriptions),
+                    "offset": offset,
+                    "description": description or "No description available"
+                }
+            })
+
+        return model_id, metadata_documents
 
     def _extract_llm_fields(self, parse_result):
         """Extract and format LLM parsed metadata fields from parse result.
@@ -253,73 +353,187 @@ class ScriptProcessorRunner:
 
         return llm_fields
 
-    def _validate_and_store_metadata(self, schema_validator, metadata_document, text_embedder, chroma_manager,
-                                     access_control):
-        """Validate and store metadata document.
+    def _validate_and_store_metadata_documents(self, schema_validator, metadata_documents, text_embedder,
+                                               chroma_manager, access_control):
+        """Validate and store metadata documents in different tables."""
+        success = True
+        critical_failure = False
+        critical_collections = ["model_file", "model_architectures", "model_frameworks"]
+
+        for key, value in metadata_documents.items():
+            documents = value if isinstance(value, list) else [value]
+
+            for document in documents:
+                doc_id = document.get("id", "")
+
+                if key == "model_descriptions":
+                    collection_name = "model_descriptions"
+                    schema_id = "model_descriptions_schema"
+                else:
+                    collection_name = key
+                    schema_id = f"{key}_schema"
+
+                if not collection_name or not schema_id:
+                    logging.warning(
+                        f"Could not determine collection name or schema ID for document {doc_id}. Skipping.")
+                    success = False
+                    continue
+
+                try:
+                    validation_result = schema_validator.validate(document, schema_id)
+                    if not validation_result["valid"]:
+                        logging.warning(
+                            f"Schema validation failed for {schema_id} document: {validation_result['errors']}")
+                        if collection_name in critical_collections:
+                            critical_failure = True
+                        success = False
+                        continue
+                except ValueError as e:
+                    logging.error(f"Schema validation error for {doc_id}: {str(e)}")
+                    if collection_name in critical_collections:
+                        critical_failure = True
+                    success = False
+                    continue
+
+                access_metadata = access_control.get_document_permissions(document)
+                document["metadata"]["access_control"] = access_metadata
+
+                try:
+                    embedding_content = self._create_metadata_content_for_type(collection_name, document)
+                    document_embedding = text_embedder.embed_mixed_content(embedding_content)
+                except Exception as e:
+                    logging.error(f"Error creating embedding for document {doc_id}: {str(e)}")
+                    if collection_name in critical_collections:
+                        critical_failure = True
+                    success = False
+                    continue
+
+                try:
+                    asyncio.run(chroma_manager.add_document(
+                        collection_name=collection_name,
+                        document_id=document["id"],
+                        document=document,
+                        embed_content=document_embedding
+                    ))
+                except Exception as e:
+                    logging.error(f"Error storing document {doc_id} in collection {collection_name}: {str(e)}")
+                    if collection_name in critical_collections:
+                        critical_failure = True
+                    success = False
+
+        return not critical_failure
+
+    def _create_metadata_content_for_type(self, doc_type, document):
+        """Create metadata content for embedding based on document type.
 
         Args:
-            schema_validator: The schema validator component
-            metadata_document: The metadata document
-            text_embedder: The text embedder component
-            chroma_manager: The chroma manager component
-            access_control: The access control component
-
-        Returns:
-            True if successful, False otherwise
-        """
-        # Validate using the metadata schema
-        validation_result = schema_validator.validate(metadata_document, "model_metadata_schema")
-        if not validation_result["valid"]:
-            logging.warning(f"Schema validation failed for metadata document: {validation_result['errors']}")
-            return False
-
-        # Add access control metadata
-        access_metadata = access_control.get_document_permissions(metadata_document)
-        metadata_document["metadata"]["access_control"] = access_metadata
-
-        # Create metadata embedding content
-        metadata_content = self._create_metadata_content(metadata_document)
-        metadata_embedding = text_embedder.embed_mixed_content(metadata_content)
-
-        # Store metadata document
-        asyncio.run(chroma_manager.add_document(
-            collection_name="model_scripts_metadata",
-            document_id=metadata_document["id"],
-            document=metadata_document,
-            embed_content=metadata_embedding
-        ))
-
-        return True
-
-    def _create_metadata_content(self, metadata_document):
-        """Create metadata content for embedding.
-
-        Args:
-            metadata_document: The metadata document
+            doc_type: Type of the document (e.g., 'model_file', 'model_date')
+            document: The metadata document
 
         Returns:
             Dictionary with title and description for embedding
         """
-        metadata = metadata_document["metadata"]
+        metadata = document["metadata"]
+        model_id = metadata["model_id"]
 
+        # Create type-specific embedding content
+        if doc_type == "model_file":
+            file_info = metadata.get("file", {})
+            return {
+                "title": f"File information for {model_id}",
+                "description": f"""
+                    Model file size: {file_info.get('size_bytes', 'N/A')} bytes.
+                    File extension: {file_info.get('file_extension', 'N/A')}.
+                    Path: {file_info.get('absolute_path', 'N/A')}.
+                    Creation date: {file_info.get('creation_date', 'N/A')}.
+                    Last modified date: {file_info.get('last_modified_date', 'N/A')}.
+                """
+            }
+
+        elif doc_type == "model_date":
+            return {
+                "title": f"Date information for {model_id}",
+                "description": f"""
+                    Model created in {metadata.get('created_month', 'N/A')}.
+                    Created in year: {metadata.get('created_year', 'N/A')}.
+                    Created on {metadata.get('created_at', 'N/A')}.
+                    Last modified in {metadata.get('last_modified_month', 'N/A')}.
+                    Last modified in year: {metadata.get('last_modified_year', 'N/A')}.
+                """
+            }
+
+        elif doc_type == "model_git":
+            git_info = metadata.get("git", {})
+            return {
+                "title": f"Git information for {model_id}",
+                "description": f"""
+                    Git creation date: {git_info.get('creation_date', 'N/A')}.
+                    Git last modified date: {git_info.get('last_modified_date', 'N/A')}.
+                    Commit count: {git_info.get('commit_count', 'N/A')}.
+                """
+            }
+
+        elif doc_type == "model_frameworks":
+            framework = metadata.get("framework", {})
+            return {
+                "title": f"Framework information for {model_id}",
+                "description": f"""
+                    Framework name: {framework.get('name', 'N/A')}.
+                    Framework version: {framework.get('version', 'N/A')}.
+                """
+            }
+
+        elif doc_type == "model_datasets":
+            dataset = metadata.get("dataset", {})
+            return {
+                "title": f"Dataset information for {model_id}",
+                "description": f"""
+                    Dataset name: {dataset.get('name', 'N/A')}.
+                """
+            }
+
+        elif doc_type == "model_training_configs":
+            training_config = metadata.get("training_config", {})
+            return {
+                "title": f"Training configuration for {model_id}",
+                "description": f"""
+                    Batch size: {training_config.get('batch_size', 'N/A')}.
+                    Optimizer: {training_config.get('optimizer', 'N/A')}.
+                    Epochs: {training_config.get('epochs', 'N/A')}.
+                    Learning rate: {training_config.get('learning_rate', 'N/A')}.
+                    Hardware used: {training_config.get('hardware_used', 'N/A')}.
+                    Associated configs: {metadata.get('associated_configs', '[]')}.
+                """
+            }
+
+        elif doc_type == "model_architectures":
+            architecture = metadata.get("architecture", {})
+            return {
+                "title": f"Architecture information for {model_id}",
+                "description": f"""
+                    Architecture type: {architecture.get('type', 'N/A')}.
+                """
+            }
+
+        elif doc_type == "model_descriptions":
+            # For individual chunk descriptions
+            chunk_id = metadata.get("chunk_id", "N/A")
+            description = metadata.get("description", "No description available")
+
+            return {
+                "title": f"Description for chunk {chunk_id} of model {model_id}",
+                "description": f"""
+                    Model: {model_id}
+                    Chunk: {chunk_id} of {metadata.get('total_chunks', 0)}
+                    Description: {description}
+                    Offset: {metadata.get('offset', -999)}.
+                """
+            }
+
+        # Default case
         return {
-            "title": metadata["model_id"],
-            "description": f"""
-                Model created in {metadata["created_month"]}.
-                Created in month: {metadata["created_month"]}.
-                Created in year: {metadata["created_year"]}.
-                Created on {metadata["created_at"]}.
-                Last modified in {metadata["last_modified_month"]}.
-                Last modified in year: {metadata["last_modified_year"]}.
-                Last modified on {metadata["created_at"]}.
-                Size: {metadata.get("file", {}).get('size_bytes', 'N/A')} bytes.
-
-                Description: {metadata["description"]}.
-                Framework: {metadata["framework"]}.
-                Architecture: {metadata["architecture"]}.
-                Dataset: {metadata["dataset"]}.
-                Training config: {metadata["training_config"]}.
-            """
+            "title": model_id,
+            "description": f"Metadata for {model_id} of type {doc_type}"
         }
 
     def _process_and_store_chunks(self, chunks, model_id, metadata_doc_id, schema_validator, text_embedder,
