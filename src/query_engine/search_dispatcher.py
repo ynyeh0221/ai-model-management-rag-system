@@ -129,7 +129,10 @@ class SearchDispatcher:
     async def handle_text_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle a text search query for model scripts and metadata.
-        Query multiple metadata tables and merge results.
+        1. Query all metadata tables, merge by model_id, sort by distance
+        2. Query model_scripts_chunks to find more model_ids
+        3. Sort results, limit to requested number, and fetch metadata for all final models
+        4. For each model in the output list, fetch and merge chunk descriptions
         """
         self.logger.debug(f"Handling text search: {query}")
         start_time = time.time()
@@ -146,8 +149,6 @@ class SearchDispatcher:
             except (TypeError, ValueError):
                 requested_limit = 20
 
-            # Define a higher limit for chunk searches
-            chunk_search_limit = requested_limit * 10
             filters = parameters.get('filters', {})
 
             # Apply access control filter if needed
@@ -166,19 +167,7 @@ class SearchDispatcher:
             # Translate filters to Chroma format
             chroma_filters = self._translate_filters_to_chroma(filters)
 
-            # Define metadata tables to search
-            metadata_tables = [
-                "model_descriptions",
-                "model_architectures",
-                "model_frameworks",
-                "model_datasets",
-                "model_training_configs",
-                "model_date",
-                "model_file",
-                "model_git"
-            ]
-
-            # Table weights for relevance calculation
+            # Define metadata tables to search with their weights
             table_weights = {
                 "model_descriptions": 0.30,
                 "model_architectures": 0.20,
@@ -190,100 +179,102 @@ class SearchDispatcher:
                 "model_git": 0.02
             }
 
-            # STEP 1: Search primary tables for model info
-            # We'll focus on description and architecture first as they're most important
+            # STEP 1: Search all metadata tables in parallel and merge results
             metadata_search_start = time.time()
+            search_tasks = []
 
-            # Start with model_descriptions as it's most relevant
-            primary_results = await self.chroma_manager.search(
-                collection_name="model_descriptions",
-                query=query,
-                where=chroma_filters,
-                limit=requested_limit * 3,  # Get more results to ensure coverage
-                include=["metadatas", "documents", "distances"]
-            )
+            # Create search tasks for all tables
+            for table_name in table_weights.keys():
+                search_tasks.append(self.chroma_manager.search(
+                    collection_name=table_name,
+                    query=query,
+                    where=chroma_filters,
+                    limit=requested_limit * 10,  # Get more results to ensure coverage
+                    include=["metadatas", "documents", "distances"]
+                ))
 
-            # Process results and create model dictionary keyed by model_id
+            # Execute all searches in parallel
+            search_results = await asyncio.gather(*search_tasks)
+
+            # Initialize model results dictionary to store combined results
             model_results = {}
 
-            # Process primary table results
-            for result in primary_results.get('results', []):
-                metadata = result.get('metadata', {})
-                model_id = metadata.get('model_id', 'unknown')
-                distance = result.get('distance', 1.0)
+            # Process search results from each table
+            for table_idx, result in enumerate(search_results):
+                table_name = list(table_weights.keys())[table_idx]
+                table_weight = table_weights[table_name]
 
-                # Apply access control
-                if self.access_control_manager and user_id:
-                    if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
+                for item in result.get('results', []):
+                    metadata = item.get('metadata', {})
+                    model_id = metadata.get('model_id', 'unknown')
+
+                    # Skip if no model_id
+                    if model_id == 'unknown':
                         continue
 
-                # Initialize model data
-                if model_id not in model_results:
-                    model_results[model_id] = {
-                        'model_id': model_id,
-                        'metadata': {},
-                        'distance': distance * table_weights.get("model_descriptions", 0.3),
-                        'tables': ["model_descriptions"],
-                        'match_source': 'metadata',
-                        'chunk_descriptions': []  # Initialize list to hold chunk descriptions
-                    }
+                    distance = item.get('distance', 1.0)
 
-                # Add metadata from this table
-                model_results[model_id]['metadata'].update(metadata)
-
-            # STEP 2: For each found model, fetch metadata from other tables
-            model_ids = list(model_results.keys())
-
-            # Only fetch additional metadata if we have models
-            if model_ids:
-                for table in metadata_tables[1:]:  # Skip descriptions as we already searched it
-                    # Skip if we have no models to search for
-                    if not model_ids:
-                        continue
-
-                    table_results = await self.chroma_manager.get(
-                        collection_name=table,
-                        where={"model_id": {"$in": model_ids}},
-                        include=["metadatas"]
-                    )
-
-                    # Process results
-                    for result in table_results.get('results', []):
-                        metadata = result.get('metadata', {})
-                        model_id = metadata.get('model_id', 'unknown')
-
-                        # Skip if model not in our results (shouldn't happen)
-                        if model_id not in model_results:
+                    # Apply access control
+                    if self.access_control_manager and user_id:
+                        if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
                             continue
 
-                        # Add metadata from this table
+                    # Apply table weight to the distance score
+                    weighted_distance = distance * table_weight
+
+                    # If model already exists in results, update its metadata and recalculate distance
+                    if model_id in model_results:
+                        # Add this table to the list of matching tables
+                        if table_name not in model_results[model_id]['tables']:
+                            model_results[model_id]['tables'].append(table_name)
+
+                        # Update model metadata with this table's metadata
                         model_results[model_id]['metadata'].update(metadata)
-                        model_results[model_id]['tables'].append(table)
 
-                        # Adjust distance based on table match (more tables = better match)
-                        current_distance = model_results[model_id]['distance']
-                        weight = table_weights.get(table, 0.1)
-                        model_results[model_id][
-                            'distance'] -= weight * 0.1  # Slightly improve score for each table match
+                        # Update the weighted distance (lower is better)
+                        # We use a weighted average based on table weights
+                        tables = model_results[model_id]['tables']
+                        current_weight_sum = sum(table_weights[t] for t in tables if t in table_weights)
 
-            metadata_search_time = (time.time() - metadata_search_start) * 1000
+                        if current_weight_sum > 0:  # Avoid division by zero
+                            old_score = model_results[model_id]['distance'] * (current_weight_sum - table_weight)
+                            new_score = weighted_distance * table_weight
+                            model_results[model_id]['distance'] = (old_score + new_score) / current_weight_sum
+                    else:
+                        # First time seeing this model, initialize its entry
+                        model_results[model_id] = {
+                            'model_id': model_id,
+                            'metadata': metadata.copy(),
+                            'distance': weighted_distance,
+                            'tables': [table_name],
+                            'match_source': 'metadata'
+                        }
 
-            # STEP 3: Search chunks table
+            # STEP 2: Search chunks table to find more matching models
             chunks_search_start = time.time()
-            chunk_results = await self.chroma_manager.search(
-                collection_name="model_scripts_chunks",
-                query=query,
-                where=chroma_filters,
-                limit=chunk_search_limit,
-                include=["metadatas", "documents", "distances"]
-            )
-            chunks_search_time = (time.time() - chunks_search_start) * 1000
+            try:
+                chunk_results = await self.chroma_manager.search(
+                    collection_name="model_scripts_chunks",
+                    query=query,
+                    where=chroma_filters,
+                    limit=requested_limit * 100,  # Define a higher limit for chunk searches
+                    include=["metadatas", "documents", "distances"]
+                )
+                chunks_search_time = (time.time() - chunks_search_start) * 1000
+            except Exception as e:
+                self.logger.error(f"Error in chunks search: {e}")
+                chunk_results = {'results': []}
+                chunks_search_time = (time.time() - chunks_search_start) * 1000
 
             # Process chunk results
             for result in chunk_results.get('results', []):
                 metadata = result.get('metadata', {})
                 model_id = metadata.get('model_id', 'unknown')
-                chunk_id = metadata.get('chunk_id', -1)
+
+                # Skip if no model_id
+                if model_id == 'unknown':
+                    continue
+
                 distance = result.get('distance', 1.0)
 
                 # Apply access control
@@ -297,115 +288,129 @@ class SearchDispatcher:
                     # Chunks are important evidence, so improve score significantly
                     model_results[model_id]['distance'] = 0.7 * model_results[model_id]['distance'] + 0.3 * (
                             distance * 0.8)
-
-                    # Store the chunk_id and distance for later fetching descriptions
-                    model_results[model_id]['chunk_descriptions'].append({
-                        'chunk_id': chunk_id,
-                        'distance': distance
-                    })
                 else:
                     # This is a new model found only in chunks
-                    # We'll need to fetch its metadata
                     model_results[model_id] = {
                         'model_id': model_id,
                         'metadata': metadata,
                         'distance': distance * 0.8,  # Chunk matches are weighted at 80%
                         'tables': ["chunks"],
-                        'match_source': 'chunks',
-                        'chunk_descriptions': [{
-                            'chunk_id': chunk_id,
-                            'distance': distance
-                        }]
+                        'match_source': 'chunks'
                     }
-
-            # STEP 4: For models found only in chunks, fetch their metadata
-            chunks_only_models = [model_id for model_id, data in model_results.items()
-                                  if data['match_source'] == 'chunks']
-
-            if chunks_only_models:
-                # First fetch from descriptions as it has most important metadata
-                desc_results = await self.chroma_manager.get(
-                    collection_name="model_descriptions",
-                    where={"model_id": {"$in": chunks_only_models}},
-                    include=["metadatas"]
-                )
-
-                # Process and update metadata
-                for result in desc_results.get('results', []):
-                    metadata = result.get('metadata', {})
-                    model_id = metadata.get('model_id', 'unknown')
-
-                    if model_id in model_results:
-                        model_results[model_id]['metadata'].update(metadata)
-                        model_results[model_id]['tables'].append("model_descriptions")
-
-                # Then fetch other important metadata selectively to avoid overloading
-                important_tables = ["model_architectures", "model_frameworks", "model_datasets"]
-
-                for table in important_tables:
-                    table_results = await self.chroma_manager.get(
-                        collection_name=table,
-                        where={"model_id": {"$in": chunks_only_models}},
-                        include=["metadatas"]
-                    )
-
-                    # Process results
-                    for result in table_results.get('results', []):
-                        metadata = result.get('metadata', {})
-                        model_id = metadata.get('model_id', 'unknown')
-
-                        if model_id in model_results:
-                            model_results[model_id]['metadata'].update(metadata)
-                            model_results[model_id]['tables'].append(table)
-
-            # STEP 5: Fetch chunk descriptions for each model
-            # This is a new step to fetch chunk descriptions from model_descriptions table
-            for model_id, model_data in model_results.items():
-                # Sort chunk descriptions by distance (lower distance is better)
-                chunk_descriptions = sorted(model_data['chunk_descriptions'], key=lambda x: x['distance'])
-
-                # Take top 3 chunks with lowest distance
-                top_chunks = chunk_descriptions[:3]
-
-                if top_chunks:
-                    # Prepare queries to fetch descriptions for each chunk
-                    description_queries = []
-                    for chunk_info in top_chunks:
-                        chunk_id = chunk_info['chunk_id']
-                        description_id = f"model_descriptions_{model_id}_chunk_{chunk_id}"
-
-                        # Create async query for this chunk description
-                        description_queries.append(self.chroma_manager.get(
-                            collection_name="model_descriptions",
-                            where={"id": {"$eq": description_id}},
-                            include=["metadatas"]
-                        ))
-
-                    # Run all description queries concurrently
-                    if description_queries:
-                        description_results = await asyncio.gather(*description_queries)
-
-                        # Process results and collect descriptions
-                        descriptions = []
-                        for result in description_results:
-                            if result and result.get('results'):
-                                for item in result.get('results', []):
-                                    metadata = item.get('metadata', {})
-                                    description = metadata.get('description', '')
-                                    if description:
-                                        descriptions.append(description)
-
-                        # Merge descriptions and add to model data
-                        if descriptions:
-                            merged_description = " ".join(descriptions)
-                            model_data['merged_description'] = merged_description
 
             # Convert to list and sort by distance (lower is better)
             output_list = list(model_results.values())
-            output_list.sort(key=lambda x: x['distance'])
+            output_list.sort(key=lambda x: x.get('distance', 1.0))
 
             # Limit to requested number of results
             output_list = output_list[:requested_limit]
+
+            # STEP 3 (COMBINED): Fetch complete metadata for all models in the final output list
+            try:
+                # Get the list of model IDs in the final output
+                final_model_ids = [model.get('model_id') for model in output_list if model.get('model_id') != 'unknown']
+
+                if final_model_ids:
+                    # Create metadata fetch tasks for each table
+                    complete_metadata_tasks = []
+                    for table_name in table_weights.keys():
+                        complete_metadata_tasks.append(self.chroma_manager.get(
+                            collection_name=table_name,
+                            where={"model_id": {"$in": final_model_ids}},
+                            include=["metadatas"]
+                        ))
+
+                    # Execute all metadata fetch tasks in parallel
+                    complete_metadata_results = await asyncio.gather(*complete_metadata_tasks)
+
+                    # Process results and update model metadata
+                    for table_idx, result in enumerate(complete_metadata_results):
+                        table_name = list(table_weights.keys())[table_idx]
+
+                        # Process each result item
+                        for item in result.get('results', []):
+                            metadata = item.get('metadata', {})
+                            model_id = metadata.get('model_id', 'unknown')
+
+                            # Find the corresponding model in our output list
+                            for model_data in output_list:
+                                if model_data.get('model_id') == model_id:
+                                    # Update the metadata with this table's data
+                                    model_data['metadata'].update(metadata)
+
+                                    # Update the tables list if not already present
+                                    if table_name not in model_data['tables']:
+                                        model_data['tables'].append(table_name)
+                                    break
+            except Exception as e:
+                self.logger.error(f"Error fetching complete metadata for final models: {e}")
+
+            # STEP 4: For each model in the output list, fetch and merge chunk descriptions
+            for model_data in output_list:
+                try:
+                    model_id = model_data.get('model_id')
+                    if not model_id or model_id == 'unknown':
+                        model_data['merged_description'] = ""
+                        continue
+
+                    # Get model description from metadata first as a fallback
+                    fallback_description = ""
+                    if 'metadata' in model_data and isinstance(model_data['metadata'], dict):
+                        fallback_description = model_data['metadata'].get('description', "")
+
+                    # Use a safer approach - don't use the original query for chunk search
+                    try:
+                        # First check if chunks exist for this model
+                        chunk_check = await self.chroma_manager.get(
+                            collection_name="model_descriptions",
+                            where={"model_id": {"$eq": model_id}},
+                            limit=1
+                        )
+
+                        # If no chunks found, use the fallback description
+                        if not chunk_check or not chunk_check.get('results'):
+                            model_data['merged_description'] = fallback_description
+                            continue
+
+                        # Now search for the most relevant chunks using the query
+                        model_chunks_search = await self.chroma_manager.search(
+                            collection_name="model_descriptions",
+                            query=query,  # Use the same query to find the most relevant chunks
+                            where={"model_id": {"$eq": model_id}},  # Only search chunks for this specific model
+                            limit=2,  # Get top 2 chunks
+                            include=["metadatas"]  # Only include metadata
+                        )
+
+                        # Extract the descriptions from the chunks
+                        chunk_descriptions = []
+
+                        if model_chunks_search and isinstance(model_chunks_search,
+                                                              dict) and 'results' in model_chunks_search:
+                            for chunk_result in model_chunks_search.get('results', []):
+                                if not isinstance(chunk_result, dict):
+                                    continue
+
+                                # Get the description from metadata
+                                description = None
+                                if 'metadata' in chunk_result and isinstance(chunk_result['metadata'], dict):
+                                    description = chunk_result['metadata'].get('description')
+
+                                if description and isinstance(description, str):
+                                    chunk_descriptions.append(description)
+
+                        # If we found any descriptions, merge them
+                        if chunk_descriptions:
+                            model_data['merged_description'] = " ".join(chunk_descriptions)
+                        else:
+                            # If no chunk descriptions found, use the model's main description if available
+                            model_data['merged_description'] = fallback_description
+                    except Exception as e:
+                        self.logger.error(f"Error in chunk description search for model {model_id}: {e}")
+                        model_data['merged_description'] = fallback_description
+                except Exception as e:
+                    self.logger.error(f"Error in chunk description handling for model: {e}")
+                    # Set an empty merged description if an error occurs
+                    model_data['merged_description'] = ""
 
             # Prepare final result items
             items = []
@@ -415,12 +420,13 @@ class SearchDispatcher:
                     'model_id': model.get('model_id'),
                     'metadata': model.get('metadata', {}),
                     'rank': rank + 1,
-                    'match_source': model.get('match_source'),
-                    'distance': model.get('distance'),
-                    'merged_description': model.get('merged_description', '')  # Add merged description to output
+                    'match_source': model.get('match_source', 'unknown'),
+                    'distance': model.get('distance', 1.0),
+                    'merged_description': model.get('merged_description', '')
                 })
 
             # Calculate performance metrics
+            metadata_search_time = (time.time() - metadata_search_start) * 1000
             total_search_time = metadata_search_time + chunks_search_time
             total_time = (time.time() - start_time) * 1000
 
@@ -453,6 +459,9 @@ class SearchDispatcher:
     async def handle_metadata_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle a metadata-specific search query across multiple metadata tables.
+        1. Query all metadata tables, merge by model_id, sort by relevance
+        2. For each model in the output list, fetch and merge chunk descriptions
+        3. Fetch all metadata for models in final output list
         """
         self.logger.debug(f"Handling metadata search: {query}")
         start_time = time.time()
@@ -476,7 +485,7 @@ class SearchDispatcher:
             # Convert filters to Chroma format
             chroma_filters = self._translate_filters_to_chroma(filters)
 
-            # Apply month filter specifically to model_date table if needed
+            # Apply month filter specifically for date queries if needed
             date_specific_filters = None
             if month_filter:
                 if chroma_filters:
@@ -511,7 +520,7 @@ class SearchDispatcher:
                 "model_training_configs": 0.15
             }
 
-            # Add date table if we have month filters (with higher weight)
+            # Add date table with higher weight if we have month filters
             if month_filter:
                 metadata_tables["model_date"] = 0.30  # Higher priority since we're filtering by month
             else:
@@ -521,187 +530,193 @@ class SearchDispatcher:
             metadata_tables["model_file"] = 0.03
             metadata_tables["model_git"] = 0.02
 
-            # Start with most relevant table (either descriptions or dates if month filter exists)
+            # STEP 1: Search all tables in parallel
             search_start = time.time()
+            search_tasks = []
+            table_names = list(metadata_tables.keys())
+
+            # Create search tasks for each table
+            for table_name in table_names:
+                # Use date-specific filters for the model_date table if we have month filters
+                if table_name == "model_date" and date_specific_filters:
+                    search_tasks.append(self.chroma_manager.get(
+                        collection_name=table_name,
+                        where=date_specific_filters,
+                        limit=limit * 5,
+                        include=["metadatas"]
+                    ))
+                else:
+                    # For other tables, use standard search
+                    search_tasks.append(self.chroma_manager.search(
+                        collection_name=table_name,
+                        query=query,
+                        where=chroma_filters,
+                        limit=limit * 5,
+                        include=["metadatas", "distances"]
+                    ))
+
+            # Execute all searches in parallel
+            search_results = await asyncio.gather(*search_tasks)
+
+            # Initialize model results dictionary
             model_results = {}
 
-            # Start with date table if we have month filters
-            if month_filter:
-                # Get models matching the month filter
-                date_results = await self.chroma_manager.get(
-                    collection_name="model_date",
-                    where=date_specific_filters,
-                    limit=limit * 3,
-                    include=["metadatas"]
-                )
+            # Process search results from each table
+            for table_idx, result in enumerate(search_results):
+                table_name = table_names[table_idx]
+                table_weight = metadata_tables[table_name]
 
-                # Process models from date table
-                for result in date_results.get('results', []):
-                    metadata = result.get('metadata', {})
+                # Handle results from the search
+                for item in result.get('results', []):
+                    metadata = item.get('metadata', {})
                     model_id = metadata.get('model_id', 'unknown')
 
-                    # Apply access control check
+                    # Skip if no model_id
+                    if model_id == 'unknown':
+                        continue
+
+                    # Get distance (if available) or use default value if this was a 'get' operation
+                    distance = item.get('distance', 0.5)  # Default middle distance
+
+                    # Apply access control
                     if self.access_control_manager and user_id:
                         if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
                             continue
 
-                    # Add to model results
-                    if model_id not in model_results:
-                        model_results[model_id] = {
-                            'model_id': model_id,
-                            'metadata': {},
-                            'relevance_score': metadata_tables["model_date"],  # Start with date table weight
-                            'tables': ["model_date"],
-                            'chunk_descriptions': []  # Initialize list to hold chunk descriptions
-                        }
+                    # Calculate relevance score (higher is better)
+                    # For search results, we convert distance to relevance (1 - distance) * weight
+                    # For get results (e.g., from date table), we use table weight directly
+                    relevance_score = (1 - distance) * table_weight if 'distance' in item else table_weight
 
-                    # Add metadata from this table
-                    model_results[model_id]['metadata'].update(metadata)
-            else:
-                # Start with descriptions table if no month filter
-                desc_results = await self.chroma_manager.get(
-                    collection_name="model_descriptions",
-                    where=chroma_filters,
-                    limit=limit * 3,
-                    include=["metadatas"]
-                )
+                    # If model already exists in results, update its metadata and recalculate relevance
+                    if model_id in model_results:
+                        # Add this table to the list of matching tables
+                        if table_name not in model_results[model_id]['tables']:
+                            model_results[model_id]['tables'].append(table_name)
 
-                # Process models from descriptions table
-                for result in desc_results.get('results', []):
-                    metadata = result.get('metadata', {})
-                    model_id = metadata.get('model_id', 'unknown')
-                    chunk_id = metadata.get('chunk_id', -1)
-
-                    # Apply access control check
-                    if self.access_control_manager and user_id:
-                        if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
-                            continue
-
-                    # Add to model results
-                    if model_id not in model_results:
-                        model_results[model_id] = {
-                            'model_id': model_id,
-                            'metadata': {},
-                            'relevance_score': metadata_tables["model_descriptions"],  # Start with desc table weight
-                            'tables': ["model_descriptions"],
-                            'chunk_descriptions': []  # Initialize list to hold chunk descriptions
-                        }
-
-                    # Add metadata from this table
-                    model_results[model_id]['metadata'].update(metadata)
-
-                    # If this is a chunk description, add to the list
-                    if chunk_id >= 0:
-                        model_results[model_id]['chunk_descriptions'].append({
-                            'chunk_id': chunk_id,
-                            'relevance_score': model_results[model_id]['relevance_score']
-                        })
-
-            # Get list of model IDs we found
-            model_ids = list(model_results.keys())
-
-            # If we have models, fetch their metadata from other tables
-            if model_ids:
-                # Determine which tables we still need to fetch from
-                remaining_tables = [t for t in metadata_tables.keys()
-                                    if t != "model_date" and t != "model_descriptions"]
-
-                # Fetch from each remaining table
-                for table in remaining_tables:
-                    table_results = await self.chroma_manager.get(
-                        collection_name=table,
-                        where={"model_id": {"$in": model_ids}},
-                        include=["metadatas"]
-                    )
-
-                    # Process results
-                    for result in table_results.get('results', []):
-                        metadata = result.get('metadata', {})
-                        model_id = metadata.get('model_id', 'unknown')
-
-                        # Skip if model not in our results (shouldn't happen)
-                        if model_id not in model_results:
-                            continue
-
-                        # Add metadata from this table
+                        # Update model metadata with this table's metadata
                         model_results[model_id]['metadata'].update(metadata)
-                        model_results[model_id]['tables'].append(table)
 
-                        # Increase relevance score based on table weight
-                        model_results[model_id]['relevance_score'] += metadata_tables.get(table, 0.1)
-
-            # STEP: Fetch chunk descriptions for each model
-            for model_id, model_data in model_results.items():
-                # If we don't have any chunk descriptions yet, get all of them for the model
-                if not model_data['chunk_descriptions']:
-                    # Query for all chunk descriptions for this model
-                    all_desc_results = await self.chroma_manager.get(
-                        collection_name="model_descriptions",
-                        where={"model_id": {"$eq": model_id}, "chunk_id": {"$gte": 0}},
-                        # Only get descriptions with chunk_id
-                        include=["metadatas"]
-                    )
-
-                    # Process and add to chunk_descriptions
-                    if all_desc_results and all_desc_results.get('results'):
-                        for item in all_desc_results.get('results', []):
-                            metadata = item.get('metadata', {})
-                            chunk_id = metadata.get('chunk_id', -1)
-                            if chunk_id >= 0:
-                                model_data['chunk_descriptions'].append({
-                                    'chunk_id': chunk_id,
-                                    'relevance_score': model_data['relevance_score'] / 2
-                                    # Lower priority than direct matches
-                                })
-
-                # Sort chunk descriptions by relevance score (higher is better)
-                chunk_descriptions = sorted(model_data['chunk_descriptions'], key=lambda x: x['relevance_score'],
-                                            reverse=True)
-
-                # Take top 3 chunks with highest relevance
-                top_chunks = chunk_descriptions[:3]
-
-                if top_chunks:
-                    # Prepare queries to fetch descriptions for each chunk
-                    description_queries = []
-                    for chunk_info in top_chunks:
-                        chunk_id = chunk_info['chunk_id']
-                        description_id = f"model_descriptions_{model_id}_chunk_{chunk_id}"
-
-                        # Create async query for this chunk description
-                        description_queries.append(self.chroma_manager.get(
-                            collection_name="model_descriptions",
-                            where={"id": {"$eq": description_id}},
-                            include=["metadatas"]
-                        ))
-
-                    # Run all description queries concurrently
-                    if description_queries:
-                        description_results = await asyncio.gather(*description_queries)
-
-                        # Process results and collect descriptions
-                        descriptions = []
-                        for result in description_results:
-                            if result and result.get('results'):
-                                for item in result.get('results', []):
-                                    metadata = item.get('metadata', {})
-                                    description = metadata.get('description', '')
-                                    if description:
-                                        descriptions.append(description)
-
-                        # Merge descriptions and add to model data
-                        if descriptions:
-                            merged_description = " ".join(descriptions)
-                            model_data['merged_description'] = merged_description
-
-            search_time = (time.time() - search_start) * 1000
+                        # Add to the relevance score
+                        model_results[model_id]['relevance_score'] += relevance_score
+                    else:
+                        # First time seeing this model, initialize its entry
+                        model_results[model_id] = {
+                            'model_id': model_id,
+                            'metadata': metadata.copy(),
+                            'relevance_score': relevance_score,
+                            'tables': [table_name]
+                        }
 
             # Convert to list and sort by relevance score (higher is better)
             output_list = list(model_results.values())
-            output_list.sort(key=lambda x: x['relevance_score'], reverse=True)
+            output_list.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
 
             # Limit to requested number of results
             output_list = output_list[:limit]
+
+            # STEP 2: For each model in the output list, fetch and merge chunk descriptions
+            for model_data in output_list:
+                try:
+                    model_id = model_data.get('model_id')
+                    if not model_id or model_id == 'unknown':
+                        model_data['merged_description'] = ""
+                        continue
+
+                    # Get model description from metadata first as a fallback
+                    fallback_description = ""
+                    if 'metadata' in model_data and isinstance(model_data['metadata'], dict):
+                        fallback_description = model_data['metadata'].get('description', "")
+
+                    # Use a safer approach for fetching chunk descriptions
+                    try:
+                        # First check if chunks exist for this model
+                        chunk_check = await self.chroma_manager.get(
+                            collection_name="model_descriptions",
+                            where={"model_id": {"$eq": model_id}},
+                            limit=1
+                        )
+
+                        # If no chunks found, use the fallback description
+                        if not chunk_check or not chunk_check.get('results'):
+                            model_data['merged_description'] = fallback_description
+                            continue
+
+                        # Now search for the most relevant chunks using the query
+                        model_chunks_search = await self.chroma_manager.search(
+                            collection_name="model_descriptions",
+                            query=query,  # Use the same query to find the most relevant chunks
+                            where={"model_id": {"$eq": model_id}},  # Only search chunks for this specific model
+                            limit=3,  # Get top 3 chunks
+                            include=["metadatas"]  # Only include metadata
+                        )
+
+                        # Extract the descriptions from the chunks
+                        chunk_descriptions = []
+
+                        if model_chunks_search and isinstance(model_chunks_search,
+                                                              dict) and 'results' in model_chunks_search:
+                            for chunk_result in model_chunks_search.get('results', []):
+                                if not isinstance(chunk_result, dict):
+                                    continue
+
+                                # Get the description from metadata
+                                description = None
+                                if 'metadata' in chunk_result and isinstance(chunk_result['metadata'], dict):
+                                    description = chunk_result['metadata'].get('description')
+
+                                if description and isinstance(description, str):
+                                    chunk_descriptions.append(description)
+
+                        # If we found any descriptions, merge them
+                        if chunk_descriptions:
+                            model_data['merged_description'] = " ".join(chunk_descriptions)
+                        else:
+                            # If no chunk descriptions found, use the model's main description if available
+                            model_data['merged_description'] = fallback_description
+                    except Exception as e:
+                        self.logger.error(f"Error in chunk description search for model {model_id}: {e}")
+                        model_data['merged_description'] = fallback_description
+                except Exception as e:
+                    self.logger.error(f"Error in chunk description handling for model: {e}")
+                    # Set an empty merged description if an error occurs
+                    model_data['merged_description'] = ""
+
+            # STEP 3 (NEW): Fetch complete metadata for all models in the output list
+            try:
+                # Get the list of model IDs in the final output
+                final_model_ids = [model.get('model_id') for model in output_list if model.get('model_id') != 'unknown']
+
+                if final_model_ids:
+                    # Create metadata fetch tasks for each table
+                    complete_metadata_tasks = []
+                    for table_name in metadata_tables.keys():
+                        complete_metadata_tasks.append(self.chroma_manager.get(
+                            collection_name=table_name,
+                            where={"model_id": {"$in": final_model_ids}},
+                            include=["metadatas"]
+                        ))
+
+                    # Execute all metadata fetch tasks in parallel
+                    complete_metadata_results = await asyncio.gather(*complete_metadata_tasks)
+
+                    # Process results and update model metadata
+                    for table_idx, result in enumerate(complete_metadata_results):
+                        table_name = list(metadata_tables.keys())[table_idx]
+
+                        # Process each result item
+                        for item in result.get('results', []):
+                            metadata = item.get('metadata', {})
+                            model_id = metadata.get('model_id', 'unknown')
+
+                            # Find the corresponding model in our output list
+                            for model_data in output_list:
+                                if model_data.get('model_id') == model_id:
+                                    # Update the metadata with this table's data
+                                    model_data['metadata'].update(metadata)
+                                    break
+            except Exception as e:
+                self.logger.error(f"Error fetching complete metadata for final models: {e}")
 
             # Prepare final result items
             items = []
@@ -711,9 +726,11 @@ class SearchDispatcher:
                     'model_id': model.get('model_id'),
                     'metadata': model.get('metadata', {}),
                     'rank': idx + 1,
-                    'relevance_score': model.get('relevance_score'),
-                    'merged_description': model.get('merged_description', '')  # Add merged description to output
+                    'relevance_score': model.get('relevance_score', 0),
+                    'merged_description': model.get('merged_description', '')
                 })
+
+            search_time = (time.time() - search_start) * 1000
 
             return {
                 'success': True,

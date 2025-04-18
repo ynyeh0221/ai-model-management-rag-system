@@ -509,7 +509,8 @@ class QueryParser:
             "cnn", "convolutional", "neural network", "deep learning",
             "rnn", "recurrent", "lstm", "transformer", "attention",
             "diffusion", "gan", "generative adversarial", "vae",
-            "variational", "autoencoder", "bert", "gpt", "mlp"
+            "variational", "autoencoder", "bert", "gpt", "mlp",
+            "cifar", "cifar-10", "stl", "stl-10", "oxford"
         }
 
         model_ids = self._extract_model_mentions(query_text)

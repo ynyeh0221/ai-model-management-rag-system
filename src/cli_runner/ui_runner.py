@@ -181,6 +181,7 @@ class UIRunner:
             user_id=self.user_id
         ))
 
+        print(f"search_results: {search_results}")
         # Process and rerank search results
         reranked_results = self._process_search_results(search_results, reranker, parsed_query, query_text)
         print(f"Reranked results: {reranked_results}")
@@ -206,20 +207,12 @@ class UIRunner:
         Returns:
             list: Reranked search results.
         """
-        print(f"Search results: {search_results}")
 
         if not isinstance(search_results, dict) or 'items' not in search_results:
             return []
 
         # Extract the items from the search results
         items_to_rerank = search_results['items']
-
-        # Add a content field if it doesn't exist (reranker might require this)
-        for item in items_to_rerank:
-            if 'content' not in item:
-                # Use some meaningful field as content, like model_id or metadata description
-                item['content'] = item.get('model_id', '') + ': ' + item.get('metadata', {}).get(
-                    'description', 'No description')
 
         if reranker and items_to_rerank:
             print(f"Sending {len(items_to_rerank)} items to reranker")
@@ -235,39 +228,51 @@ class UIRunner:
     def _display_reranked_results_pretty(self, reranked_results):
         """
         Display reranked search results in a nicely formatted table with detailed model metadata.
-
-        Creates and prints a table showing comprehensive information from reranked results
-        with proper column alignment and truncation for long values.
+        Optimized for 15-inch laptop screens.
 
         Args:
             reranked_results (list): List of reranked search result dictionaries to display.
         """
         import json
+        from prettytable import PrettyTable, ALL
 
         table = PrettyTable()
-        table.field_names = ["Rank", "Model ID", "Score", "File Size", "Creation Date", "Last Modified",
-                             "Absolute Path", "Description", "Framework", "Architecture", "Dataset",
-                             "Batch Size", "Learning Rate", "Optimizer", "Epochs", "Hardware"]
+        table.field_names = ["Rank", "Model ID", "Score", "Size", "Created", "Modified",
+                             "Path", "Description", "Framework", "Arch", "Dataset",
+                             "Batch", "LR", "Optimizer", "Epochs", "HW"]
 
         # Align columns
         table.align = "l"  # Default left alignment for all
         table.align["Rank"] = "c"  # center
         table.align["Score"] = "r"  # right
-        table.align["File Size"] = "r"  # right align file size
+        table.align["Size"] = "r"  # right align file size
 
-        # Set max width for columns
+        # Set max width for columns - optimized for 15-inch laptop
         max_width = {
-            "Model ID": 30,
-            "Description": 50,
-            "Framework": 20,
-            "Architecture": 20,
-            "Dataset": 20,
-            "Hardware": 20,
-            "Absolute Path": 40
+            "Rank": 4,
+            "Model ID": 15,
+            "Score": 6,
+            "Size": 7,
+            "Created": 10,
+            "Modified": 10,
+            "Path": 15,
+            "Description": 20,
+            "Framework": 8,
+            "Arch": 10,
+            "Dataset": 10,
+            "Batch": 5,
+            "LR": 4,
+            "Optimizer": 7,
+            "Epochs": 5,
+            "HW": 6
         }
 
         for column in max_width:
             table.max_width[column] = max_width[column]
+
+        # Add horizontal lines and reduce padding for better display
+        table.hrules = ALL
+        table.padding_width = 1
 
         # Helper function to parse JSON string fields
         def parse_nested_json(metadata, fields):
@@ -306,7 +311,7 @@ class UIRunner:
             )
 
             # Extract description
-            description = parsed_metadata.get('description', 'Unknown')
+            description = result.get('merged_description', 'Unknown')
             if description == "N/A":
                 description = "Unknown"
 
@@ -314,29 +319,30 @@ class UIRunner:
             file_metadata = parsed_metadata.get('file', {})
             size_bytes = file_metadata.get('size_bytes', 'Unknown')
 
-            # Convert file size to MB
+            # Convert file size to compact format
             if isinstance(size_bytes, (int, float)):
                 size_mb = size_bytes / 1048576  # 1024 * 1024
                 if size_mb >= 1:
-                    file_size = f"{size_mb:.2f} MB"
+                    file_size = f"{size_mb:.1f}MB"
                 else:
                     # For small files, show in KB
                     size_kb = size_bytes / 1024
                     if size_kb >= 1:
-                        file_size = f"{size_kb:.2f} KB"
+                        file_size = f"{size_kb:.1f}KB"
                     else:
                         # For very small files, show in bytes
-                        file_size = f"{size_bytes} bytes"
+                        file_size = f"{size_bytes}B"
             else:
                 file_size = size_bytes  # Keep as "Unknown" or whatever non-numeric value
 
+            # Truncate dates to save space
             creation_date = file_metadata.get('creation_date', 'Unknown')
-            if isinstance(creation_date, str) and len(creation_date) > 19:
-                creation_date = creation_date[:19]  # Truncate microseconds
+            if isinstance(creation_date, str) and len(creation_date) > 10:
+                creation_date = creation_date[:10]  # Just YYYY-MM-DD
 
             last_modified = file_metadata.get('last_modified_date', 'Unknown')
-            if isinstance(last_modified, str) and len(last_modified) > 19:
-                last_modified = last_modified[:19]  # Truncate microseconds
+            if isinstance(last_modified, str) and len(last_modified) > 10:
+                last_modified = last_modified[:10]  # Just YYYY-MM-DD
 
             # Extract absolute path
             absolute_path = file_metadata.get('absolute_path', 'Unknown')
@@ -347,6 +353,9 @@ class UIRunner:
             framework_version = framework_metadata.get('version', '')
             framework = framework_name
             if framework_version and framework_version.lower() not in ['unknown', 'unspecified']:
+                # Just add major version number
+                if '.' in framework_version:
+                    framework_version = framework_version.split('.')[0]
                 framework += f" {framework_version}"
 
             # Extract architecture and dataset
@@ -356,13 +365,18 @@ class UIRunner:
             dataset_metadata = parsed_metadata.get('dataset', {})
             dataset = dataset_metadata.get('name', 'Unknown')
 
-            # Extract training config
+            # Extract training config with compact formatting
             training_config = parsed_metadata.get('training_config', {})
-            batch_size = training_config.get('batch_size', 'Unknown')
-            learning_rate = training_config.get('learning_rate', 'Unknown')
-            optimizer = training_config.get('optimizer', 'Unknown')
-            epochs = training_config.get('epochs', 'Unknown')
-            hardware = training_config.get('hardware_used', 'Unknown')
+            batch_size = training_config.get('batch_size', 'N/A')
+
+            learning_rate = training_config.get('learning_rate', 'N/A')
+            # Format learning rate in scientific notation if it's a small float
+            if isinstance(learning_rate, float) and learning_rate < 0.01:
+                learning_rate = f"{learning_rate:.0e}"
+
+            optimizer = training_config.get('optimizer', 'N/A')
+            epochs = training_config.get('epochs', 'N/A')
+            hardware = training_config.get('hardware_used', 'N/A')
 
             # Add row to table
             table.add_row([

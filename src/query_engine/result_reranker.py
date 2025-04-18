@@ -45,7 +45,7 @@ class CrossEncoderReranker:
 
         Args:
             query: The original query string
-            results: List of search results with at least 'id' and 'content' fields
+            results: List of search results with at least 'id' and 'merged_description' fields
             top_k: Number of top results to return (None for all)
             threshold: Minimum score threshold (None for no threshold)
 
@@ -60,7 +60,7 @@ class CrossEncoderReranker:
             return self._fallback_rerank(query, results, top_k, threshold)
 
         # Prepare cross-encoder inputs
-        query_doc_pairs = [(query, result.get("content", "")) for result in results]
+        query_doc_pairs = [(query, result.get("merged_description", "")) for result in results]
 
         # Get cross-encoder scores
         try:
@@ -117,7 +117,7 @@ class CrossEncoderReranker:
         query_terms = set(query.lower().split())
 
         for result in results:
-            content = result.get("content", "")
+            content = result.get("merged_description", "")
             if not content:
                 result["rerank_score"] = 0.0
                 continue
@@ -189,7 +189,7 @@ class DenseReranker:
 
         Args:
             query: The original query string
-            results: List of search results with at least 'id' and 'content' fields
+            results: List of search results with at least 'id' and 'merged_description' fields
             top_k: Number of top results to return (None for all)
             threshold: Minimum score threshold (None for no threshold)
 
@@ -216,7 +216,7 @@ class DenseReranker:
             query_embedding = self.model.encode(query, convert_to_tensor=True)
 
             # Encode documents
-            documents = [result.get("content", "") for result in results]
+            documents = [result.get("merged_description", "") for result in results]
             doc_embeddings = self.model.encode(documents, convert_to_tensor=True)
 
             # Calculate cosine similarity
