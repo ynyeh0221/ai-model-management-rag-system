@@ -7,135 +7,74 @@ import re
 from git import Repo
 
 """
-CodeParser: A class for parsing code files to extract machine learning model metadata.
+LLMBasedCodeParser: A class for extracting structured metadata from ML model code using AST and LLMs.
 
-This class analyzes Python code files (.py and .ipynb) to extract metadata about machine learning 
-models, including framework, architecture, datasets, training configurations, and other relevant 
-information. It can process both whole files and chunks of code, using LLM assistance for extracting 
-complex metadata.
+This class analyzes Python code files (e.g., .py or .ipynb) to extract machine learning model metadata,
+including framework, architecture, datasets, training configuration, and descriptive information. It combines
+static analysis (via Python's AST module) with dynamic summarization powered by a language model (LLM).
+
+The parser generates an AST-based digest of the code (functions, classes, variables, imports), summarizes it 
+in natural language, and then generates structured JSON metadata.
 
 Attributes:
-    schema_validator: An optional validator for checking the extracted metadata schema.
-    llm_interface: An optional interface to a language model for assistance in extracting metadata.
-    llm_metadata_cache: A cache for storing extracted LLM metadata.
+    schema_validator (optional): A schema validation object to check the final metadata format.
+    llm_interface (optional): An interface that communicates with a language model for code summarization.
+    llm_metadata_cache (dict): Stores intermediate results from LLM calls for reuse and traceability.
 
 Methods:
-    parse(file_path): 
-        Parse a file to extract model metadata.
-        
-        Args:
-            file_path (str): Path to the file to parse.
-            
-        Returns:
-            dict or None: Extracted metadata if file type is supported, None otherwise.
-            The returned metadata dictionary contains the following fields:
-            - creation_date: ISO format date of file creation.
-            - last_modified_date: ISO format date of last modification.
-            - model_id: Identifier for the model, extracted from class names.
-            - model_family: Family of the model (custom or known).
-            - version: Version of the model.
-            - framework: Dict with name and version of the ML framework.
-            - architecture: Dict with type of the neural network architecture.
-            - dataset: Dict with name of the dataset used.
-            - training_config: Dict with batch_size, learning_rate, optimizer, epochs, hardware_used.
-            - description: Text description of what the model does.
-            - is_model_script: Boolean indicating if this is a model script.
-            - content: The original file content.
-    
-    parse_file(file_path):
-        Parse a Python file to extract model metadata.
-        
-        Args:
-            file_path (str): Path to the Python file to parse.
-            
-        Returns:
-            dict: Extracted model metadata (see parse method for structure).
-    
-    split_by_lines(file_content, chunk_size_in_lines=500, overlap=100):
-        Split code into chunks based on lines rather than AST.
-        
-        Args:
-            file_content (str): The content of the file to split.
-            chunk_size_in_lines (int): Approximate target size of each chunk in lines.
-            overlap (int): Number of lines to overlap between chunks.
-            
-        Returns:
-            list: List of dictionaries containing chunk information with keys:
-            - text: The chunk text content.
-            - offset: Character offset in the original file.
-            - type: Type of chunk (always "code").
-            - line_range: Tuple of (start_line, end_line).
-    
-    extract_chunk_summary(chunk_text, chunk_offset=0, max_retries=3):
-        Extract a natural language summary of metadata from a code chunk.
-        
-        Args:
-            chunk_text (str): The code chunk to analyze.
-            chunk_offset (int): Offset of the chunk in the original file.
-            max_retries (int): Maximum number of retries for extracting the summary.
-            
-        Returns:
-            dict: Summary information for the chunk with keys:
-            - summary: Text summary of the chunk.
-            - source_offset: Offset in the original file.
-            - source_preview: Preview of the first 120 characters.
-    
-    merge_chunk_summaries(chunk_summaries):
-        Merge multiple chunk summaries into a single comprehensive summary.
-        
-        Args:
-            chunk_summaries (list): List of chunk summaries to merge.
-            
-        Returns:
-            str: Merged summary text, truncated to a maximum of 12000 characters.
-    
-    generate_metadata_from_summary(merged_summary, max_retries=3):
-        Generate structured JSON metadata from the merged summary.
-        
-        Args:
-            merged_summary (str): The merged summary to process.
-            max_retries (int): Maximum number of retries for generating metadata.
-            
-        Returns:
-            dict: Structured metadata with the following structure:
-            {
-                "description": "Short summary of what the model does",
-                "framework": { "name": "...", "version": "..." },
-                "architecture": { "type": "..." },
-                "dataset": { "name": "..." },
-                "training_config": {
-                    "batch_size": 32,
-                    "learning_rate": 0.001,
-                    "optimizer": "Adam",
-                    "epochs": 10,
-                    "hardware_used": "GPU"
-                }
-            }
-    
-    extract_architecture_metadata(chunk_text, max_retries=3):
-        Extract metadata from a code chunk and format it directly in the final structure.
-        
-        Args:
-            chunk_text (str): The code chunk to analyze.
-            max_retries (int): Maximum number of retries for extracting metadata.
-            
-        Returns:
-            dict: Extracted metadata in the final structure (see generate_metadata_from_summary).
-            Also includes an "_trace" key for debugging purposes.
+    parse(file_path):
+        Parses a file to extract model metadata.
 
-Examples:
-    # Initialize the parser with a schema validator and LLM interface
-    parser = CodeParser(schema_validator=my_validator, llm_interface=my_llm)
-    
-    # Parse a Python file to extract model metadata
+        Args:
+            file_path (str): Path to a .py or .ipynb file.
+
+        Returns:
+            dict or None: Metadata dictionary (if file is supported), or None.
+
+    parse_file(file_path):
+        Reads and analyzes the code file using AST + LLM summarization.
+        Returns a complete dictionary of extracted metadata fields.
+
+    generate_ast_summary(code_str, file_path):
+        Uses the AST module to extract and format the code structure, including:
+            - Import statements
+            - Variable assignments
+            - Function and class definitions (with docstrings)
+        Returns a simplified string representation of the code structure.
+
+    extract_chunk_summary(chunk_text, chunk_offset=0, max_retries=3):
+        Feeds an AST-based summary chunk to the LLM for natural language summarization.
+        Returns a dictionary with the summary and source preview.
+
+    generate_metadata_from_summary(merged_summary, max_retries=3):
+        Uses the LLM to convert a natural-language code summary into structured JSON metadata
+        that includes fields like:
+            - description
+            - framework {name, version}
+            - architecture {type}
+            - dataset {name}
+            - training_config {batch_size, learning_rate, optimizer, epochs, hardware_used}
+
+    remove_import_lines(code):
+        Removes all lines that start with 'import' or 'from ... import' from a string.
+        Useful for summarization cleanup.
+
+    clean_empty_lines(text):
+        Removes empty lines from a string, preserving structure.
+
+    _extract_model_info(file_content, file_path):
+        Uses the AST to extract model identifiers from class definitions (e.g., model name and family).
+
+    _get_creation_date(file_path):
+        Returns the earliest creation date (from Git history or file system).
+
+    _get_last_modified_date(file_path):
+        Returns the last modification date (from Git history or file system).
+
+Example:
+    parser = LLMBasedCodeParser(schema_validator=my_validator, llm_interface=my_llm)
     metadata = parser.parse("model.py")
-    
-    # Access extracted information
-    print(f"Model: {metadata['model_id']}")
-    print(f"Framework: {metadata['framework']['name']} {metadata['framework']['version']}")
-    print(f"Architecture: {metadata['architecture']['type']}")
-    print(f"Dataset: {metadata['dataset']['name']}")
-    print(f"Description: {metadata['description']}")
+    print(metadata["framework"], metadata["architecture"], metadata["dataset"])
 """
 class LLMBasedCodeParser:
     def __init__(self, schema_validator=None, llm_interface=None):
