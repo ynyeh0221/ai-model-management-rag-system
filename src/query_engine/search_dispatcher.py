@@ -185,11 +185,15 @@ class SearchDispatcher:
 
             # Create search tasks for all tables
             for table_name in table_weights.keys():
+                if table_name == 'model_descriptions':
+                    search_limit = requested_limit * 10
+                else:
+                    search_limit = requested_limit
                 search_tasks.append(self.chroma_manager.search(
                     collection_name=table_name,
                     query=query,
                     where=chroma_filters,
-                    limit=requested_limit * 10,  # Get more results to ensure coverage
+                    limit=search_limit,
                     include=["metadatas", "documents", "distances"]
                 ))
 
