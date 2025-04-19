@@ -265,15 +265,13 @@ class LLMBasedCodeParser:
             chunk_offset=0,
             max_retries=max_retries
         )
-
-        # STEP 3: Merge summaries into a single doc
         print(f"Summary from AST digest: {summary}")
 
-        # STEP 4: Feed merged summary to LLM for structured metadata generation
+        # STEP 3: Feed merged summary to LLM for structured metadata generation
         summary_and_ast = summary.get("summary", "") + ", " + ast_digest
         final = self.generate_metadata_from_summary(summary_and_ast, max_retries=max_retries)
         final['chunk_descriptions'] = [self.split_summary_into_chunks(summary_text=summary.get("summary", ""), overlap_lines=0, max_lines_per_chunk=50)]
-        print(f"Final chunk descriptions count: {len(final['chunk_descriptions'])}")
+        print(f"Chunk descriptions count: {len(final['chunk_descriptions'])}")
         final.pop("description", None)
         final.pop("_trace", None)
 
