@@ -163,8 +163,8 @@ class LLMBasedCodeParser:
 
     def generate_ast_summary(self, code_str: str, file_path: str = "<unknown>") -> str:
         """
-        Parse code using AST and generate a human-readable digest of the code structure.
-        Useful for LLM-friendly summarization.
+        Parse code using AST and generate a human-readable digest of the code structure,
+        including *all* variable assignments and layer definitions for nn.Module subclasses.
         """
         try:
             tree = ast.parse(code_str, filename=file_path)
@@ -174,6 +174,11 @@ class LLMBasedCodeParser:
         lines = []
 
         class CodeSummaryVisitor(ast.NodeVisitor):
+            def __init__(self):
+                super().__init__()
+                self.current_bases = []
+                self.in_init = False
+
             def visit_Import(self, node):
                 names = [alias.name for alias in node.names]
                 lines.append(f"Import: {', '.join(names)}")
@@ -183,36 +188,63 @@ class LLMBasedCodeParser:
                 names = [alias.name for alias in node.names]
                 lines.append(f"From {module} import {', '.join(names)}")
 
-            def visit_Assign(self, node):
-                targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
-                try:
-                    value = ast.unparse(node.value)
-                except Exception:
-                    value = "<complex_expression>"
-                for t in targets:
-                    if any(k in t.lower() for k in ["batch", "lr", "epoch", "optimizer", "device", "model", "train"]):
-                        lines.append(f"Variable: {t} = {value}")
-
             def visit_ClassDef(self, node):
-                bases = [getattr(b, "id", getattr(b, "attr", "object")) for b in node.bases]
-                docstring = ast.get_docstring(node)
+                # record base classes for module detection
+                bases = [getattr(b, 'id', getattr(b, 'attr', 'object')) for b in node.bases]
+                self.current_bases = bases
                 lines.append(f"\nClass: {node.name} (inherits from {', '.join(bases)})")
-                if docstring:
-                    lines.append(f"  Docstring: {docstring.strip()}")
+                doc = ast.get_docstring(node)
+                if doc:
+                    lines.append(f"  Docstring: {doc.strip()}")
+                # visit methods and inner assigns
+                for child in node.body:
+                    self.visit(child)
+                self.current_bases = []
 
             def visit_FunctionDef(self, node):
+                prev_init = self.in_init
+                if node.name == "__init__" and any(b.endswith("Module") for b in self.current_bases):
+                    self.in_init = True
+
                 args = [arg.arg for arg in node.args.args]
-                defaults = [ast.unparse(d) if hasattr(ast, "unparse") else repr(d) for d in node.args.defaults]
+                defaults = [ast.unparse(d) for d in node.args.defaults]
                 pad = [None] * (len(args) - len(defaults))
-                arg_pairs = [f"{a}={d}" if d else a for a, d in zip(args, pad + defaults)]
-                docstring = ast.get_docstring(node)
-                lines.append(f"\nFunction: {node.name}({', '.join(arg_pairs)})")
-                if docstring:
-                    lines.append(f"  Docstring: {docstring.strip()}")
+                arg_list = [f"{a}={d}" if d else a for a, d in zip(args, pad + defaults)]
+                lines.append(f"\nFunction: {node.name}({', '.join(arg_list)})")
+                doc = ast.get_docstring(node)
+                if doc:
+                    lines.append(f"  Docstring: {doc.strip()}")
+
+                for child in node.body:
+                    self.visit(child)
+                self.in_init = prev_init
+
+            def visit_Assign(self, node):
+                # capture layers inside nn.Module.__init__
+                if self.in_init:
+                    for target in node.targets:
+                        if (isinstance(target, ast.Attribute)
+                                and isinstance(target.value, ast.Name)
+                                and target.value.id == "self"):
+                            name = target.attr
+                            try:
+                                val = ast.unparse(node.value)
+                            except Exception:
+                                val = "<complex_expression>"
+                            lines.append(f"Layer: self.{name} = {val}")
+                            return
+                # capture all other top‑level assigns as Variables
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        name = target.id
+                        try:
+                            val = ast.unparse(node.value)
+                        except Exception:
+                            val = "<complex_expression>"
+                        lines.append(f"Variable: {name} = {val}")
 
         visitor = CodeSummaryVisitor()
         visitor.visit(tree)
-
         return "\n".join(lines)
 
     def _remove_import_lines(self, code: str) -> str:
@@ -225,22 +257,23 @@ class LLMBasedCodeParser:
     def _extract_llm_metadata(self, code_str: str, file_path: str = "<unknown>", max_retries: int = 15) -> dict:
         # STEP 1: Generate AST digest/summary
         ast_digest = self.clean_empty_lines(self.generate_ast_summary(code_str, file_path=file_path))
-        print(f"Total AST digest: {ast_digest}")
+        # print(f"Total AST digest: {ast_digest}")
 
-        # STEP 3: Extract natural-language summary for each digest chunk
+        # STEP 2: Extract natural-language summary for each digest chunk
         summary = self.extract_chunk_summary(
             chunk_text=ast_digest,
             chunk_offset=0,
             max_retries=max_retries
         )
 
-        # STEP 4: Merge summaries into a single doc
+        # STEP 3: Merge summaries into a single doc
         print(f"Summary from AST digest: {summary}")
 
-        # STEP 5: Feed merged summary to LLM for structured metadata generation
+        # STEP 4: Feed merged summary to LLM for structured metadata generation
         summary_and_ast = summary.get("summary", "") + ", " + ast_digest
         final = self.generate_metadata_from_summary(summary_and_ast, max_retries=max_retries)
-        final['chunk_descriptions'] = [self._remove_import_lines(summary_and_ast)]
+        final['chunk_descriptions'] = [self.split_summary_into_chunks(summary_text=summary.get("summary", ""), overlap_lines=0, max_lines_per_chunk=50)]
+        print(f"Final chunk descriptions count: {len(final['chunk_descriptions'])}")
         final.pop("description", None)
         final.pop("_trace", None)
 
@@ -253,21 +286,33 @@ class LLMBasedCodeParser:
             return {}
 
         system_prompt = (
-            "You are an expert machine learning metadata extractor. "
-            "You will be given a structured summary of a Python ML script extracted via AST (abstract syntax tree). "
-            "From that, extract metadata explicitly mentioned, including:\n"
-            "- Description of what the model does\n"
-            "- Framework name (like PyTorch, TensorFlow) and version if available\n"
-            "- Neural network architecture (e.g. Transformer, CNN, RNN, etc.)\n"
-            "- Dataset name (e.g. FashionMNIST)\n"
-            "- Training configuration: batch size, learning rate, optimizer, epochs, hardware used\n\n"
-            "Provide a **natural language summary under 300 characters** that captures all extractable info.\n"
-            "Use compact, direct language. ONLY include details that appear in the input."
+            "You are a knowledgeable software‑engineer assistant specialized in reading AST‑based code summaries "
+            "and translating them into clear, human‑friendly explanations of what the code does. "
+            "You will be given an AST summary of a Python file, listing every import, class, function, "
+            "and variable or layer assignment (including `self.xxx = …` in `__init__`). Your task is to:\n"
+            "1. Convert each line into a descriptive sentence or paragraph.\n"
+            "2. Include every element exactly—do not skip or omit any imports, classes, functions, variables, or layers.\n"
+            "3. Group related items in this order: Imports, Variables, Classes, Functions, Model Architecture, Forward Pass.\n"
+            "4. Preserve names verbatim but explain their role (e.g. “`optimizer` is set to `Adam(lr=0.001)`, which…”).\n"
+            "5. If a docstring appears on a class or function, include it verbatim immediately after its header as:\n"
+            "     This class/function does: <docstring>\n"
+            "6. If an expression is marked <complex_expression>, say “A complex expression was assigned: <complex_expression>.”\n"
+            "7. **Imports:** List each `Import:` or `From … import:` line exactly as it appears, one per bullet.\n"
+            "8. **Variables:** Immediately after Imports, list every `Variable:` line as “<name> = <value>” plus a one‑sentence purpose.\n"
+            "9. **Model Architecture:** For each `Layer: self.<name> = <Ctor>(…)` in an `nn.Module`:\n"
+            "     • **Name & type:** `<name>: <Ctor>(…)`\n"
+            "     • **Constructor args unpacked:** e.g. `in_channels=1, out_channels=embed_dim, kernel_size=4, stride=4`\n"
+            "     • **Tensor shape transformation:** e.g. `(batch, 1, 28, 28) → (batch, embed_dim, 7, 7)`\n"
+            "10. **Forward Pass:** Provide a numbered list of each operation, in the same order as the Layers list, with exact input→output tensor shapes, for example:\n"
+            "     1. Embed labels: (batch,) → (batch, embed_dim)\n"
+            "     2. Conv reduce + BatchNorm + ReLU: (batch,1,28,28) → (batch,embed_dim,7,7)\n"
+            "     3. …\n\n"
+            "Return your result as a cohesive, well‑structured report with clear headings and bullet points or numbered steps for maximum readability."
         )
 
         for attempt in range(max_retries):
             try:
-                user_prompt = f"Code chunk:\n```python\n{chunk_text}\n```"
+                user_prompt = f"Here is the AST summary:\n{chunk_text}\n```"
                 response = self.llm_interface.generate_structured_response(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
@@ -341,7 +386,7 @@ class LLMBasedCodeParser:
         system_prompt = (
             "You are a metadata extractor for machine learning code. "
             "Based on the following code analysis summary, create a structured representation of the model metadata.\n\n"
-            "⚠️ The output **must strictly follow this exact JSON structure**:\n"
+            "The output **must strictly follow this exact JSON structure**:\n"
             "{\n"
             '  "description": "Short summary of what the model does",\n'
             '  "framework": { "name": "...", "version": "..." },\n'
@@ -355,29 +400,28 @@ class LLMBasedCodeParser:
             '    "hardware_used": "GPU"\n'
             '  }\n'
             "}\n\n"
-            "📌 For 'architecture.type', use standardized names where possible. Common examples include:\n"
-            "- CNN (Convolutional Neural Network)\n"
-            "- RNN / LSTM\n"
-            "- Transformer\n"
-            "- GAN (Generative Adversarial Network)\n"
-            "- VAE (Variational Autoencoder)\n"
-            "- Diffusion Model\n"
-            "- Latent Diffusion Model (VAE + Diffusion)\n"
-            "- UNet\n"
-            "- ResNet, ViT, BERT, etc.\n\n"
-            "📌 For 'training_config.hardware_used', use only one of these options:\n"
-            "- GPU\n"
-            "- CPU\n"
-            "- Both\n\n"
-            "⚠️ ALL fields must be included exactly as shown, even if you have to use placeholder values.\n"
-            "🟡 If you cannot confidently extract a field, use \"unknown\", null, or a placeholder value.\n"
-            "✅ Do not include any additional fields — **only return the fields shown above**.\n"
-            "Respond only with valid JSON. No extra text, comments, or explanation."
+            "Extraction hints:\n"
+            "• **framework.name**: look for imports like `import torch` or `import tensorflow`; default to “unknown”.\n"
+            "• **framework.version**: look for `torch.__version__` or similar; else “unknown”.\n"
+            "• **architecture.type**: look for class names or keywords (e.g. “Transformer”, “CNN”); else “unknown”.\n"
+            "• **dataset.name**: look for dataset identifiers (e.g. “FashionMNIST”); else “unknown”.\n"
+            "• **batch_size**: look for `batch_size=` in DataLoader; else null.\n"
+            "• **learning_rate**: look for `lr=` or “learning rate”; else null.\n"
+            "• **optimizer**: look for optimizer names (Adam, SGD); else “unknown”.\n"
+            "• **epochs**: look for `epochs =`; else null.\n"
+            "• **hardware_used**: look for device settings (`cuda`, `mps`, `cpu`); map to “GPU”, “CPU” or “Both”; else “unknown”.\n\n"
+            "🚨 **Output ONLY** the JSON object—no commentary, no markdown."
         )
 
         for attempt in range(max_retries):
             try:
-                user_prompt = f"Code analysis summary:\n{merged_summary}\n\nBased on this information, create the structured metadata JSON:"
+                user_prompt = f"""
+                Here is the merged code analysis summary:
+
+                {merged_summary}
+
+                Extract the metadata JSON as specified above.
+                """
                 response = self.llm_interface.generate_structured_response(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
@@ -449,200 +493,6 @@ class LLMBasedCodeParser:
 
         return True
 
-    def extract_architecture_metadata(self, chunk_text: str, max_retries: int = 3) -> dict:
-        """
-        Extract metadata from a code chunk and format it directly in the final structure.
-        This eliminates the need to call merge_partial_metadata for short scripts.
-        """
-        if not self.llm_interface:
-            return self._create_default_metadata_structure()
-
-        system_prompt = (
-            "You are a code analysis assistant. "
-            "Analyze the following Python code and extract metadata. "
-            "You may include reasoning in a <thinking>...</thinking> block, but must output a valid JSON object afterward.\n\n"
-            "⚠️ The output **must strictly follow this exact JSON structure**:\n"
-            "{\n"
-            '  "description": "Short summary of what the model does",\n'
-            '  "framework": { "name": "...", "version": "..." },\n'
-            '  "architecture": { "type": "..." },\n'
-            '  "dataset": { "name": "..." },\n'
-            '  "training_config": {\n'
-            '    "batch_size": 32,\n'
-            '    "learning_rate": 0.001,\n'
-            '    "optimizer": "Adam",\n'
-            '    "epochs": 10,\n'
-            '    "hardware_used": "GPU"\n'
-            '  }\n'
-            "}\n\n"
-            "⚠️ ALL fields must be included exactly as shown, even if you have to use placeholder values.\n"
-            "🟡 If you cannot confidently extract a field, use \"unknown\", null, or a placeholder value.\n"
-            "✅ Do not include any additional fields — **only return the fields shown above**.\n"
-            "❌ Do not return metadata like 'visualization', 'id', 'tags', or any other fields.\n\n"
-            "Respond only with <thinking>...</thinking> followed by the valid JSON. "
-            "No markdown, no extra comments, and no content outside the JSON structure."
-        )
-
-        required_fields = ["description", "framework", "architecture", "dataset", "training_config"]
-        training_config_fields = ["batch_size", "learning_rate", "optimizer", "epochs", "hardware_used"]
-
-        # Create the final structure that will be returned
-        result = {
-            "description": None,
-            "framework": {"name": None, "version": None},
-            "architecture": {"type": None},
-            "dataset": {"name": None},
-            "training_config": {
-                "batch_size": None,
-                "learning_rate": None,
-                "optimizer": None,
-                "epochs": None,
-                "hardware_used": None
-            },
-            "_trace": {}  # Keep track of where each piece of metadata came from
-        }
-
-        source_preview = chunk_text[:120]
-
-        for attempt in range(max_retries):
-            try:
-                user_prompt = f"Code chunk:\n```python\n{chunk_text}\n```"
-                response = self.llm_interface.generate_structured_response(
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    temperature=0,
-                    max_tokens=4000
-                )
-                print(f"Metadata extraction attempt {attempt + 1}: {response}")
-                raw = response.get("content", "").strip()
-                raw = re.sub(r"<thinking>.*?</thinking>", "", raw, flags=re.DOTALL).strip()
-                json_candidate = re.search(r"\{.*\}", raw, re.DOTALL)
-
-                if json_candidate:
-                    try:
-                        parsed = json.loads(json_candidate.group())
-
-                        # Validate that all required fields are present
-                        missing_fields = [field for field in required_fields if field not in parsed]
-                        missing_tc_fields = []
-                        if "training_config" in parsed and isinstance(parsed["training_config"], dict):
-                            missing_tc_fields = [field for field in training_config_fields
-                                                 if field not in parsed["training_config"]]
-
-                        # Handle variants of "training_config" key
-                        if "training_config" not in parsed:
-                            # Check for variant keys
-                            variant_keys = [key for key in parsed.keys()
-                                            if key.lower().replace("_", "") == "trainingconfig"]
-
-                            if variant_keys:
-                                # Found a variant key, normalize it
-                                variant_key = variant_keys[0]
-                                parsed["training_config"] = parsed.pop(variant_key)
-                                missing_fields = [f for f in missing_fields if f != "training_config"]
-
-                        # Normalize training_config subfields if needed
-                        if "training_config" in parsed and isinstance(parsed["training_config"], dict):
-                            tc = parsed["training_config"]
-
-                            # Map variant field names to standard field names
-                            field_map = {
-                                "batchsize": "batch_size",
-                                "batch": "batch_size",
-                                "learningrate": "learning_rate",
-                                "lr": "learning_rate",
-                                "numepochs": "epochs",
-                                "epoch": "epochs",
-                                "hardware": "hardware_used",
-                                "gpu": "hardware_used"
-                            }
-
-                            # Process the field mapping
-                            for variant, standard in field_map.items():
-                                if variant in tc and standard not in tc:
-                                    tc[standard] = tc.pop(variant)
-
-                            # Recheck for missing fields after normalization
-                            missing_tc_fields = [field for field in training_config_fields
-                                                 if field not in tc]
-
-                        # If fields are still missing after normalization, retry
-                        if missing_fields or missing_tc_fields:
-                            fields_str = ", ".join(missing_fields)
-                            tc_fields_str = ", ".join(missing_tc_fields)
-                            print(
-                                f"[Retry {attempt + 1}] Missing fields: {fields_str}, Missing training_config fields: {tc_fields_str}")
-
-                            # If it's the last attempt, continue with what we have
-                            if attempt == max_retries - 1:
-                                for field in missing_fields:
-                                    if field == "description":
-                                        parsed["description"] = "Unknown model purpose"
-                                    elif field == "framework":
-                                        parsed["framework"] = {"name": "unknown", "version": "unknown"}
-                                    elif field == "architecture":
-                                        parsed["architecture"] = {"type": "unknown"}
-                                    elif field == "dataset":
-                                        parsed["dataset"] = {"name": "unknown"}
-                                    elif field == "training_config":
-                                        parsed["training_config"] = {
-                                            "batch_size": None,
-                                            "learning_rate": None,
-                                            "optimizer": None,
-                                            "epochs": None,
-                                            "hardware_used": None
-                                        }
-
-                                if "training_config" in parsed and isinstance(parsed["training_config"], dict):
-                                    for field in missing_tc_fields:
-                                        parsed["training_config"][field] = None
-                            else:
-                                # Not the last attempt, so try again
-                                continue
-
-                        # Now populate the result structure with the parsed data
-                        # This directly creates the same structure that merge_partial_metadata would produce
-                        for key in required_fields:
-                            if key in parsed:
-                                if isinstance(parsed[key], dict):
-                                    for subkey, subval in parsed[key].items():
-                                        if subval is not None:
-                                            result[key][subkey] = subval
-                                            result["_trace"][f"{key}.{subkey}"] = source_preview
-                                else:
-                                    if parsed[key] is not None:
-                                        result[key] = parsed[key]
-                                        result["_trace"][key] = source_preview
-
-                        return result
-                    except json.JSONDecodeError as e:
-                        print(f"[Retry {attempt + 1}] Invalid JSON: {e}")
-                else:
-                    print(f"[Retry {attempt + 1}] No valid JSON object found in LLM response.")
-            except Exception as e:
-                print(f"[Retry {attempt + 1}] Metadata extraction failed: {e}")
-
-        # After all retries, return the default structure
-        default_result = self._create_default_metadata_structure()
-        default_result["_trace"] = {"default": "Failed to extract metadata after all retries"}
-        return default_result
-
-    def _create_default_metadata_structure(self) -> dict:
-        """Create the default metadata structure with null values."""
-        return {
-            "description": "Unknown model purpose",
-            "framework": {"name": "unknown", "version": "unknown"},
-            "architecture": {"type": "unknown"},
-            "dataset": {"name": "unknown"},
-            "training_config": {
-                "batch_size": None,
-                "learning_rate": None,
-                "optimizer": None,
-                "epochs": None,
-                "hardware_used": None
-            }
-        }
-
     def _extract_model_info(self, file_content: str, file_path: str) -> dict:
         try:
             tree = ast.parse(file_content, filename=file_path)
@@ -711,54 +561,56 @@ class LLMBasedCodeParser:
 
         return chunks
 
-    def split_by_lines(self, file_content: str, chunk_size_in_lines: int = 500, overlap: int = 100):
-        """
-        Split code into chunks based on lines rather than AST.
-        This avoids the problem of AST creating very small chunks.
 
-        Args:
-            file_content: The content of the file to split
-            chunk_size_in_lines: Approximate target size of each chunk in lines
-            overlap: Number of lines to overlap between chunks
-            min_chunk_length: Minimum character length for a chunk to be included
+    def split_summary_into_chunks(self, summary_text, overlap_lines=2, max_lines_per_chunk=50):
+        """
+        Splits a summary into semantic chunks based on headings (markdown # or underlined headings),
+        with an overlap of lines between chunks. Falls back to fixed-size chunking if no headings detected.
+
+        Parameters:
+        - summary_text (str): The full summary text.
+        - overlap_lines (int): Number of lines to overlap between chunks.
+        - max_lines_per_chunk (int): Maximum lines per chunk when no headings detected.
 
         Returns:
-            List of dictionaries containing chunk information
+        - List[str]: A list of text chunks.
         """
-        lines = file_content.splitlines(keepends=True)
+        lines = summary_text.splitlines(keepends=True)
+        heading_indices = set()
+
+        # Detect markdown headings (#, ##, ###, etc.)
+        for i, line in enumerate(lines):
+            if re.match(r'^\s{0,3}#{1,6}\s+', line):
+                heading_indices.add(i)
+
+        # Detect underlined headings (text followed by === or ---)
+        for i in range(len(lines) - 1):
+            if lines[i].strip() and re.match(r'^[=-]{3,}\s*$', lines[i + 1]):
+                heading_indices.add(i)
+
+        # If no headings found, fallback to fixed-size chunking
+        if not heading_indices:
+            chunks = []
+            total = len(lines)
+            for start in range(0, total, max_lines_per_chunk):
+                chunk = lines[start:start + max_lines_per_chunk]
+                if start > 0:
+                    overlap = lines[start - overlap_lines:start]
+                    chunk = overlap + chunk
+                chunks.append(''.join(chunk))
+            return chunks
+
+        # Otherwise, split at heading lines
+        sorted_idxs = sorted(heading_indices)
         chunks = []
-
-        # Helper function to get character offset from line number
-        def get_offset(line_index):
-            return sum(len(lines[i]) for i in range(min(line_index, len(lines))))
-
-        # Process chunks of lines
-        i = 0
-        while i < len(lines):
-            # Calculate end of this chunk (with respect to chunk_size)
-            end = min(i + chunk_size_in_lines, len(lines))
-
-            # Try to find a better splitting point by looking for empty lines
-            # or lines that don't start with whitespace (likely a top-level definition)
-            if end < len(lines):
-                # Look ahead a bit to find a good split point
-                for j in range(end, min(end + 20, len(lines))):
-                    if not lines[j].strip() or not lines[j].startswith((' ', '\t')):
-                        end = j
-                        break
-
-            # Extract the chunk
-            chunk_lines = lines[i:end]
-            chunk_text = "".join(chunk_lines)
-            chunks.append({
-                "text": chunk_text,
-                "offset": get_offset(i),
-                "type": "code",
-                "line_range": (i, end)
-            })
-
-            # Move to next chunk, accounting for overlap
-            i = end - overlap if end < len(lines) else end
+        for idx, start in enumerate(sorted_idxs):
+            end = sorted_idxs[idx + 1] if idx + 1 < len(sorted_idxs) else len(lines)
+            chunk_lines = lines[start:end]
+            if idx > 0:
+                prev_end = start
+                overlap = lines[prev_end - overlap_lines:prev_end]
+                chunk_lines = overlap + chunk_lines
+            chunks.append(''.join(chunk_lines))
 
         return chunks
 
