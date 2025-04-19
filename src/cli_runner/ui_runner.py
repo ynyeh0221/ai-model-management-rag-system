@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from datetime import datetime
 
 import nbformat
@@ -193,7 +194,7 @@ class UIRunner:
         self._generate_query_response(query_text, reranked_results, parsed_query, template_manager, llm_interface)
 
     def _process_search_results(self, search_results, reranker, parsed_query, query_text, max_to_return=10,
-                                rerank_threshold=0.01):
+                                rerank_threshold=0.05):
         """
         Process and rerank search results.
 
@@ -249,8 +250,9 @@ class UIRunner:
 
         # Align columns
         table.align = "l"  # Default left alignment for all
-        table.align["Similarity Rank"] = "c"  # center
+        table.align["Rank"] = "c"  # center
         table.align["Similarity Score"] = "r"  # right
+        table.align["Similarity Distance"] = "r"  # right
         table.align["Size"] = "r"  # right align file size
 
         # Set max width for columns - optimized for 15-inch laptop
@@ -425,9 +427,16 @@ class UIRunner:
         if parsed_query["type"] == "comparison":
             template_id = "model_comparison"
         elif parsed_query["type"] == "retrieval":
-            template_id = "information_retrieval"
+            # Pseudocode / Python-style
+            if re.search(r"\b(common|most used|typically used|usually used)\b", query_text, re.IGNORECASE):
+                template_id = "aggregation_query"  # the one with dataset summarization etc.
+            else:
+                template_id = "information_retrieval"
         else:
-            template_id = "general_query"
+            if re.search(r"\b(common|most used|typically used|usually used)\b", query_text, re.IGNORECASE):
+                template_id = "aggregation_query"  # the one with dataset summarization etc.
+            else:
+                template_id = "general_query"
 
         # Prepare context for template
         context = self._prepare_template_context(query_text, reranked_results, parsed_query)

@@ -80,15 +80,13 @@ class CrossEncoderReranker:
             # Sort by score in descending order
             reranked_results = sorted(results, key=lambda x: x.get("rerank_score", 0), reverse=True)
 
-            print(f"reranked results before filter: {reranked_results}")
+            # Apply threshold filter if specified
+            if threshold is not None:
+                reranked_results = [r for r in reranked_results if r.get("rerank_score", 0) >= threshold]
 
             # Apply top_k filter if specified
             if top_k is not None and top_k > 0:
                 reranked_results = reranked_results[:top_k]
-
-            # Apply threshold filter if specified
-            if threshold is not None:
-                reranked_results = [r for r in reranked_results if r.get("rerank_score", 0) >= threshold]
 
             return reranked_results
 

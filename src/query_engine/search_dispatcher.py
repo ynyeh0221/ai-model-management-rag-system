@@ -129,10 +129,12 @@ class SearchDispatcher:
     async def handle_text_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle a text search query for model scripts and metadata.
-        1. Query all metadata tables, merge by model_id, sort by distance
+        1. Query all metadata tables to find model_ids
         2. Query model_scripts_chunks to find more model_ids
-        3. Sort results, limit to requested number, and fetch metadata for all final models
-        4. For each model in the output list, fetch and merge chunk descriptions
+        3. Fetch complete metadata for ALL found model_ids
+        4. Calculate weighted distance sum using complete metadata
+        5. Sort ALL results by distance
+        6. Limit to requested number of results
         """
         self.logger.debug(f"Handling text search: {query}")
         start_time = time.time()
@@ -143,11 +145,11 @@ class SearchDispatcher:
 
             # Extract search parameters
             try:
-                requested_limit = int(parameters.get('limit', 20))
+                requested_limit = int(parameters.get('limit', 10))
                 if requested_limit <= 0:
-                    requested_limit = 20
+                    requested_limit = 10
             except (TypeError, ValueError):
-                requested_limit = 20
+                requested_limit = 10
 
             filters = parameters.get('filters', {})
 
@@ -179,34 +181,30 @@ class SearchDispatcher:
                 "model_git": 0.0
             }
 
-            # STEP 1: Search all metadata tables in parallel and merge results
+            # STEP 1: Search all metadata tables in parallel to collect model_ids
             metadata_search_start = time.time()
             search_tasks = []
 
             # Create search tasks for all tables
             for table_name in table_weights.keys():
-                if table_name == 'model_descriptions':
-                    search_limit = requested_limit
-                else:
-                    search_limit = requested_limit
+                search_limit = requested_limit
                 search_tasks.append(self.chroma_manager.search(
                     collection_name=table_name,
                     query=query,
                     where=chroma_filters,
                     limit=search_limit,
-                    include=["metadatas", "documents", "distances"]
+                    include=["metadatas", "documents"]  # Don't need distances here
                 ))
 
             # Execute all searches in parallel
             search_results = await asyncio.gather(*search_tasks)
 
-            # Initialize model results dictionary to store combined results
-            model_results = {}
+            # Initialize dictionary to collect all models
+            all_results = {}
 
-            # Process search results from each table
+            # Process search results from each table to identify all model_ids ONLY
             for table_idx, result in enumerate(search_results):
                 table_name = list(table_weights.keys())[table_idx]
-                table_weight = table_weights[table_name]
 
                 for item in result.get('results', []):
                     metadata = item.get('metadata', {})
@@ -216,44 +214,23 @@ class SearchDispatcher:
                     if model_id == 'unknown':
                         continue
 
-                    distance = item.get('distance', 1.0)
-
                     # Apply access control
                     if self.access_control_manager and user_id:
                         if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
                             continue
 
-                    # Apply table weight to the distance score
-                    weighted_distance = distance * table_weight
-
-                    # If model already exists in results, update its metadata and recalculate distance
-                    if model_id in model_results:
-                        # Add this table to the list of matching tables
-                        if table_name not in model_results[model_id]['tables']:
-                            model_results[model_id]['tables'].append(table_name)
-
-                        # Update the weighted distance (lower is better)
-                        # Calculate previous weight sum (excluding current table)
-                        previous_tables = [t for t in model_results[model_id]['tables'] if t != table_name]
-                        previous_weight_sum = sum(table_weights[t] for t in previous_tables if t in table_weights)
-
-                        # Calculate new total weight (including current table)
-                        new_weight_sum = previous_weight_sum + table_weight
-
-                        if new_weight_sum > 0:  # Avoid division by zero
-                            # Calculate weighted average correctly
-                            old_score = model_results[model_id]['distance'] * previous_weight_sum
-                            new_score = weighted_distance * table_weight
-                            model_results[model_id]['distance'] = (old_score + new_score) / new_weight_sum
-                    else:
-                        # First time seeing this model, initialize its entry
-                        model_results[model_id] = {
+                    # If first time seeing this model, initialize its entry
+                    if model_id not in all_results:
+                        all_results[model_id] = {
                             'model_id': model_id,
-                            'metadata': dict(),
-                            'distance': weighted_distance,
-                            'tables': [table_name],
+                            'tables': [],
+                            'table_initial_distances': {},  # Empty dictionary for distances
                             'match_source': 'metadata'
                         }
+
+                    # Add this table to the list of matching tables if not already there
+                    if table_name not in all_results[model_id]['tables']:
+                        all_results[model_id]['tables'].append(table_name)
 
             # STEP 2: Search chunks table to find more matching models
             chunks_search_start = time.time()
@@ -280,125 +257,132 @@ class SearchDispatcher:
                 if model_id == 'unknown':
                     continue
 
-                distance = result.get('distance', 1.0)
-
                 # Apply access control
                 if self.access_control_manager and user_id:
                     if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
                         continue
 
-                # If we already have this model, update its match source and distance
-                if model_id in model_results:
-                    model_results[model_id]['match_source'] = 'metadata+chunks'
-                    # Parameters: 0.9, 0.1, 0.9
-                    # Rationale: We significantly favor metadata matches (90%) over chunk matches (10%)
-                    # because metadata provides more structured and reliable information.
-                    # The 0.9 multiplier for chunk distance provides only a slight 10% improvement
-                    # to chunk scores, reflecting our preference for metadata-driven results
-                    # while still acknowledging that chunks provide some additional relevance.
-                    model_results[model_id]['distance'] = 0.9 * model_results[model_id]['distance'] + 0.1 * (distance * 0.9)
+                # If we already have this model, update its match source
+                if model_id in all_results:
+                    all_results[model_id]['match_source'] = 'metadata+chunks'
                 else:
                     # This is a new model found only in chunks
-                    # Parameter: 0.9
-                    # Rationale: For models found only in chunks, we apply a modest 10% improvement
-                    # to their distance score to slightly boost their ranking, but keep them
-                    # generally lower priority than metadata matches. This balances giving
-                    # chunk-only matches fair consideration while maintaining the primacy
-                    # of metadata in our search algorithm.
-                    model_results[model_id] = {
+                    all_results[model_id] = {
                         'model_id': model_id,
-                        'metadata': dict(),
-                        'distance': distance * 0.9,
                         'tables': ["chunks"],
                         'match_source': 'chunks'
                     }
 
-            # Convert to list and sort by distance (lower is better)
-            output_list = list(model_results.values())
-            output_list.sort(key=lambda x: x.get('distance', 1.0))
+            print(f"Model ids to fetch metadata fields: {len(all_results)}")
 
-            # Limit to requested number of results
-            output_list = output_list[:requested_limit]
-
-            # STEP 3: Fetch complete metadata for all models in the final output list
+            # STEP 3: Fetch complete metadata for ALL found models with distances
             try:
-                # Get the list of model IDs in the final output
-                final_model_ids = [model.get('model_id') for model in output_list if model.get('model_id') != 'unknown']
+                # Get the list of all model IDs
+                all_model_ids = [model_id for model_id in all_results.keys() if model_id != 'unknown']
 
-                if final_model_ids:
-                    # Create metadata fetch tasks for each table
-                    complete_metadata_tasks = []
-                    for table_name in table_weights.keys():
-                        if table_name == 'model_descriptions':
-                            continue
-                        complete_metadata_tasks.append(self.chroma_manager.get(
-                            collection_name=table_name,
-                            where={"model_id": {"$in": final_model_ids}},
-                            include=["metadatas"]
-                        ))
+                if all_model_ids:
+                    # Process in smaller batches to reduce memory usage
+                    batch_size = 1
+                    for i in range(0, len(all_model_ids), batch_size):
+                        batch_model_ids = all_model_ids[i:i + batch_size]
 
-                    # Execute all metadata fetch tasks in parallel
-                    complete_metadata_results = await asyncio.gather(*complete_metadata_tasks)
+                        # Create metadata fetch tasks for each table except model_descriptions
+                        for table_name in table_weights.keys():
+                            if table_name != 'model_descriptions':
+                                try:
+                                    # Use search to retrieve actual distances
+                                    result = await self.chroma_manager.search(
+                                        collection_name=table_name,
+                                        query=query,  # Use the original query
+                                        where={"model_id": {"$in": batch_model_ids}},
+                                        include=["metadatas", "documents", "distances"]  # Include distances
+                                    )
 
-                    # Process results and update model metadata
-                    for table_idx, result in enumerate(complete_metadata_results):
-                        table_name = list(table_weights.keys())[table_idx]
+                                    # Log the raw results structure for debugging
+                                    self.logger.debug(f"Search result structure for {table_name}: {result.keys()}")
 
-                        # Process each result item
-                        for item in result.get('results', []):
-                            metadata = item.get('metadata', {})
-                            model_id = metadata.get('model_id', 'unknown')
+                                    # Process each result item
+                                    for idx, item in enumerate(result.get('results', [])):
+                                        metadata = item.get('metadata', {})
+                                        model_id = metadata.get('model_id', 'unknown')
 
-                            # Find the corresponding model in our output list
-                            for model_data in output_list:
-                                if model_data.get('model_id') == model_id:
-                                    # Update the metadata with this table's data
-                                    model_data['metadata'].update(metadata)
+                                        # Get the distance from the results
+                                        distance = None
+                                        if 'distances' in result and isinstance(result['distances'], list):
+                                            if len(result['distances']) > idx:
+                                                if isinstance(result['distances'][idx], list) and len(
+                                                        result['distances'][idx]) > 0:
+                                                    distance = result['distances'][idx][
+                                                        0]  # ChromaDB sometimes returns nested lists
+                                                else:
+                                                    distance = result['distances'][idx]
+                                        else:
+                                            # Or try to get it directly from the item
+                                            distance = item.get('distance')
 
-                                    # Update the tables list if not already present
-                                    if table_name not in model_data['tables']:
-                                        model_data['tables'].append(table_name)
-                                    break
+                                        # Use a default if all else fails
+                                        if distance is None:
+                                            distance = 2.0
+
+                                        # Log the distance for debugging
+                                        self.logger.debug(f"Distance for model {model_id} in {table_name}: {distance}")
+
+                                        # Find the corresponding model in our results
+                                        if model_id in all_results:
+                                            # Initialize metadata dictionary if it doesn't exist
+                                            if 'metadata' not in all_results[model_id]:
+                                                all_results[model_id]['metadata'] = {}
+
+                                            # Update the metadata with this table's data
+                                            all_results[model_id]['metadata'].update(metadata)
+
+                                            # Update the tables list if not already present
+                                            if table_name not in all_results[model_id]['tables']:
+                                                all_results[model_id]['tables'].append(table_name)
+
+                                            # Make sure table_initial_distances exists before accessing it
+                                            if 'table_initial_distances' not in all_results[model_id]:
+                                                all_results[model_id]['table_initial_distances'] = {}
+
+                                            # Always store the distance from this search
+                                            all_results[model_id]['table_initial_distances'][table_name] = distance
+                                except Exception as e:
+                                    self.logger.error(f"Error searching metadata from {table_name} for batch: {e}")
             except Exception as e:
-                self.logger.error(f"Error fetching complete metadata for final models: {e}")
+                self.logger.error(f"Error fetching complete metadata for models: {e}")
 
-            # STEP 4: For each model in the output list, fetch and merge chunk descriptions
-            for model_data in output_list:
+            # Special handling for model descriptions using chunks - process one model at a time
+            for model_id, model_data in all_results.items():
                 try:
-                    model_id = model_data.get('model_id')
                     if not model_id or model_id == 'unknown':
-                        model_data['merged_description'] = ""
                         continue
 
-                    # Get model description from metadata first as a fallback
-                    fallback_description = ""
-                    if 'metadata' in model_data and isinstance(model_data['metadata'], dict):
-                        fallback_description = "No model description found"
+                    # Ensure model_data has the required keys
+                    if 'metadata' not in model_data:
+                        model_data['metadata'] = {}
 
-                    # Use a safer approach - don't use the original query for chunk search
+                    if 'table_initial_distances' not in model_data:
+                        model_data['table_initial_distances'] = {}
+
+                    # Initialize description-related fields
+                    model_data['chunk_descriptions'] = []
+                    model_data['chunk_description_distances'] = []
+
                     try:
-                        # First check if chunks exist for this model
-                        chunk_check = await self.chroma_manager.get(
-                            collection_name="model_descriptions",
-                            where={"model_id": {"$eq": model_id}},
-                            limit=1
-                        )
-
-                        # If no chunks found, use the fallback description
-                        if not chunk_check or not chunk_check.get('results'):
-                            model_data['merged_description'] = fallback_description
-                            continue
-
-                        # Now search for the most relevant chunks using the query
+                        # Search for the most relevant chunks using the query
                         model_chunks_search = await self.chroma_manager.search(
                             collection_name="model_descriptions",
                             query=query,  # Use the same query to find the most relevant chunks
                             where={"model_id": {"$eq": model_id}},  # Only search chunks for this specific model
-                            limit=1,  # Get top 1 chunks
-                            include=["metadatas"]  # Only include metadata
+                            limit=1,
+                            include=["metadatas", "distances"]  # Include distances
                         )
 
-                        # Extract the descriptions from the chunks
+                        # Log the raw search results to debug distance issues
+                        self.logger.debug(f"Description search results for model {model_id}: {model_chunks_search}")
+
+                        # Process chunk results to collect descriptions and distances
+                        chunk_distances = []
                         chunk_descriptions = []
 
                         if model_chunks_search and isinstance(model_chunks_search,
@@ -407,7 +391,19 @@ class SearchDispatcher:
                                 if not isinstance(chunk_result, dict):
                                     continue
 
-                                # Get the description from metadata
+                                # Get distance
+                                distance = chunk_result.get('distance')
+                                # Log the distance value
+                                self.logger.debug(f"Distance for description chunk of model {model_id}: {distance}")
+
+                                # Only add valid distances
+                                if distance is not None:
+                                    chunk_distances.append(distance)
+                                else:
+                                    # If no distance is provided, use a moderate default (2.0)
+                                    chunk_distances.append(2.0)
+
+                                # Get description
                                 description = None
                                 if 'metadata' in chunk_result and isinstance(chunk_result['metadata'], dict):
                                     description = chunk_result['metadata'].get('description')
@@ -415,19 +411,76 @@ class SearchDispatcher:
                                 if description and isinstance(description, str):
                                     chunk_descriptions.append(description)
 
-                        # If we found any descriptions, merge them
+                        # Store collected data
+                        model_data['chunk_descriptions'] = chunk_descriptions
+                        model_data['chunk_description_distances'] = chunk_distances
+
+                        # Create merged description from chunks
                         if chunk_descriptions:
                             model_data['merged_description'] = " ".join(chunk_descriptions)
+                            # Calculate average distance for model_descriptions (as requested)
+                            if chunk_distances:
+                                avg_description_distance = sum(chunk_distances) / len(chunk_distances)
+                                self.logger.debug(
+                                    f"Average description distance for model {model_id}: {avg_description_distance}")
+                                model_data['table_initial_distances']['model_descriptions'] = avg_description_distance
                         else:
-                            # If no chunk descriptions found, use the model's main description if available
-                            model_data['merged_description'] = fallback_description
+                            model_data['merged_description'] = ""
+                            # Use a moderate default distance if no descriptions found
+                            model_data['table_initial_distances']['model_descriptions'] = 2.0
+
+                        # Update metadata with merged description
+                        model_data['metadata']['description'] = model_data.get('merged_description', '')
+
+                        # Add to tables list if not already there
+                        if 'model_descriptions' not in model_data['tables']:
+                            model_data['tables'].append('model_descriptions')
+
                     except Exception as e:
                         self.logger.error(f"Error in chunk description search for model {model_id}: {e}")
-                        model_data['merged_description'] = fallback_description
+                        # Set a moderate default distance if error occurs
+                        model_data['table_initial_distances']['model_descriptions'] = 2.0
                 except Exception as e:
-                    self.logger.error(f"Error in chunk description handling for model: {e}")
-                    # Set an empty merged description if an error occurs
-                    model_data['merged_description'] = ""
+                    self.logger.error(f"Error in model description handling for model: {e}")
+
+            # STEP 4: Calculate weighted distance sum for all models using all gathered metadata
+            for model_id, model_data in all_results.items():
+                # Calculate weighted distance from metadata tables
+                weighted_sum = 0.0
+                weight_sum = 0.0
+
+                for table_name, table_weight in table_weights.items():
+                    if table_name in model_data.get('table_initial_distances', {}):
+                        distance = model_data['table_initial_distances'][table_name]
+                        weighted_sum += distance * table_weight
+                        weight_sum += table_weight
+
+                # Calculate metadata distance (weighted average)
+                if weight_sum > 0:
+                    metadata_distance = weighted_sum / weight_sum
+                else:
+                    metadata_distance = 2.0  # Default to maximum distance if no metadata
+
+                # Combine metadata and chunk distances if both exist
+                if 'chunk_initial_distance' in model_data:
+                    # Parameters: 0.9, 0.1, 0.95
+                    # Rationale: We significantly favor metadata matches (90%) over chunk matches (10%)
+                    if model_data['match_source'] == 'metadata+chunks':
+                        final_distance = 0.9 * metadata_distance + 0.1 * (model_data['chunk_initial_distance'] * 0.95)
+                    else:  # 'chunks' only
+                        final_distance = model_data['chunk_initial_distance'] * 0.95
+                else:
+                    final_distance = metadata_distance
+
+                # Store the final calculated distance
+                model_data['distance'] = final_distance
+
+            # STEP 5: Convert to list and sort by distance (lower is better)
+            output_list = list(all_results.values())
+            output_list.sort(key=lambda x: x.get('distance', 2.0))
+
+            # STEP 6: Limit to requested number of results
+            output_list = output_list[:requested_limit]
 
             # Prepare final result items
             items = []
@@ -438,7 +491,7 @@ class SearchDispatcher:
                     'metadata': model.get('metadata', {}),
                     'rank': rank + 1,
                     'match_source': model.get('match_source', 'unknown'),
-                    'distance': model.get('distance', 1.0),
+                    'distance': model.get('distance', 2.0),
                     'merged_description': model.get('merged_description', '')
                 })
 
@@ -460,7 +513,7 @@ class SearchDispatcher:
                 'type': 'text_search',
                 'items': items,
                 'total_found': len(items),
-                'total_models': len(model_results),
+                'total_models': len(all_results),
                 'performance': {
                     'metadata_search_time_ms': metadata_search_time,
                     'chunks_search_time_ms': chunks_search_time,
@@ -489,7 +542,7 @@ class SearchDispatcher:
 
             # Extract search parameters
             filters = parameters.get('filters', {})
-            limit = parameters.get('limit', 20)
+            limit = parameters.get('limit', 10)
 
             # If query mentions a specific month, add it to filters
             month_filter = None
@@ -574,7 +627,6 @@ class SearchDispatcher:
             # Process search results from each table
             for table_idx, result in enumerate(search_results):
                 table_name = table_names[table_idx]
-                table_weight = metadata_tables[table_name]
 
                 # Handle results from the search
                 for item in result.get('results', []):
@@ -585,47 +637,20 @@ class SearchDispatcher:
                     if model_id == 'unknown':
                         continue
 
-                    # Get distance (if available) or use default value if this was a 'get' operation
-                    distance = item.get('distance', 0.5)  # Default middle distance
-
                     # Apply access control
                     if self.access_control_manager and user_id:
                         if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
                             continue
-
-                    # Calculate relevance score (higher is better)
-                    # For search results, we convert distance to relevance (1 - distance) * weight
-                    # For get results (e.g., from date table), we use table weight directly
-                    relevance_score = (1 - distance) * table_weight if 'distance' in item else table_weight
 
                     # If model already exists in results, update its metadata and recalculate relevance
                     if model_id in model_results:
                         # Add this table to the list of matching tables
                         if table_name not in model_results[model_id]['tables']:
                             model_results[model_id]['tables'].append(table_name)
-
-                        # Update model metadata with this table's metadata
-                        model_results[model_id]['metadata'].update(metadata)
-
-                        # Use weighted average instead of simple addition for relevance score
-                        # Calculate previous weight and score contribution
-                        previous_tables = [t for t in model_results[model_id]['tables'] if t != table_name]
-                        previous_weight_sum = sum(metadata_tables[t] for t in previous_tables if t in metadata_tables)
-                        current_weight_sum = previous_weight_sum + table_weight
-
-                        if current_weight_sum > 0:  # Avoid division by zero
-                            # Calculate weighted average relevance score
-                            previous_score_contribution = model_results[model_id][
-                                                              'relevance_score'] * previous_weight_sum
-                            new_score_contribution = relevance_score * table_weight
-                            model_results[model_id]['relevance_score'] = (
-                                                                                     previous_score_contribution + new_score_contribution) / current_weight_sum
                     else:
                         # First time seeing this model, initialize its entry
                         model_results[model_id] = {
                             'model_id': model_id,
-                            'metadata': metadata.copy(),
-                            'relevance_score': relevance_score,
                             'tables': [table_name]
                         }
 
@@ -668,7 +693,7 @@ class SearchDispatcher:
                             collection_name="model_descriptions",
                             query=query,  # Use the same query to find the most relevant chunks
                             where={"model_id": {"$eq": model_id}},  # Only search chunks for this specific model
-                            limit=3,  # Get top 3 chunks
+                            limit=1,  # Get top 3 chunks
                             include=["metadatas"]  # Only include metadata
                         )
 
@@ -802,7 +827,7 @@ class SearchDispatcher:
             embedding_time = (time.time() - embedding_start) * 1000
 
             # Extract search parameters
-            limit = parameters.get('limit', 20)
+            limit = parameters.get('limit', 10)
             style_tags = parameters.get('style_tags', [])
             prompt_terms = parameters.get('prompt_terms', "")
             resolution = parameters.get('resolution', None)

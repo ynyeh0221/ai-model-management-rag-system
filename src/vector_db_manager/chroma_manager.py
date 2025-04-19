@@ -712,7 +712,7 @@ class ChromaManager:
                 **get_args
             )
 
-            print(f"Get results: {results}")
+            # print(f"Get results: {results}")
 
             # Process results into a more user-friendly format
             processed_results = self._process_search_results(results, include)
@@ -963,6 +963,7 @@ class ChromaManager:
         documents = results.get('documents') or []
         metadatas = results.get('metadatas') or []
         embeddings = results.get('embeddings') or []
+        distances = results.get('distances') or []  # Make sure to extract distances
 
         # Flatten structure if necessary
         if isinstance(ids, list) and len(ids) > 0 and isinstance(ids[0], list):
@@ -973,6 +974,8 @@ class ChromaManager:
             metadatas = metadatas[0]
         if isinstance(embeddings, list) and len(embeddings) > 0 and isinstance(embeddings[0], list):
             embeddings = embeddings[0]
+        if isinstance(distances, list) and len(distances) > 0 and isinstance(distances[0], list):
+            distances = distances[0]  # Flatten distances if nested
 
         result_count = len(ids)
         for i in range(result_count):
@@ -984,6 +987,8 @@ class ChromaManager:
                 item["metadata"] = metadatas[i] if i < len(metadatas) and metadatas[i] else {}
             if "embeddings" in include and i < len(embeddings):
                 item["embedding"] = embeddings[i]
+            if "distances" in include and i < len(distances):  # Add distances to results
+                item["distance"] = distances[i]
 
             processed["results"].append(item)
 
