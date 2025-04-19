@@ -1,174 +1,251 @@
-# AI Model Management RAG System
+## AI Model Management RAG System
 
-This repository contains a modular Retrieval-Augmented Generation (RAG) system for managing AI model scripts, associated metadata, and generated images. The system supports schema-based validation, vector-based retrieval, multi-modal querying, side-by-side model comparison, and Colab notebook generation.
+### Overview
 
-## Features
+This system enables structured understanding, indexing, and retrieval of machine learning model code and metadata. It combines static analysis, LLM-based summarization, vector embeddings, and Google Colab automation to support advanced retrieval-augmented workflows.
 
-- **Schema-Validated Document Processing**
-  - Structured ingestion of code, image, and metadata documents
-  - Multi-framework support (PyTorch, TensorFlow, etc.)
+### Features
 
-- **Vector-Based Retrieval**
-  - Embedding generation for code, text, and images
-  - Fast similarity search via Chroma and FAISS
+- Script processing and code chunking via AST
+- LLM-based metadata extraction and summarization
+- Schema validation and multi-collection vector indexing
+- Support for querying across different embedding spaces (multi-vector support)
+- Remote notebook generation and execution via Google Colab API
+- Modular access control and metadata schemas
 
-- **Query Engine**
-  - Natural language understanding using LangChain
-  - Supports hybrid search (vector + keyword)
-  - Intent classification and custom ranking strategies
+---
 
-- **Image Gallery and Search**
-  - Searchable and filterable views of generated images
-  - Supports tag-based filtering and generation parameter overlays
+### Core Components
 
-- **Model Comparison Tools**
-  - Compare model architecture, training configs, and performance
-  - Timeline view for model evolution
+#### ScriptProcessorRunner
 
-- **Notebook Generator**
-  - Create and execute Colab notebooks for model inspection
-  - Includes reproducibility tracking and resource usage logs
+Processes entire directories of model-related files. For each file:
 
-- **Prompt Studio**
-  - Prompt template management with versioning and A/B testing
-  - Git-style diffing and template performance analytics
+- Verifies file type and structure
+- Parses code using `LLMBasedCodeParser`
+- Extracts both metadata and code chunks
+- Validates documents using schema definitions
+- Embeds and stores both code and metadata in separate Chroma collections
 
-- **User Interface**
-  - Start from command line interface 
-  - Built with React and Tailwind CSS
-  - Monaco-based editor for code and prompts
-  - Access control via JWT and RBAC
+#### LLMBasedCodeParser
 
-- **Monitoring and Analytics**
-  - System performance tracking with Prometheus and Grafana
-  - Query logging and analysis with Elasticsearch and Kibana
+Parses `.py` or `.ipynb` files by:
 
-## Architecture Overview
+1. Extracting code structure using Python's AST (classes, functions, variables)
+2. Summarizing with an LLM (e.g., GPT) to generate structured metadata including:
+   - Description of model purpose
+   - Framework (name and version)
+   - Architecture type
+   - Dataset used
+   - Training configuration (e.g., batch size, learning rate)
 
-The system is composed of the following components:
+All metadata is normalized and can be extended or validated against versioned schemas.
 
-1. Document Processor
-2. Vector Database Manager
-3. Query Engine
-4. Response Generator
-5. Notebook Generator
-6. Frontend UI
-7. Monitoring & Analytics
+---
 
-## Technology Stack
+### Data Model
 
-| Category          | Tools / Libraries |
-|-------------------|------------------|
-| Language          | Python 3.9+, JavaScript (React) |
-| Backend           | FastAPI / Flask |
-| Frontend          | React, Tailwind CSS, Zustand |
-| Vector Search     | ChromaDB, FAISS, SQLite |
-| Embeddings        | SentenceTransformers, OpenCLIP |
-| LLM Integration   | LangChain, LLaMA, Deepseek-llm |
-| Image Processing  | Pillow, OpenCLIP |
-| Notebooks         | nbformat, Papermill, Google Colab API |
-| Visualization     | Matplotlib, Plotly |
-| Monitoring        | Prometheus, Grafana, OpenTelemetry |
-| Logging           | Elasticsearch, Kibana |
-| Access Control    | JWT, Role-Based Access Control (RBAC) |
+Each piece of metadata is stored as a document in a dedicated vector collection:
 
-## Getting Started with AI Model Management RAG System
+| Collection               | Purpose                        | Example Metadata                       |
+|--------------------------|--------------------------------|----------------------------------------|
+| `model_file`             | File-level attributes          | Path, size, creation/modification dates|
+| `model_date`             | Timestamp-based indexing       | Month/year created, last modified      |
+| `model_frameworks`       | Framework metadata             | `{"name": "PyTorch", "version": "2.0"}`|
+| `model_architectures`    | Model type and structure       | `{"type": "Transformer"}`              |
+| `model_datasets`         | Dataset references             | `{"name": "CIFAR-10"}`                 |
+| `model_training_configs` | Training configuration         | Optimizer, epochs, batch size, etc.    |
+| `model_descriptions`     | LLM-generated text summaries   | Concise explanation of each code chunk |
+| `model_scripts_chunks`   | Code snippets and AST sections | Actual Python source segments          |
 
-Based on your GitHub repository and main.py file, here's a corrected "Getting Started" guide that matches your actual repository structure:
+---
 
-### Clone the Repository
+### Multi-Vector Support
 
-```bash
-git clone https://github.com/your-org/ai-model-management-rag-system.git
-cd ai-model-management-rag-system
+Each Chroma collection supports its own embedding model and schema. This allows different types of information to be indexed, retrieved, and filtered independently.
+
+- `model_descriptions` is optimized for natural language search
+- `model_frameworks` supports faceted filtering on version and name
+- `model_scripts_chunks` enables deep semantic search over model code
+- Queries can be executed across any vector space with optional structured filters
+
+Example:
+
+```python
+results = await chroma_manager.search(
+    query="transformer trained on CIFAR-10",
+    collection_name="model_descriptions",
+    where={"framework.name": {"$eq": "PyTorch"}}
+)
 ```
 
-### Set Up the Environment
+---
+
+### ColabAPIClient
+
+Handles notebook lifecycle management with Google APIs.
+
+- Authenticates with service account or OAuth2
+- Creates and uploads Jupyter notebooks from extracted code
+- Launches remote execution with:
+  - Custom parameters
+  - GPU/TPU support
+  - Execution monitoring
+  - Result downloading and inspection
+
+Example:
+
+```python
+nb = codegen.generate_notebook_from_chunks(chunks)
+client = ColabAPIClient()
+file_id = client.create_notebook(nb, "example_model.ipynb")
+execution_id = client.execute_notebook(file_id, accelerator_type="GPU")
+status = client.wait_for_execution(execution_id)
+```
+
+---
+
+### Access Control
+
+Document-level access control is enforced at the time of ingestion:
+
+- Documents include access metadata derived from `access_control.get_document_permissions`
+- These access rights are respected during query filtering and sharing
+- Supports user-level, group-level, or public visibility
+
+---
+
+### Response Generation Workflow
+
+When a user submits a query through the CLI interface (`UIRunner`), the system follows a structured multi-stage process to generate a final response:
+
+#### 1. **Query Parsing**
+- The raw query is processed by a `query_parser` component.
+- Extracts the user's intent (e.g., retrieval, comparison, summarization) and filters (e.g., timeframe, framework).
+  
+#### 2. **Search Dispatching**
+- The parsed query is sent to a `search_dispatcher`, which dispatches it to one or more vector collections:
+  - `model_descriptions` for natural language summaries
+  - `model_frameworks`, `model_architectures`, `model_training_configs` for structured filtering
+- The dispatcher supports hybrid vector+metadata queries and returns relevant matches.
+
+#### 3. **Reranking**
+- Raw search results are reranked using a `reranker` (e.g., BGE-Reranker or CrossEncoder).
+- Scores are adjusted based on textual similarity and contextual relevance to the query.
+
+#### 4. **Template Selection**
+- A `template_manager` selects the appropriate response template based on query type:
+  - Retrieval: e.g., “Which models use Vision Transformers on CIFAR-10?”
+  - Aggregation: e.g., “What frameworks are most common for diffusion models?”
+  - Comparison: e.g., “Compare ModelA vs ModelB”
+  - General query fallback if no intent is confidently extracted
+
+#### 5. **Prompt Construction**
+- The selected template is rendered using:
+  - The original query
+  - Top-N reranked search results
+  - Parsed metadata (frameworks, datasets, configs, etc.)
+
+#### 6. **LLM Response Generation**
+- The `llm_interface` (e.g., OpenAI or other LLM provider) generates a final answer using the templated prompt.
+- Responses can include:
+  - Summary tables
+  - Textual comparisons
+  - Recommendations based on metadata
+
+#### 7. **Fallback Strategy**
+- If template rendering fails, a backup prompt is constructed using raw results + query.
+- A fallback LLM call is made to ensure robustness.
+
+---
+
+### Example
 
 ```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+> query transformer with CIFAR-10
+```
+
+The system:
+
+- Parses it as an information retrieval query
+- Searches in `model_descriptions` and filters by dataset
+- Reranks results based on relevance to “transformer”
+- Selects the `information_retrieval` template
+- Builds a prompt like:
+
+```txt
+Query: transformer with CIFAR-10
+
+Top Results:
+1. Model: ViT_CIFAR10
+   - Framework: PyTorch
+   - Dataset: CIFAR-10
+   - Arch: Vision Transformer
+   - Training: Adam, batch=32, lr=3e-4
+2. Model: TransformerBaseline
+   - Framework: TensorFlow
+   - Dataset: CIFAR-10
+   - Arch: Transformer
+
+Please summarize key differences and trends across these models.
+```
+
+LLM returns:
+
+> "Two transformer-based models were found using CIFAR-10. The first uses PyTorch and ViT architecture with Adam optimizer and a learning rate of 3e-4. The second uses a TensorFlow baseline. Most models prefer PyTorch for transformer training on this dataset."
+
+---
+
+### Installation
+
+```bash
 pip install -r requirements.txt
 ```
 
-### Using the Command Line Interface
+Requirements include:
 
-The system provides several CLI commands:
+- `chromadb`, `sentence-transformers`, `nbformat`
+- `openai`, `gitpython`, `google-auth`, `google-api-python-client`
+- `torch`, `Pillow`, `jsonschema`, etc.
 
-```bash
-# Process all model scripts in a directory
-python main.py process-scripts /path/to/scripts
+---
 
-# Process a single model script
-python main.py process-single-script /path/to/script.py
+### Usage
 
-# Process images in a directory
-python main.py process-images /path/to/images
-
-# Start the user interface
-python main.py start-ui --host localhost --port 8000
-```
-
-## Repository Structure
-
-* `cli_runner/` – Command-line interface runners for various functions
-* `document_processor/` – Code and image parsing, metadata extraction, schema validation
-* `vector_db_manager/` – Text and image embedding, ChromaDB integration, access control
-* `query_engine/` – Query parsing, search dispatching, result reranking, analytics
-* `response_generator/` – LLM interface, template management, prompt visualization
-* `colab_generator/` – Colab notebook creation, API client, reproducibility management
-* `config/` – Configuration files including schema registry
-* `templates/` – Prompt templates for the response generator
-* `chroma_db/` – Storage location for the ChromaDB vector database
-
-## Example Use Cases
-
-- Search: "Find all Transformer models trained on wikitext-103"
-- Compare: "Compare Transformer V1 and V2 on accuracy and training parameters"
-- Browse: "List all photorealistic images generated by Stable Diffusion V2"
-- Generate: "Create a Colab notebook to evaluate Transformer V2"
-
-## Evaluation Metrics
-
-- Retrieval precision and recall
-- Query latency and throughput
-- Prompt effectiveness (conversion rates, response quality)
-- Image search relevance
-- System scalability and resource efficiency
-
-## Security and Access
-
-- Authentication via JWT
-- Role-based access control (RBAC)
-- Access logs and query tracking
-
-## Roadmap Highlights
-
-- Auto-generated model cards
-- MLflow and Weights & Biases integration
-- Model architecture visualization
-- Federated search across repositories
-- Prompt explainability and optimization tools
-
-## Contributing
-
-Contributions are welcome. Please ensure your changes include relevant tests and follow the existing code style.
+Run batch model script processing:
 
 ```bash
-# Run tests
-pytest
-
-# Format code
-black . && isort .
+python run_model_processor.py --directory ./models
 ```
 
-Refer to [CONTRIBUTING.md](CONTRIBUTING.md) for full guidelines.
+This will:
 
-## License
+- Traverse all supported model scripts
+- Parse and chunk using AST
+- Extract structured metadata via LLM
+- Store into multiple vector collections in Chroma
+- Generate Colab notebooks if configured
 
-This project is licensed under the MIT License.
+---
 
-## Contact
+### Folder Structure
 
-For questions, issues, or feature requests, please open an issue or contact the maintainers at [ynyeh0221@gmail.com](mailto:ynyeh0221@gmail.com).
+```bash
+.
+├── colab/                     # Google Colab integration
+├── codegen/                   # Notebook and code generation
+├── processing/                # Script parsing and metadata extraction
+├── vector_db/                 # Chroma and embedding management
+├── schemas/                   # Metadata schema definitions
+├── models/                    # Example model scripts
+├── run_model_processor.py     # Entry point script
+└── README.md
 ```
+
+---
+
+### License
+
+MIT License
+
+---
