@@ -170,13 +170,13 @@ class SearchDispatcher:
             # Define metadata tables to search with their weights
             table_weights = {
                 "model_descriptions": 0.30,
-                "model_architectures": 0.20,
-                "model_frameworks": 0.15,
+                "model_architectures": 0.15,
+                "model_frameworks": 0.05,
                 "model_datasets": 0.15,
-                "model_training_configs": 0.10,
-                "model_date": 0.05,
-                "model_file": 0.03,
-                "model_git": 0.02
+                "model_training_configs": 0.15,
+                "model_date": 0.15,
+                "model_file": 0.05,
+                "model_git": 0.0
             }
 
             # STEP 1: Search all metadata tables in parallel and merge results
@@ -186,7 +186,7 @@ class SearchDispatcher:
             # Create search tasks for all tables
             for table_name in table_weights.keys():
                 if table_name == 'model_descriptions':
-                    search_limit = requested_limit * 10
+                    search_limit = requested_limit
                 else:
                     search_limit = requested_limit
                 search_tasks.append(self.chroma_manager.search(
@@ -233,14 +233,18 @@ class SearchDispatcher:
                             model_results[model_id]['tables'].append(table_name)
 
                         # Update the weighted distance (lower is better)
-                        # We use a weighted average based on table weights
-                        tables = model_results[model_id]['tables']
-                        current_weight_sum = sum(table_weights[t] for t in tables if t in table_weights)
+                        # Calculate previous weight sum (excluding current table)
+                        previous_tables = [t for t in model_results[model_id]['tables'] if t != table_name]
+                        previous_weight_sum = sum(table_weights[t] for t in previous_tables if t in table_weights)
 
-                        if current_weight_sum > 0:  # Avoid division by zero
-                            old_score = model_results[model_id]['distance'] * (current_weight_sum - table_weight)
+                        # Calculate new total weight (including current table)
+                        new_weight_sum = previous_weight_sum + table_weight
+
+                        if new_weight_sum > 0:  # Avoid division by zero
+                            # Calculate weighted average correctly
+                            old_score = model_results[model_id]['distance'] * previous_weight_sum
                             new_score = weighted_distance * table_weight
-                            model_results[model_id]['distance'] = (old_score + new_score) / current_weight_sum
+                            model_results[model_id]['distance'] = (old_score + new_score) / new_weight_sum
                     else:
                         # First time seeing this model, initialize its entry
                         model_results[model_id] = {
@@ -286,15 +290,25 @@ class SearchDispatcher:
                 # If we already have this model, update its match source and distance
                 if model_id in model_results:
                     model_results[model_id]['match_source'] = 'metadata+chunks'
-                    # Chunks are important evidence, so improve score significantly
-                    model_results[model_id]['distance'] = 0.7 * model_results[model_id]['distance'] + 0.3 * (
-                            distance * 0.8)
+                    # Parameters: 0.9, 0.1, 0.9
+                    # Rationale: We significantly favor metadata matches (90%) over chunk matches (10%)
+                    # because metadata provides more structured and reliable information.
+                    # The 0.9 multiplier for chunk distance provides only a slight 10% improvement
+                    # to chunk scores, reflecting our preference for metadata-driven results
+                    # while still acknowledging that chunks provide some additional relevance.
+                    model_results[model_id]['distance'] = 0.9 * model_results[model_id]['distance'] + 0.1 * (distance * 0.9)
                 else:
                     # This is a new model found only in chunks
+                    # Parameter: 0.9
+                    # Rationale: For models found only in chunks, we apply a modest 10% improvement
+                    # to their distance score to slightly boost their ranking, but keep them
+                    # generally lower priority than metadata matches. This balances giving
+                    # chunk-only matches fair consideration while maintaining the primacy
+                    # of metadata in our search algorithm.
                     model_results[model_id] = {
                         'model_id': model_id,
                         'metadata': dict(),
-                        'distance': distance * 0.8,  # Chunk matches are weighted at 80%
+                        'distance': distance * 0.9,
                         'tables': ["chunks"],
                         'match_source': 'chunks'
                     }
@@ -516,22 +530,15 @@ class SearchDispatcher:
 
             # Define metadata tables to search with their relevance weights
             metadata_tables = {
-                "model_descriptions": 0.25,
+                "model_descriptions": 0.30,
                 "model_architectures": 0.15,
-                "model_frameworks": 0.15,
+                "model_frameworks": 0.05,
                 "model_datasets": 0.15,
-                "model_training_configs": 0.15
+                "model_training_configs": 0.15,
+                "model_date": 0.15,
+                "model_file": 0.05,
+                "model_git": 0.0
             }
-
-            # Add date table with higher weight if we have month filters
-            if month_filter:
-                metadata_tables["model_date"] = 0.30  # Higher priority since we're filtering by month
-            else:
-                metadata_tables["model_date"] = 0.10
-
-            # Add remaining tables with lower weights
-            metadata_tables["model_file"] = 0.03
-            metadata_tables["model_git"] = 0.02
 
             # STEP 1: Search all tables in parallel
             search_start = time.time()
@@ -545,7 +552,7 @@ class SearchDispatcher:
                     search_tasks.append(self.chroma_manager.get(
                         collection_name=table_name,
                         where=date_specific_filters,
-                        limit=limit * 5,
+                        limit=limit,
                         include=["metadatas"]
                     ))
                 else:
@@ -554,7 +561,7 @@ class SearchDispatcher:
                         collection_name=table_name,
                         query=query,
                         where=chroma_filters,
-                        limit=limit * 5,
+                        limit=limit,
                         include=["metadatas", "distances"]
                     ))
 
@@ -600,8 +607,19 @@ class SearchDispatcher:
                         # Update model metadata with this table's metadata
                         model_results[model_id]['metadata'].update(metadata)
 
-                        # Add to the relevance score
-                        model_results[model_id]['relevance_score'] += relevance_score
+                        # Use weighted average instead of simple addition for relevance score
+                        # Calculate previous weight and score contribution
+                        previous_tables = [t for t in model_results[model_id]['tables'] if t != table_name]
+                        previous_weight_sum = sum(metadata_tables[t] for t in previous_tables if t in metadata_tables)
+                        current_weight_sum = previous_weight_sum + table_weight
+
+                        if current_weight_sum > 0:  # Avoid division by zero
+                            # Calculate weighted average relevance score
+                            previous_score_contribution = model_results[model_id][
+                                                              'relevance_score'] * previous_weight_sum
+                            new_score_contribution = relevance_score * table_weight
+                            model_results[model_id]['relevance_score'] = (
+                                                                                     previous_score_contribution + new_score_contribution) / current_weight_sum
                     else:
                         # First time seeing this model, initialize its entry
                         model_results[model_id] = {

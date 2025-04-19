@@ -66,14 +66,12 @@ class CrossEncoderReranker:
         try:
             scores = self.model.predict(query_doc_pairs)
 
-            # Normalize rerank scores
-            min_score = min(scores)
-            max_score = max(scores)
-            score_range = max_score - min_score
+            import numpy as np
+            def softmax_normalize(scores, temperature=10.0):
+                exp_scores = np.exp(np.array(scores) / temperature)
+                return exp_scores / np.sum(exp_scores)
 
-            if score_range > 0:
-                normalized_scores = [(s - min_score) / score_range for s in scores]
-                scores = normalized_scores
+            scores = np.array(softmax_normalize(scores))
 
             # Add scores to results
             for i, result in enumerate(results):
@@ -81,6 +79,8 @@ class CrossEncoderReranker:
 
             # Sort by score in descending order
             reranked_results = sorted(results, key=lambda x: x.get("rerank_score", 0), reverse=True)
+
+            print(f"reranked results before filter: {reranked_results}")
 
             # Apply top_k filter if specified
             if top_k is not None and top_k > 0:

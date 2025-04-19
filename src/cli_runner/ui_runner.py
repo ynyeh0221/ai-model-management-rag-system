@@ -193,7 +193,7 @@ class UIRunner:
         self._generate_query_response(query_text, reranked_results, parsed_query, template_manager, llm_interface)
 
     def _process_search_results(self, search_results, reranker, parsed_query, query_text, max_to_return=10,
-                                rerank_threshold=0.3):
+                                rerank_threshold=0.01):
         """
         Process and rerank search results.
 
@@ -218,16 +218,7 @@ class UIRunner:
         items_to_rerank = search_results['items']
         # Loop through each item and add the content field
         for item in items_to_rerank:
-            item['content'] = item.get('merged_description', '') + \
-                              ", created_month: " + item.get("metadata", {}).get('created_month', '') + \
-                              ", created_year: " + item.get("metadata", {}).get('created_year', '') + \
-                              ", last_modified_month: " + item.get("metadata", {}).get('last_modified_month', '') + \
-                              ", last_modified_year: " + item.get("metadata", {}).get('last_modified_year', '') + \
-                              ", file size: " + item.get("metadata", {}).get("file", {}) + \
-                              ", framework: " + item.get("metadata", {}).get('framework', '') + \
-                              ", architecture: " + item.get("metadata", {}).get('architecture', '') + \
-                              ", dateset: " + item.get("metadata", {}).get('dataset', '') + \
-                              ", training_config: " + item.get("metadata", {}).get('training_config', {})
+            item['content'] = item.get('model_id', '') + ", " + item.get('merged_description', '')
 
         if reranker and items_to_rerank:
             print(f"Sending {len(items_to_rerank)} items to reranker")
@@ -252,22 +243,22 @@ class UIRunner:
         from prettytable import PrettyTable, ALL
 
         table = PrettyTable()
-        table.field_names = ["Rank", "Model ID", "Score", "Distance", "Size", "Created", "Modified",
+        table.field_names = ["Rank", "Model ID", "Similarity Score", "Similarity Distance", "Size", "Created", "Modified",
                              "Path", "Description", "Framework", "Arch", "Dataset",
                              "Batch", "LR", "Optimizer", "Epochs", "HW"]
 
         # Align columns
         table.align = "l"  # Default left alignment for all
-        table.align["Rank"] = "c"  # center
-        table.align["Score"] = "r"  # right
+        table.align["Similarity Rank"] = "c"  # center
+        table.align["Similarity Score"] = "r"  # right
         table.align["Size"] = "r"  # right align file size
 
         # Set max width for columns - optimized for 15-inch laptop
         max_width = {
             "Rank": 4,
             "Model ID": 15,
-            "Score": 6,
-            "Distance": 6,
+            "Similarity Score": 6,
+            "Similarity Distance": 6,
             "Size": 7,
             "Created": 10,
             "Modified": 10,
