@@ -159,6 +159,25 @@ When a user submits a query through the CLI interface (`UIRunner`), the system f
 
 ---
 
+### Technology Stack
+
+| Category          | Tools / Libraries |
+|-------------------|------------------|
+| Language          | Python 3.9+, JavaScript (React) |
+| Backend           | FastAPI / Flask |
+| Frontend          | React, Tailwind CSS, Zustand |
+| Vector Search     | ChromaDB, FAISS, SQLite |
+| Embeddings        | SentenceTransformers, OpenCLIP |
+| LLM Integration   | LangChain, LLaMA, Deepseek-llm |
+| Image Processing  | Pillow, OpenCLIP |
+| Notebooks         | nbformat, Papermill, Google Colab API |
+| Visualization     | Matplotlib, Plotly |
+| Monitoring        | Prometheus, Grafana, OpenTelemetry |
+| Logging           | Elasticsearch, Kibana |
+| Access Control    | JWT, Role-Based Access Control (RBAC) |
+
+---
+
 ### Example
 
 ```bash
