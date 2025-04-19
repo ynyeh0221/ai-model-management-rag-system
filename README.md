@@ -56,6 +56,7 @@ Each piece of metadata is stored as a document in a dedicated vector collection:
 | `model_datasets`         | Dataset references             | `{"name": "CIFAR-10"}`                 |
 | `model_training_configs` | Training configuration         | Optimizer, epochs, batch size, etc.    |
 | `model_descriptions`     | LLM-generated text summaries   | Concise explanation of each code chunk |
+| `model_ast_summaries`    | Model AST digest summaries     | Concise explanation of code            |
 | `model_scripts_chunks`   | Code snippets and AST sections | Actual Python source segments          |
 
 ---
