@@ -14,7 +14,7 @@ class TextEmbedder:
     of text and code for semantic search and comparison.
     """
 
-    def __init__(self, model_name="all-MiniLM-L6-v2", device=None, cache_folder=None):
+    def __init__(self, model_name="BAAI/bge-m3", device=None, cache_folder=None):
         """
         Initialize the TextEmbedder with a specific model.
 

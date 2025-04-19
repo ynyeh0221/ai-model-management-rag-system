@@ -236,6 +236,35 @@
       "updated_date": "2025-04-17T00:00:00"
     },
     {
+      "schema_id": "model_ast_summaries_schema",
+      "schema_version": "1.0.0",
+      "schema_definition": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "content": {"type": "string"},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model_id": {"type": "string"},
+              "ast_summary": {
+                "type": "object",
+                "properties": {
+                  "ast_summary": {"type": ["string", "null"]}
+                },
+                "required": ["ast_summary"]
+              },
+              "access_control": {"type": "object"}
+            },
+            "required": ["model_id", "ast_summary"]
+          }
+        },
+        "required": ["id", "content", "metadata"]
+      },
+      "description": "Schema for model AST summary information",
+      "updated_date": "2025-04-19T00:00:00"
+    },
+    {
       "schema_id": "model_chunk_schema",
       "schema_version": "1.0.0",
       "schema_definition": {

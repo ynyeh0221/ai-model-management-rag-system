@@ -303,7 +303,19 @@ class ScriptProcessorRunner:
                 }
             },
 
-            "model_descriptions": []  # List of chunk descriptions
+            # 8. Model descriptions information
+            "model_descriptions": [],  # List of chunk descriptions
+
+            # 9. Model AST summaries information
+            "model_ast_summaries": {
+                "id": f"model_ast_summaries_{model_id}",
+                "$schema_version": "1.0.0",
+                "content": f"Model AST summaries: {model_id}",
+                "metadata": {
+                    "model_id": model_id,
+                    "ast_summary": llm_fields["ast_summary"]
+                }
+            }
         }
 
         # Add all model_descriptions documents
@@ -338,7 +350,8 @@ class ScriptProcessorRunner:
             "framework": parse_result.get("framework", {}),
             "architecture": parse_result.get("architecture", {}),
             "dataset": parse_result.get("dataset", {}),
-            "training_config": parse_result.get("training_config", {})
+            "training_config": parse_result.get("training_config", {}),
+            "ast_summary": parse_result.get("ast_summary", {})
         }
 
         # Ensure all fields are the correct type
@@ -350,15 +363,16 @@ class ScriptProcessorRunner:
             llm_fields["dataset"] = {"name": llm_fields["dataset"]}
         if not isinstance(llm_fields["training_config"], dict):
             llm_fields["training_config"] = {}
+        if isinstance(llm_fields["ast_summary"], str):
+            llm_fields["ast_summary"] = {"ast_summary": llm_fields["ast_summary"]}
 
         return llm_fields
 
     def _validate_and_store_metadata_documents(self, schema_validator, metadata_documents, text_embedder,
                                                chroma_manager, access_control):
         """Validate and store metadata documents in different tables."""
-        success = True
         critical_failure = False
-        critical_collections = ["model_file", "model_architectures", "model_frameworks"]
+        critical_collections = ["model_file", "model_architectures", "model_frameworks", "model_descriptions", "model_ast_summaries"]
 
         for key, value in metadata_documents.items():
             documents = value if isinstance(value, list) else [value]
@@ -366,17 +380,12 @@ class ScriptProcessorRunner:
             for document in documents:
                 doc_id = document.get("id", "")
 
-                if key == "model_descriptions":
-                    collection_name = "model_descriptions"
-                    schema_id = "model_descriptions_schema"
-                else:
-                    collection_name = key
-                    schema_id = f"{key}_schema"
+                collection_name = key
+                schema_id = f"{key}_schema"
 
                 if not collection_name or not schema_id:
                     logging.warning(
                         f"Could not determine collection name or schema ID for document {doc_id}. Skipping.")
-                    success = False
                     continue
 
                 try:
@@ -386,13 +395,11 @@ class ScriptProcessorRunner:
                             f"Schema validation failed for {schema_id} document: {validation_result['errors']}")
                         if collection_name in critical_collections:
                             critical_failure = True
-                        success = False
                         continue
                 except ValueError as e:
                     logging.error(f"Schema validation error for {doc_id}: {str(e)}")
                     if collection_name in critical_collections:
                         critical_failure = True
-                    success = False
                     continue
 
                 access_metadata = access_control.get_document_permissions(document)
@@ -405,7 +412,6 @@ class ScriptProcessorRunner:
                     logging.error(f"Error creating embedding for document {doc_id}: {str(e)}")
                     if collection_name in critical_collections:
                         critical_failure = True
-                    success = False
                     continue
 
                 try:
@@ -419,7 +425,6 @@ class ScriptProcessorRunner:
                     logging.error(f"Error storing document {doc_id} in collection {collection_name}: {str(e)}")
                     if collection_name in critical_collections:
                         critical_failure = True
-                    success = False
 
         return not critical_failure
 
@@ -528,6 +533,16 @@ class ScriptProcessorRunner:
                     Description: {description}
                     Offset: {metadata.get('offset', -999)}.
                 """
+            }
+
+        elif doc_type == "model_ast_summary":
+            ast_summary = metadata.get("ast_summary", "No ast_summary available")
+
+            return {
+                "title": f"AST summary information for {model_id}",
+                "description": f"""
+                                AST summary type: {ast_summary.get('type', 'N/A')}.
+                            """
             }
 
         # Default case

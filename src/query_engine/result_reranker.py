@@ -152,7 +152,7 @@ class DenseReranker:
     Can be used with models like SBERT, DPR, or other bi-encoders.
     """
 
-    def __init__(self, model_name: str = "all-MiniLM-L6-v2", device: str = "cpu"):
+    def __init__(self, model_name: str = "BAAI/bge-m3", device: str = "cpu"):
         """
         Initialize the dense reranker with a bi-encoder model.
 

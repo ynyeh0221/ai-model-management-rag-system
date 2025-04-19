@@ -195,6 +195,14 @@ class ChromaManager:
                         "total_chunks": "number",
                         "offset": "number"
                     }
+                },
+                "model_ast_summaries": {
+                    "description": "Collection for model AST summary information",
+                    "embedding_function": self.text_embedding_function,
+                    "metadata_schema": {
+                        "model_id": "string",
+                        "ast_summary": "string"
+                    }
                 }
             }
 

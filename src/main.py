@@ -37,7 +37,7 @@ def initialize_components(config_path="./config"):
     image_processor = ImageProcessor(schema_validator)
     
     # Initialize vector database components
-    text_embedder = TextEmbedder()
+    text_embedder = TextEmbedder(device="mps")
     image_embedder = ImageEmbedder()
     chroma_manager = ChromaManager(text_embedder, image_embedder, "./chroma_db")
     access_control = AccessControlManager(chroma_manager)
