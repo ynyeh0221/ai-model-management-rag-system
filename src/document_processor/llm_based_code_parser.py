@@ -3,6 +3,7 @@ import datetime
 import json
 import os
 import re
+from typing import List
 
 from git import Repo
 
@@ -92,7 +93,7 @@ class LLMBasedCodeParser:
         with open(file_path, "r", encoding="utf-8") as f:
             file_content = f.read()
 
-        self.llm_metadata_cache = self._extract_llm_metadata(file_content, max_retries=15)
+        self.llm_metadata_cache = self._extract_llm_metadata(file_content, file_path, max_retries=15)
 
         model_info = {
             "creation_date": self._get_creation_date(file_path),
@@ -163,10 +164,12 @@ class LLMBasedCodeParser:
         print(f"updated model_info: {model_info}")
         return model_info
 
+    import ast
+
     def generate_ast_summary(self, code_str: str, file_path: str = "<unknown>") -> str:
         """
-        Parse code using AST and generate a human-readable digest of the code structure,
-        including *all* variable assignments and layer definitions for nn.Module subclasses.
+        Parse code using AST and generate a human-readable digest of the code structure.
+        Now also picks up layer definitions and logs their key dims.
         """
         try:
             tree = ast.parse(code_str, filename=file_path)
@@ -176,11 +179,6 @@ class LLMBasedCodeParser:
         lines = []
 
         class CodeSummaryVisitor(ast.NodeVisitor):
-            def __init__(self):
-                super().__init__()
-                self.current_bases = []
-                self.in_init = False
-
             def visit_Import(self, node):
                 names = [alias.name for alias in node.names]
                 lines.append(f"Import: {', '.join(names)}")
@@ -190,60 +188,69 @@ class LLMBasedCodeParser:
                 names = [alias.name for alias in node.names]
                 lines.append(f"From {module} import {', '.join(names)}")
 
+            def visit_Assign(self, node):
+                # find simple name targets
+                targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+                # try to pretty-print the right-hand side
+                try:
+                    expr = ast.unparse(node.value)
+                except Exception:
+                    expr = "<complex_expression>"
+
+                # 1) existing vars of interest
+                for t in targets:
+                    if any(k in t.lower() for k in ["batch", "lr", "epoch", "optimizer", "device", "model", "train"]):
+                        lines.append(f"Variable: {t} = {expr}")
+
+                # 2) catch layer instantiations: e.g. self.fc1 = nn.Linear(128, 64)
+                if isinstance(node.value, ast.Call):
+                    func = node.value.func
+                    # get fully-unparsed call name
+                    call_name = ast.unparse(func)
+                    # crude filter: module attribute or capitalized name
+                    is_layer = (
+                            (isinstance(func, ast.Attribute) and func.attr and func.attr[0].isupper())
+                            or (isinstance(func, ast.Name) and func.id[0].isupper())
+                    )
+                    if targets and is_layer:
+                        # extract positional args (e.g. in/out features)
+                        args = []
+                        for arg in node.value.args:
+                            try:
+                                args.append(ast.unparse(arg))
+                            except Exception:
+                                args.append("?")
+                        # extract key keywords like in_channels, out_channels, etc.
+                        for kw in node.value.keywords:
+                            key = kw.arg or ""
+                            try:
+                                val = ast.unparse(kw.value)
+                            except Exception:
+                                val = "?"
+                            args.append(f"{key}={val}")
+                        # keep it short: only first two args + any keywords
+                        short_args = ", ".join(args[:2] + args[2:])
+                        lines.append(f"Layer: {targets[0]} = {call_name}({short_args})")
+
             def visit_ClassDef(self, node):
-                # record base classes for module detection
-                bases = [getattr(b, 'id', getattr(b, 'attr', 'object')) for b in node.bases]
-                self.current_bases = bases
+                bases = [getattr(b, "id", getattr(b, "attr", "object")) for b in node.bases]
+                docstring = ast.get_docstring(node)
                 lines.append(f"\nClass: {node.name} (inherits from {', '.join(bases)})")
-                doc = ast.get_docstring(node)
-                if doc:
-                    lines.append(f"  Docstring: {doc.strip()}")
-                # visit methods and inner assigns
-                for child in node.body:
-                    self.visit(child)
-                self.current_bases = []
+                if docstring:
+                    lines.append(f"  Docstring: {docstring.strip()}")
 
             def visit_FunctionDef(self, node):
-                prev_init = self.in_init
-                if node.name == "__init__" and any(b.endswith("Module") for b in self.current_bases):
-                    self.in_init = True
-
                 args = [arg.arg for arg in node.args.args]
-                defaults = [ast.unparse(d) for d in node.args.defaults]
+                defaults = [
+                    ast.unparse(d) if hasattr(ast, "unparse") else repr(d)
+                    for d in node.args.defaults
+                ]
                 pad = [None] * (len(args) - len(defaults))
-                arg_list = [f"{a}={d}" if d else a for a, d in zip(args, pad + defaults)]
-                lines.append(f"\nFunction: {node.name}({', '.join(arg_list)})")
-                doc = ast.get_docstring(node)
-                if doc:
-                    lines.append(f"  Docstring: {doc.strip()}")
-
-                for child in node.body:
-                    self.visit(child)
-                self.in_init = prev_init
-
-            def visit_Assign(self, node):
-                # capture layers inside nn.Module.__init__
-                if self.in_init:
-                    for target in node.targets:
-                        if (isinstance(target, ast.Attribute)
-                                and isinstance(target.value, ast.Name)
-                                and target.value.id == "self"):
-                            name = target.attr
-                            try:
-                                val = ast.unparse(node.value)
-                            except Exception:
-                                val = "<complex_expression>"
-                            lines.append(f"Layer: self.{name} = {val}")
-                            return
-                # capture all other top‑level assigns as Variables
-                for target in node.targets:
-                    if isinstance(target, ast.Name):
-                        name = target.id
-                        try:
-                            val = ast.unparse(node.value)
-                        except Exception:
-                            val = "<complex_expression>"
-                        lines.append(f"Variable: {name} = {val}")
+                arg_pairs = [f"{a}={d}" if d else a for a, d in zip(args, pad + defaults)]
+                docstring = ast.get_docstring(node)
+                lines.append(f"\nFunction: {node.name}({', '.join(arg_pairs)})")
+                if docstring:
+                    lines.append(f"  Docstring: {docstring.strip()}")
 
         visitor = CodeSummaryVisitor()
         visitor.visit(tree)
@@ -270,7 +277,7 @@ class LLMBasedCodeParser:
         print(f"Summary from AST digest: {summary}")
 
         # STEP 3: Feed merged summary to LLM for structured metadata generation
-        final = self.generate_metadata_from_summary(ast_digest, max_retries=max_retries)
+        final = self.generate_metadata_from_summary(ast_digest, max_retries=max_retries, file_path=file_path)
         final['chunk_descriptions'] = self.split_summary_into_chunks(summary_text=summary.get("summary", ""), overlap_lines=0, max_lines_per_chunk=50)
         print(f"Chunk descriptions count: {len(final['chunk_descriptions'])}")
 
@@ -290,28 +297,18 @@ class LLMBasedCodeParser:
             return {}
 
         system_prompt = (
-            "You are a knowledgeable software‑engineer assistant specialized in reading AST‑based code summaries "
-            "and translating them into clear, human‑friendly explanations of what the code does. "
-            "You will be given an AST summary of a Python file, listing every import, class, function, "
-            "and variable or layer assignment (including `self.xxx = …` in `__init__`). Your task is to:\n"
-            "1. Convert each line into a descriptive sentence or paragraph.\n"
-            "2. Include every element exactly—do not skip or omit any imports, classes, functions, variables, or layers.\n"
-            "3. Group related items in this order: Imports, Variables, Classes, Functions, Model Architecture, Forward Pass.\n"
-            "4. Preserve names verbatim but explain their role (e.g. “`optimizer` is set to `Adam(lr=0.001)`, which…”).\n"
-            "5. If a docstring appears on a class or function, include it verbatim immediately after its header as:\n"
-            "     This class/function does: <docstring>\n"
-            "6. If an expression is marked <complex_expression>, say “A complex expression was assigned: <complex_expression>.”\n"
-            "7. **Imports:** List each `Import:` or `From … import:` line exactly as it appears, one per bullet.\n"
-            "8. **Variables:** Immediately after Imports, list every `Variable:` line as “<name> = <value>” plus a one‑sentence purpose.\n"
-            "9. **Model Architecture:** For each `Layer: self.<name> = <Ctor>(…)` in an `nn.Module`:\n"
-            "     • **Name & type:** `<name>: <Ctor>(…)`\n"
-            "     • **Constructor args unpacked:** e.g. `in_channels=1, out_channels=embed_dim, kernel_size=4, stride=4`\n"
-            "     • **Tensor shape transformation:** e.g. `(batch, 1, 28, 28) → (batch, embed_dim, 7, 7)`\n"
-            "10. **Forward Pass:** Provide a numbered list of each operation, in the same order as the Layers list, with exact input→output tensor shapes, for example:\n"
-            "     1. Embed labels: (batch,) → (batch, embed_dim)\n"
-            "     2. Conv reduce + BatchNorm + ReLU: (batch,1,28,28) → (batch,embed_dim,7,7)\n"
-            "     3. …\n\n"
-            "Return your result as a cohesive, well‑structured report with clear headings and bullet points or numbered steps for maximum readability."
+            "You are an expert machine‑learning metadata extractor. "
+            "You will receive a structured AST‑based summary of a Python ML script. "
+            "From that summary, identify **only** the metadata explicitly mentioned, including:\n"
+            "- What the model is designed to do (its purpose)\n"
+            "- Framework (e.g. PyTorch, TensorFlow) and version, if given\n"
+            "- Neural network architecture (Transformer, CNN, etc.)\n"
+            "- Components and their layers: layer types with their input/output dimensions\n"
+            "- Dataset name(s)\n"
+            "- Training setup: batch size, learning rate, optimizer, number of epochs\n"
+            "- Hardware or device information\n\n"
+            "Then compose a coherent, detailed natural‑language description of the model, its architecture (including each component and layer dimensions), "
+            "and its training configuration. Use clear, concise prose, and include every piece of metadata you can extract from the input."
         )
 
         for attempt in range(max_retries):
@@ -351,30 +348,6 @@ class LLMBasedCodeParser:
         # Join lines back with a single newline
         return '\n'.join(cleaned)
 
-    def truncate_string(self, s, threshold):
-        return s[:threshold] if len(s) > threshold else s
-
-    def merge_chunk_summaries(self, chunk_summaries: list) -> str:
-        """Merge multiple chunk summaries into a single comprehensive summary."""
-        if not chunk_summaries:
-            return "No metadata information found in the code."
-
-        # Extract all summaries
-        summaries = [chunk.get("summary", "") for chunk in chunk_summaries if chunk.get("summary")]
-
-        # Remove duplicates and empty strings
-        unique_summaries = []
-        for summary in summaries:
-            if summary and summary not in unique_summaries and summary != "No relevant metadata found in this code chunk.":
-                unique_summaries.append(self.clean_empty_lines(summary))
-
-        if not unique_summaries:
-            return "No useful metadata found in the code."
-
-        # Combine the summaries into a single document
-        merged_summary = self.truncate_string("Combined Code Analysis Summary:\n" + "\n".join(unique_summaries), 12000) # 4,096 tokens ≈ 16,384 characters
-        return merged_summary
-
     def sanitize_json_string(self, json_str: str) -> str:
         # Remove JS-style comments
         json_str = re.sub(r"//.*?$", "", json_str, flags=re.MULTILINE)
@@ -382,10 +355,51 @@ class LLMBasedCodeParser:
         json_str = re.sub(r",(\s*[}\]])", r"\1", json_str)
         return json_str
 
-    def generate_metadata_from_summary(self, merged_summary: str, max_retries: int = 3) -> dict:
+    def filter_ast_summary_for_metadata(self, summary: str) -> str:
+        """
+        Given the output of generate_ast_summary(), return only the lines that
+        contain:
+          - Docstrings      (model description)
+          - Import / From   (framework & dataset)
+          - Class           (architecture type)
+          - Layer           (component + dims)
+          - Variable        (batch_size, lr, optimizer, epochs, device)
+        """
+        lines = summary.splitlines()
+        filtered: List[str] = []
+        # what prefixes we always keep
+        keep_prefixes = ("Docstring:", "Import:", "From ", "Class:", "Layer:")
+        # which variable names to keep
+        var_keys = ("batch", "lr", "epoch", "optimizer", "device")
+
+        for line in lines:
+            stripped = line.strip()
+            # always keep these kinds of lines
+            if any(stripped.startswith(pref) for pref in keep_prefixes):
+                filtered.append(stripped)
+                continue
+
+            # selectively keep Variable: lines
+            if stripped.startswith("Variable:"):
+                # extract the var name before the '='
+                m = re.match(r"Variable:\s*([^=]+)", stripped)
+                if m:
+                    varname = m.group(1).strip().lower()
+                    if any(key in varname for key in var_keys):
+                        filtered.append(stripped)
+
+        return "\n".join(filtered)
+
+    def generate_metadata_from_summary(self, summary: str, max_retries: int = 3, file_path: str = "<unknown>") -> dict:
         """Generate structured JSON metadata from the merged summary."""
         if not self.llm_interface:
             return self._create_default_metadata()
+
+        # Reduce input size of LLM
+        print(f"len(summary): {len(summary)}, file_path: {file_path}")
+        if len(summary) >= 2000:
+            summary = self.filter_ast_summary_for_metadata(summary)
+            print(f"len(extracted_summary): {len(summary)}, file_path: {file_path}")
 
         system_prompt = (
             "You are a metadata extractor for machine learning code. "
@@ -422,7 +436,7 @@ class LLMBasedCodeParser:
                 user_prompt = f"""
                 Here is the model AST digest summary:
 
-                {merged_summary}
+                {summary}
 
                 Extract the metadata JSON as specified above.
                 """
@@ -442,13 +456,13 @@ class LLMBasedCodeParser:
                         if self._validate_metadata_structure(parsed):
                             return parsed
                         else:
-                            print(f"[Retry {attempt + 1}] Invalid metadata structure.")
+                            print(f"[Retry {attempt + 1}] Invalid metadata structure, file_path: {file_path}")
                     except json.JSONDecodeError:
-                        print(f"[Retry {attempt + 1}] Invalid JSON format.")
+                        print(f"[Retry {attempt + 1}] Invalid JSON format, file_path: {file_path}")
                 else:
-                    print(f"[Retry {attempt + 1}] No valid JSON object found in LLM response.")
+                    print(f"[Retry {attempt + 1}] No valid JSON object found in LLM response, file_path: {file_path}")
             except Exception as e:
-                print(f"[Retry {attempt + 1}] Metadata generation failed: {e}")
+                print(f"[Retry {attempt + 1}] Metadata generation failed: {e}, file_path: {file_path}")
 
         # After all retries, return default metadata
         return self._create_default_metadata()
