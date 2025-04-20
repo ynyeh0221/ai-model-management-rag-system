@@ -270,7 +270,7 @@ class LLMBasedCodeParser:
         print(f"Summary from AST digest: {summary}")
 
         # STEP 3: Feed merged summary to LLM for structured metadata generation
-        final = self.generate_metadata_from_summary(summary.get("summary", "") + ", " + ast_digest, max_retries=max_retries)
+        final = self.generate_metadata_from_summary(ast_digest, max_retries=max_retries)
         final['chunk_descriptions'] = self.split_summary_into_chunks(summary_text=summary.get("summary", ""), overlap_lines=0, max_lines_per_chunk=50)
         print(f"Chunk descriptions count: {len(final['chunk_descriptions'])}")
 
@@ -388,44 +388,39 @@ class LLMBasedCodeParser:
             return self._create_default_metadata()
 
         system_prompt = (
-            "You are a metadata extractor for machine‑learning code. "
-            "Based on the following code‑analysis summary, create a structured representation "
-            "of the model metadata.\n\n"
-
-            "Return **exactly** this JSON with the placeholders replaced by real values. "
-            "If you cannot confidently determine a value, write “unknown” (or null for numerics):\n"
+            "You are a metadata extractor for machine learning code. "
+            "Based on the following model AST digest summary, create a structured representation of the model metadata.\n\n"
+            "The output **must strictly follow this exact JSON structure**:\n"
             "{\n"
-            '  "description": "___",\n'
-            '  "framework": { "name": "___", "version": "___" },\n'
-            '  "architecture": { "type": "___" },\n'
-            '  "dataset": { "name": "___" },\n'
+            '  "description": "Short summary of what the model does",\n'
+            '  "framework": { "name": "...", "version": "..." },\n'
+            '  "architecture": { "type": "..." },\n'
+            '  "dataset": { "name": "..." },\n'
             '  "training_config": {\n'
-            '    "batch_size": ___,\n'
-            '    "learning_rate": ___,\n'
-            '    "optimizer": "___",\n'
-            '    "epochs": ___,\n'
-            '    "hardware_used": "___"\n'
+            '    "batch_size": 32,\n'
+            '    "learning_rate": 0.001,\n'
+            '    "optimizer": "Adam",\n'
+            '    "epochs": 10,\n'
+            '    "hardware_used": "GPU"\n'
             '  }\n'
             "}\n\n"
-
             "Extraction hints:\n"
             "• **framework.name**: look for imports like `import torch` or `import tensorflow`; default to “unknown”.\n"
-            "• **framework.version**: look for `torch.__version__`, `tf.__version__`, etc.; default “unknown”.\n"
-            "• **architecture.type**: look for class names or keywords (e.g. “Transformer”, “CNN”); default “unknown”.\n"
-            "• **dataset.name**: look for dataset identifiers (e.g. “FashionMNIST”); default “unknown”.\n"
-            "• **batch_size**: look for `batch_size=` in a DataLoader; default null.\n"
-            "• **learning_rate**: look for `lr=` or phrases like “learning rate”; default null.\n"
-            "• **optimizer**: look for optimizer names (Adam, SGD, RMSprop); default “unknown”.\n"
-            "• **epochs**: look for `epochs =` or a loop over epochs; default null.\n"
-            "• **hardware_used**: detect device settings (`cuda`, `mps`, `cpu`) → “GPU”, “CPU”, or “Both”; default “unknown”.\n\n"
-
+            "• **framework.version**: look for `torch.__version__` or similar; else “unknown”.\n"
+            "• **architecture.type**: look for class names or keywords (e.g. “Transformer”, “CNN”); else “unknown”.\n"
+            "• **dataset.name**: look for dataset identifiers (e.g. “FashionMNIST”); else “unknown”.\n"
+            "• **batch_size**: look for `batch_size=` in DataLoader; else null.\n"
+            "• **learning_rate**: look for `lr=` or “learning rate”; else null.\n"
+            "• **optimizer**: look for optimizer names (Adam, SGD); else “unknown”.\n"
+            "• **epochs**: look for `epochs =`; else null.\n"
+            "• **hardware_used**: look for device settings (`cuda`, `mps`, `cpu`); map to “GPU”, “CPU” or “Both”; else “unknown”.\n\n"
             "🚨 **Output ONLY** the JSON object—no commentary, no markdown."
         )
 
         for attempt in range(max_retries):
             try:
                 user_prompt = f"""
-                Here is the merged code analysis summary:
+                Here is the model AST digest summary:
 
                 {merged_summary}
 

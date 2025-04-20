@@ -251,7 +251,7 @@ class SearchDispatcher:
         # Create search tasks for all tables
         for table_name in table_weights.keys():
             if table_name == 'model_descriptions':
-                search_limit = requested_limit * 5
+                search_limit = requested_limit * 7
             else:
                 search_limit = requested_limit
             search_tasks.append(self.chroma_manager.search(
