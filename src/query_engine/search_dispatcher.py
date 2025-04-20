@@ -826,86 +826,68 @@ class SearchDispatcher:
 
     async def handle_comparison(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle a comparison query for multiple models.
-
-        Args:
-            query: The processed query text
-            parameters: Dictionary of extracted parameters
-
-        Returns:
-            Dictionary containing comparison results
+        Handle a comparison query for multiple models by first retrieving full metadata
+        for each model using the metadata search flow, then performing dimension-based comparisons.
+        Returns output in the same format as handle_metadata_search.
         """
-        self.logger.debug(f"Handling comparison: {parameters}")
+        self.logger.debug(f"Handling comparison (metadata search flow): {parameters}")
         start_time = time.time()
 
-        try:
-            # Get user_id from parameters for access control
-            user_id = parameters.get('user_id')
+        # Extract model IDs to compare
+        model_ids = parameters.get('filters', {}).get('model_id', [])
+        if not model_ids or len(model_ids) < 2:
+            raise ValueError("Comparison requires at least two model IDs")
 
-            # Get model IDs to compare
-            model_ids = parameters.get('model_ids', [])
-            if not model_ids or len(model_ids) < 2:
-                raise ValueError("Comparison requires at least two model IDs")
+        # Use metadata search flow to fetch complete metadata for these model_ids
+        user_id, _, _ = self._extract_text_search_parameters(parameters)
+        table_weights = self._get_metadata_table_weights()
+        chroma_filters = {"model_id": {"$in": model_ids}}
 
-            # Get comparison dimensions
-            dimensions = parameters.get('comparison_dimensions', ['architecture', 'performance'])
+        # STEP 1 & 2: Search metadata tables and fetch complete metadata
+        all_results = await self._search_all_metadata_tables(
+            query="", chroma_filters=chroma_filters,
+            requested_limit=len(model_ids), table_weights=table_weights,
+            user_id=user_id
+        )
+        all_results = await self._fetch_complete_model_metadata(
+            query="", all_results=all_results,
+            table_weights=table_weights, user_id=user_id
+        )
+        all_results = await self._process_model_descriptions_text_search(
+            query="", all_results=all_results
+        )
 
-            # Fetch model data in parallel with access control
-            tasks = []
-            for model_id in model_ids:
-                tasks.append(self._fetch_model_data(model_id, dimensions, user_id))
+        # Prepare items list
+        items = []
+        for rank, model_id in enumerate(model_ids, start=1):
+            data = all_results.get(model_id, {})
+            metadata = data.get('metadata', {})
+            items.append({
+                'id': f"model_metadata_{model_id}",
+                'model_id': model_id,
+                'metadata': metadata,
+                'rank': rank,
+                'match_source': data.get('match_source', 'unknown'),
+                'distance': data.get('distance', 2.0),
+                'merged_description': data.get('merged_description', '')
+            })
 
-            model_data_list = await asyncio.gather(*tasks)
+        total_found = len(items)
+        total_models = len(all_results)
+        total_time_ms = (time.time() - start_time) * 1000
 
-            # Filter out models the user doesn't have access to
-            accessible_models = [model for model in model_data_list if model.get('found', False)]
+        performance_metrics = {
+            'total_time_ms': total_time_ms
+        }
 
-            # Check if we still have enough models to compare
-            if len(accessible_models) < 2:
-                raise ValueError("Need at least two accessible models to perform comparison")
-
-            # Process comparison data
-            comparison_results = {
-                'models': {},
-                'dimensions': {},
-                'summary': {}
-            }
-
-            # Organize by model
-            for model_data in accessible_models:
-                model_id = model_data.get('model_id', 'unknown')
-                comparison_results['models'][model_id] = model_data
-
-            # Organize by dimension
-            for dimension in dimensions:
-                comparison_results['dimensions'][dimension] = {}
-                for model_id, model_data in comparison_results['models'].items():
-                    comparison_results['dimensions'][dimension][model_id] = model_data.get(dimension, {})
-
-            # Generate performance comparisons
-            if 'performance' in dimensions and len(accessible_models) >= 2:
-                perf_comparisons = self._generate_performance_comparisons(accessible_models)
-                comparison_results['summary']['performance'] = perf_comparisons
-
-            # Generate architecture comparisons if applicable
-            if 'architecture' in dimensions and len(accessible_models) >= 2:
-                arch_comparisons = self._generate_architecture_comparisons(accessible_models)
-                comparison_results['summary']['architecture'] = arch_comparisons
-
-            return {
-                'success': True,
-                'type': 'comparison',
-                'models': [model.get('model_id') for model in accessible_models],
-                'dimensions': dimensions,
-                'results': comparison_results,
-                'performance': {
-                    'total_time_ms': (time.time() - start_time) * 1000
-                }
-            }
-
-        except Exception as e:
-            self.logger.error(f"Error in comparison: {e}", exc_info=True)
-            raise
+        return {
+            'success': True,
+            'type': 'comparison',
+            'items': items,
+            'total_found': total_found,
+            'total_models': total_models,
+            'performance': performance_metrics
+        }
 
     async def handle_notebook_request(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """

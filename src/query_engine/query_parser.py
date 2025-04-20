@@ -99,7 +99,7 @@ class QueryParser:
 
                 IMPORTANT:
                 - Do NOT classify a query as 'comparison' just because it includes a dataset name like "CIFAR" or "ImageNet".
-                - If the query includes a dataset name, treat it as 'retrieval' unless there's a clear comparison between models.
+                - If the query contains the word "compare", "versus", "vs", or synonyms *and* mentions two models, you *must* choose 'comparison'.
                 - Do not treat dataset names (CIFAR, MNIST, etc.) as model identifiers.
                 - If a query includes time references like "created in April", "models from 2022", or "last modified in March", classify it as **metadata**.
 
@@ -257,7 +257,7 @@ class QueryParser:
         }
 
         # Parameter extraction patterns
-        self.model_id_pattern = r"(model[_-]?id|model)[:\s]+([a-zA-Z0-9_-]+)"
+        self.model_id_pattern = r"\bmodel(?:[-\s]?id)\s*[:=]?\s*([A-Za-z0-9._-]+)\b"
         self.metric_pattern = r"(accuracy|loss|perplexity|clip[_-]?score|performance|precision|recall|f1|mae|mse|rmse)"
 
         self.filter_patterns = {
@@ -567,34 +567,16 @@ class QueryParser:
             "diffusion", "autoencoder", "bert", "gpt"
         }
 
+        model_id_pattern = re.compile(
+            self.model_id_pattern,
+            flags=re.IGNORECASE
+        )
         # Try to extract explicit model_id mentions
-        for match in re.finditer(self.model_id_pattern, query_text.lower()):
-            model_id = match.group(2)
+        for match in model_id_pattern.finditer(query_text):
+            model_id = match.group(1)  # e.g. "Multiplication_scriptRNN_ReversedInputString"
             if model_id.lower() not in GENERIC_ARCH and model_id.lower() not in COMMON_DATASETS:
                 model_ids.append(model_id)
-
-        # Handle "<name> model" patterns
-        model_suffix_pattern = r'(\w+)\s+model\b'
-        for match in re.finditer(model_suffix_pattern, query_text.lower()):
-            model_id = match.group(1)
-            if model_id.lower() not in GENERIC_ARCH and model_id.lower() not in COMMON_DATASETS:
-                model_ids.append(model_id)
-
-        # Named entity recognition fallback
-        doc = self.nlp(query_text)
-        for ent in doc.ents:
-            if ent.label_ in ["ORG", "PRODUCT"] and ent.text.lower() not in COMMON_DATASETS:
-                model_ids.append(ent.text)
-
-        # Check for model family keywords
-        for family in self.model_families:
-            if family.lower() in COMMON_DATASETS:
-                continue
-            matches = re.finditer(r'\b' + re.escape(family) + r'[-_]?(\d+|v\d+)?\b', query_text.lower())
-            for match in matches:
-                model_id = match.group(0)
-                if model_id.lower() not in GENERIC_ARCH and model_id.lower() not in COMMON_DATASETS:
-                    model_ids.append(model_id)
+        print(f"Extracted model id(s) {model_ids} from query {query_text}")
 
         # Deduplicate
         return list(set(model_ids))
