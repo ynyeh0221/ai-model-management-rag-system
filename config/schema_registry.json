@@ -297,11 +297,86 @@
       "schema_version": "1.0.0",
       "schema_definition": {
         "type": "object",
-        "properties": {},
-        "required": []
+        "properties": {
+          "id": {"type": "string"},
+          "$schema_version": {"type": "string"},
+          "content": {"type": ["string", "null"]},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model_id": {"type": "string"},
+              "epoch": {"type": ["integer", "null"]},
+              "description": {"type": ["string", "null"]},
+              "image_content": {
+                "type": "object",
+                "properties": {
+                  "subject_type": {
+                    "type": ["string", "null"],
+                    "description": "Primary subject of the image (e.g., person, animal, object, scene, text)"
+                  },
+                  "subject_details": {
+                    "type": ["object", "null"],
+                    "description": "Additional details about the subject",
+                    "additionalProperties": true
+                  },
+                  "scene_type": {
+                    "type": ["string", "null"],
+                    "description": "Type of scene (e.g., indoor, outdoor, abstract)"
+                  },
+                  "style": {
+                    "type": ["string", "null"],
+                    "description": "Visual style of the image (e.g., photorealistic, cartoon, sketch)"
+                  },
+                  "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "General tags describing image content"
+                  },
+                  "colors": {
+                    "type": ["array", "null"],
+                    "items": {"type": "string"},
+                    "description": "Dominant colors in the image"
+                  },
+                  "objects": {
+                    "type": ["array", "null"],
+                    "items": {"type": "string"},
+                    "description": "Key objects identified in the image"
+                  }
+                }
+              },
+              "image_path": {"type": ["string", "null"]},
+              "thumbnail_path": {"type": ["string", "null"]},
+              "format": {"type": ["string", "null"]},
+              "mode": {"type": ["string", "null"]},
+              "size": {
+                "type": ["array", "null"],
+                "items": {"type": "integer"},
+                "minItems": 2,
+                "maxItems": 2
+              },
+              "exif": {"type": "object"},
+              "dates": {
+                "type": "object",
+                "properties": {
+                  "creation_date": {"type": ["string", "null"]},
+                  "created_at": {"type": ["string", "null"]},
+                  "created_month": {"type": ["string", "null"]},
+                  "created_year": {"type": ["string", "null"]},
+                  "last_modified_date": {"type": ["string", "null"]},
+                  "last_modified_month": {"type": ["string", "null"]},
+                  "last_modified_year": {"type": ["string", "null"]},
+                  "date_taken": {"type": ["string", "null"]}
+                }
+              },
+              "access_control": {"type": "object"}
+            },
+            "required": ["model_id"]
+          }
+        },
+        "required": ["id", "$schema_version", "metadata"]
       },
-      "description": "Schema for generated images",
-      "updated_date": "2025-04-09T00:00:00"
+      "description": "Schema for generated images with enhanced metadata",
+      "updated_date": "2025-04-20T00:00:00"
     }
   ]
 }

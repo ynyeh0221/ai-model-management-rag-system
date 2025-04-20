@@ -1,7 +1,7 @@
-# src/vector_db_manager/image_embedder.py
-
+import logging
 import os
-from typing import List, Tuple
+import tempfile
+from typing import List, Tuple, Union
 
 import numpy as np
 import open_clip
@@ -12,29 +12,29 @@ from torchvision import transforms
 
 class ImageEmbedder:
     """
-    Generates vector embeddings for images using Open-CLIP models.
+    Generates vector embeddings for images using Open-CLIP models directly.
     Supports both global image embeddings and tiled embeddings for region-based search.
     Also provides text embedding functionality to enable text-to-image search.
     """
 
-    def __init__(self, model_name="ViT-L-14-336", pretrained="openai", device=None, target_dim=384):
+    def __init__(self, model_name="ViT-B-32", pretrained="laion2b_s34b_b79k", device=None, target_dim=384):
         """
         Initialize the ImageEmbedder with the specified model.
 
         Args:
-            model_name (str): The CLIP model architecture to use (default: "ViT-L-14-336")
-                Selected to match available models in OpenCLIP
-            pretrained (str): The pre-trained weights to use (default: "openai")
+            model_name (str): The CLIP model architecture to use (default: "ViT-B-32")
+            pretrained (str): The pre-trained weights to use (default: "laion2b_s34b_b79k")
             device (str, optional): Device to run the model on ('cuda' or 'cpu').
-                                    If None, will use CUDA if available.
+                                   If None, will use CUDA if available.
             target_dim (int): Target dimension for embeddings (default: 384)
-                               Used to ensure compatibility with Chroma collections
+                             Used to ensure compatibility with Chroma collections
         """
         self.model_name = model_name
         self.pretrained = pretrained
-        self.device = device or (
-            "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu"))
+        self.device = device or ("mps" if torch.backends.mps.is_available() else
+                                 ("cuda" if torch.cuda.is_available() else "cpu"))
         self.target_dim = target_dim
+        self.logger = logging.getLogger(__name__)
         self._initialize_model()
 
     def _initialize_model(self):
@@ -55,16 +55,16 @@ class ImageEmbedder:
             # Get embedding dimension from the model
             self.embedding_dim = self.model.visual.output_dim
 
-            # Load the tokenizer - use the one created with the model
-            # This is safer than calling get_tokenizer separately
-            self.tokenizer = open_clip.tokenize
+            # Load the tokenizer
+            self.tokenizer = open_clip.get_tokenizer(self.model_name)
 
-            print(f"CLIP model initialized: {self.model_name}")
-            print(f"Original embedding dimension: {self.embedding_dim}")
-            print(f"Target embedding dimension: {self.target_dim}")
-            print(f"Running on device: {self.device}")
+            self.logger.info(f"CLIP model initialized: {self.model_name}")
+            self.logger.info(f"Original embedding dimension: {self.embedding_dim}")
+            self.logger.info(f"Target embedding dimension: {self.target_dim}")
+            self.logger.info(f"Running on device: {self.device}")
 
         except Exception as e:
+            self.logger.error(f"Failed to initialize CLIP model: {e}")
             raise RuntimeError(f"Failed to initialize CLIP model: {e}")
 
     def _resize_embedding(self, embedding: np.ndarray) -> np.ndarray:
@@ -93,7 +93,9 @@ class ImageEmbedder:
             resized[:original_dim] = embedding
 
             # Re-normalize after padding to maintain unit length
-            resized = resized / np.linalg.norm(resized)
+            norm = np.linalg.norm(resized)
+            if norm > 0:  # Avoid division by zero
+                resized = resized / norm
 
             return resized
 
@@ -121,71 +123,87 @@ class ImageEmbedder:
             np.ndarray: L2-normalized embedding vector in the same space as image embeddings,
                         resized to match target dimension if needed
         """
-        # Tokenize the text using the tokenizer function from open_clip
-        tokens = self.tokenizer([text]).to(self.device)
+        try:
+            # Tokenize the text
+            tokens = self.tokenizer([text]).to(self.device)
 
-        # Generate text embedding
-        with torch.no_grad():
-            text_features = self.model.encode_text(tokens)
+            # Generate text embedding
+            with torch.no_grad():
+                text_features = self.model.encode_text(tokens)
 
-            # L2 normalize the embedding
-            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+                # L2 normalize the embedding
+                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
-            # Convert to numpy array and flatten
-            embedding = text_features.cpu().numpy().flatten()
+                # Convert to numpy array and flatten
+                embedding = text_features.cpu().numpy().flatten()
 
-        # Resize the embedding to match the target dimension if needed
-        return self._resize_embedding(embedding)
+            # Resize the embedding to match the target dimension if needed
+            return self._resize_embedding(embedding)
+        except Exception as e:
+            self.logger.error(f"Error generating text embedding: {e}")
+            # Return a zero vector as fallback
+            return np.zeros(self.target_dim)
 
-    def _load_and_preprocess_image(self, image_path: str) -> torch.Tensor:
+    def _load_and_preprocess_image(self, image_path_or_array: Union[str, np.ndarray]) -> torch.Tensor:
         """
         Load and preprocess an image for embedding.
 
         Args:
-            image_path (str): Path to the image file
+            image_path_or_array: Path to the image file or numpy array
 
         Returns:
             torch.Tensor: Preprocessed image tensor
         """
-        if not os.path.exists(image_path):
-            raise FileNotFoundError(f"Image not found: {image_path}")
-
         try:
-            # Open image and convert to RGB (in case it's grayscale or has alpha channel)
-            image = Image.open(image_path).convert('RGB')
+            if isinstance(image_path_or_array, np.ndarray):
+                # Convert numpy array to PIL Image
+                image = Image.fromarray(image_path_or_array.astype('uint8'))
+            elif isinstance(image_path_or_array, str):
+                if not os.path.exists(image_path_or_array):
+                    raise FileNotFoundError(f"Image not found: {image_path_or_array}")
+                # Open image and convert to RGB (in case it's grayscale or has alpha channel)
+                image = Image.open(image_path_or_array).convert('RGB')
+            else:
+                raise ValueError(f"Unsupported image input type: {type(image_path_or_array)}")
 
             # Apply CLIP preprocessing
             preprocessed = self.preprocess(image).unsqueeze(0).to(self.device)
-
             return preprocessed
-        except Exception as e:
-            raise ValueError(f"Error preprocessing image {image_path}: {e}")
 
-    def embed_image(self, image_path: str) -> np.ndarray:
+        except Exception as e:
+            self.logger.error(f"Error preprocessing image: {e}")
+            raise ValueError(f"Error preprocessing image: {e}")
+
+    def embed_image(self, image_path_or_array: Union[str, np.ndarray]) -> np.ndarray:
         """
         Generate embedding for a single image.
 
         Args:
-            image_path (str): Path to the image file
+            image_path_or_array: Path to the image file or numpy array
 
         Returns:
             np.ndarray: L2-normalized embedding vector, resized to match target dimension
         """
-        # Load and preprocess the image
-        preprocessed = self._load_and_preprocess_image(image_path)
+        try:
+            # Load and preprocess the image
+            preprocessed = self._load_and_preprocess_image(image_path_or_array)
 
-        # Generate embedding
-        with torch.no_grad():
-            image_features = self.model.encode_image(preprocessed)
+            # Generate embedding
+            with torch.no_grad():
+                image_features = self.model.encode_image(preprocessed)
 
-            # L2 normalize the embedding as specified in the design doc
-            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+                # L2 normalize the embedding
+                image_features = image_features / image_features.norm(dim=-1, keepdim=True)
 
-            # Convert to numpy array and flatten
-            embedding = image_features.cpu().numpy().flatten()
+                # Convert to numpy array and flatten
+                embedding = image_features.cpu().numpy().flatten()
 
-        # Resize the embedding to match the target dimension
-        return self._resize_embedding(embedding)
+            # Resize the embedding to match the target dimension
+            return self._resize_embedding(embedding)
+        except Exception as e:
+            self.logger.error(f"Error embedding image {image_path_or_array}: {e}")
+            # Return a zero vector as fallback
+            return np.zeros(self.target_dim)
 
     def embed_batch(self, image_paths: List[str]) -> np.ndarray:
         """
@@ -210,7 +228,7 @@ class ImageEmbedder:
                 batch.append(preprocessed)
                 valid_paths.append(path)
             except Exception as e:
-                print(f"Warning: Skipping image {path}: {e}")
+                self.logger.warning(f"Warning: Skipping image {path}: {e}")
 
         if not batch:
             return np.array([])
@@ -234,6 +252,36 @@ class ImageEmbedder:
             resized_embeddings[i] = self._resize_embedding(embedding)
 
         return resized_embeddings
+
+    async def generate_embedding(self, image_data: bytes) -> np.ndarray:
+        """
+        Generate embedding for an image provided as binary data.
+        Async method for compatibility with SearchDispatcher.
+
+        Args:
+            image_data (bytes): Binary image data
+
+        Returns:
+            np.ndarray: L2-normalized embedding vector, resized to match target dimension
+        """
+        try:
+            # Create a temporary file to save the image
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as temp_file:
+                temp_file.write(image_data)
+                temp_path = temp_file.name
+
+            try:
+                # Process the image
+                return self.embed_image(temp_path)
+            finally:
+                # Clean up the temporary file
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+
+        except Exception as e:
+            self.logger.error(f"Error generating embedding from image data: {e}")
+            # Return a zero vector as fallback
+            return np.zeros(self.target_dim)
 
     def embed_image_tiled(self, image_path: str, tile_config: dict = None) -> Tuple[np.ndarray, Tuple[int, int]]:
         """
@@ -261,42 +309,6 @@ class ImageEmbedder:
 
         # Call the embed_tiles method with the appropriate parameters
         return self.embed_tiles(image_path, tile_size, overlap)
-
-    async def generate_embedding(self, image_data: bytes) -> np.ndarray:
-        """
-        Generate embedding for an image provided as binary data.
-        Async method for compatibility with SearchDispatcher.
-
-        Args:
-            image_data (bytes): Binary image data
-
-        Returns:
-            np.ndarray: L2-normalized embedding vector, resized to match target dimension
-        """
-        import io
-        from PIL import Image
-
-        # Create an in-memory file-like object
-        image_stream = io.BytesIO(image_data)
-
-        # Open the image from the stream
-        image = Image.open(image_stream).convert('RGB')
-
-        # Apply CLIP preprocessing
-        preprocessed = self.preprocess(image).unsqueeze(0).to(self.device)
-
-        # Generate embedding
-        with torch.no_grad():
-            image_features = self.model.encode_image(preprocessed)
-
-            # L2 normalize the embedding
-            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-
-            # Convert to numpy array and flatten
-            embedding = image_features.cpu().numpy().flatten()
-
-        # Resize the embedding to match the target dimension
-        return self._resize_embedding(embedding)
 
     def embed_tiles(self, image_path: str, tile_size: int = 224, overlap: int = 32) -> Tuple[
         np.ndarray, Tuple[int, int]]:
@@ -428,8 +440,8 @@ class ImageEmbedder:
             embeddings = self.embed_batch(input)
             return embeddings.tolist() if isinstance(embeddings, np.ndarray) else embeddings
         except Exception as e:
-            print(f"Error in ImageEmbedder __call__: {e}")
+            self.logger.error(f"Error in ImageEmbedder __call__: {e}")
             return [[0.0] * self.target_dim for _ in input]
 
     def name(self) -> str:
-        return f"ImageEmbedder::{self.model_name}"
+        return f"ImageEmbedder::OpenCLIP::{self.model_name}"

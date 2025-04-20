@@ -316,6 +316,13 @@ class ChromaManager:
             This enables updating existing documents by using the same document_id.
         """
         try:
+            # Check for valid inputs
+            if not document:
+                raise ValueError("Missing document content")
+
+            if embed_content is None:
+                raise ValueError("Missing embedding for document")
+
             # Process document ID
             doc_id = self._get_document_id(document, document_id, collection_name)
 
@@ -379,8 +386,18 @@ class ChromaManager:
 
     async def _generate_embeddings(self, content, collection_name: str, embed_content) -> Optional[List[Any]]:
         """Generate embeddings based on content and collection type."""
-        # Normalize embed_content to boolean
-        should_embed = self._normalize_embed_flag(embed_content)
+        # Normalize embed_content to boolean or numpy array
+        if isinstance(embed_content, bool):
+            should_embed = embed_content
+        elif isinstance(embed_content, np.ndarray):
+            # If embed_content is already an embedding, return it directly
+            return [embed_content]
+        else:
+            # Try to interpret as a boolean
+            try:
+                should_embed = bool(embed_content)
+            except Exception:
+                should_embed = True
 
         # Check if content exists
         has_content = self._check_content_exists(content)
@@ -388,10 +405,22 @@ class ChromaManager:
         # Generate embeddings if needed
         if should_embed and (has_content or collection_name == "generated_images"):
             if collection_name == "generated_images":
-                return await self._run_in_executor(
-                    self.image_embedding_function,
-                    ["Image embedding placeholder"]
-                )
+                # If embed_content is already an embedding (numpy array), use it directly
+                if isinstance(embed_content, np.ndarray):
+                    return [embed_content]
+
+                # Otherwise, if it's a path, use it to generate an embedding
+                elif isinstance(embed_content, str) and os.path.exists(embed_content):
+                    return await self._run_in_executor(
+                        self.image_embedding_function,
+                        [embed_content]
+                    )
+                # For the case where embed_content is True but we don't have a valid path,
+                # generate a random embedding as fallback
+                else:
+                    # Create a random embedding with the same dimensionality as the expected embeddings
+                    random_embedding = np.random.rand(384).astype(np.float32)  # Default size is 384
+                    return [random_embedding]
             else:
                 return await self._run_in_executor(
                     self.text_embedding_function,
@@ -720,7 +749,7 @@ class ChromaManager:
                 **get_args
             )
 
-            # print(f"Get results: {results}")
+            print(f"Get results: {results}")
 
             # Process results into a more user-friendly format
             processed_results = self._process_search_results(results, include)

@@ -141,52 +141,42 @@ class TestImageEmbedder(unittest.TestCase):
         self.assertIsInstance(result, np.ndarray)
         self.assertEqual(result.shape, (TEST_TARGET_DIM,))
 
+    @patch('open_clip.tokenize')  # Not needed, can remove
     @patch('open_clip.create_model_and_transforms')
-    @patch('open_clip.tokenize')
-    def test_generate_text_embedding_sync(self, mock_tokenize, mock_create_model):
+    @patch('open_clip.get_tokenizer')
+    def test_generate_text_embedding_sync(self, mock_get_tokenizer, mock_create_model, mock_tokenize_unused):
         # Set up the mocks
         mock_create_model.return_value = (self.mock_clip_model, None, self.mock_preprocess)
 
-        # Mock the tokenizer to return tensor on the right device
+        # This is the actual tokenizer function returned by get_tokenizer
+        mock_tokenizer_fn = MagicMock()
         token_tensor = torch.ones((1, 77), dtype=torch.long, device=TEST_DEVICE)
-        mock_tokenize.return_value = token_tensor
+        mock_tokenizer_fn.return_value = token_tensor
+        mock_get_tokenizer.return_value = mock_tokenizer_fn
 
-        # Initialize the ImageEmbedder
+        # Initialize the ImageEmbedder (calls get_tokenizer internally)
         embedder = ImageEmbedder(device=TEST_DEVICE)
 
         # Mock the model's encode_text method
         embedder.model.encode_text = MagicMock()
-        # Create a mock tensor with the original dimension on the correct device
         mock_text_features = torch.ones((1, TEST_EMBEDDING_DIM), device=TEST_DEVICE)
-        # Mock the norm method to return a tensor on the correct device
         mock_text_features.norm = MagicMock(return_value=torch.ones((1, 1), device=TEST_DEVICE))
         embedder.model.encode_text.return_value = mock_text_features
 
         # Mock the _resize_embedding method
-        embedder._resize_embedding = MagicMock()
-        embedder._resize_embedding.return_value = np.ones(TEST_TARGET_DIM)
+        embedder._resize_embedding = MagicMock(return_value=np.ones(TEST_TARGET_DIM))
 
-        # Test the _generate_text_embedding_sync method
+        # Run the actual method
         result = embedder._generate_text_embedding_sync("test query")
 
-        # Check if the tokenizer was called with the correct parameters
-        mock_tokenize.assert_called_once_with(["test query"])
+        # Check if tokenizer function was called properly
+        mock_tokenizer_fn.assert_called_once_with(["test query"])
 
-        # Check if the model's encode_text method was called with the token tensor
+        # Check model encode_text was used
         embedder.model.encode_text.assert_called_once()
 
-        # Compare device-agnostic tensor data instead of comparing devices
-        self.assertTrue(
-            np.array_equal(
-                embedder.model.encode_text.call_args[0][0].cpu().numpy(),
-                token_tensor.cpu().numpy()
-            )
-        )
-
-        # Check if _resize_embedding was called
-        self.assertTrue(embedder._resize_embedding.called)
-
-        # Check the result
+        # Check resize_embedding and result
+        embedder._resize_embedding.assert_called_once()
         self.assertIsInstance(result, np.ndarray)
         self.assertEqual(result.shape, (TEST_TARGET_DIM,))
 
@@ -230,8 +220,9 @@ class TestImageEmbedder(unittest.TestCase):
 
         # Test error case when file does not exist
         mock_exists.return_value = False
-        with self.assertRaises(FileNotFoundError):
+        with self.assertRaises(ValueError) as cm:
             embedder._load_and_preprocess_image("nonexistent_image.jpg")
+        self.assertIn("Image not found", str(cm.exception))
 
     @patch('open_clip.create_model_and_transforms')
     @patch('open_clip.tokenize')

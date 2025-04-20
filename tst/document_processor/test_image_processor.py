@@ -39,17 +39,19 @@ class TestImageProcessor(unittest.TestCase):
         """Test basic image processing functionality."""
         result = self.processor.process_image(self.test_image_path)
 
-        # Check that all expected keys are present in the result
-        self.assertIn("format", result)
-        self.assertIn("mode", result)
-        self.assertIn("size", result)
         self.assertIn("metadata", result)
-        self.assertIn("exif", result)
+        metadata = result["metadata"]
+
+        # Check that all expected keys are present in the metadata
+        self.assertIn("format", metadata)
+        self.assertIn("mode", metadata)
+        self.assertIn("size", metadata)
+        self.assertIn("exif", metadata)
 
         # Check basic properties of the test image
-        self.assertEqual(result["size"], (100, 100))
-        self.assertEqual(result["mode"], "RGB")
-        self.assertEqual(result["format"], "JPEG")
+        self.assertEqual(metadata["size"], [100, 100])  # List, not tuple
+        self.assertEqual(metadata["mode"], "RGB")
+        self.assertEqual(metadata["format"], "JPEG")
 
     def test_process_image_with_metadata(self):
         """Test processing an image with additional metadata."""
