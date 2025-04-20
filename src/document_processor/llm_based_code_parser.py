@@ -269,12 +269,12 @@ class LLMBasedCodeParser:
         # print(f"Total AST digest: {ast_digest}")
 
         # STEP 2: Extract natural-language summary for each digest chunk
-        summary = self.extract_chunk_summary(
+        summary = self.extract_natural_language_summary(
             chunk_text=ast_digest,
             chunk_offset=0,
             max_retries=max_retries
         )
-        print(f"Summary from AST digest: {summary}")
+        print(f"Natural language summary from AST digest: {summary}")
 
         # STEP 3: Feed merged summary to LLM for structured metadata generation
         final = self.generate_metadata_from_summary(ast_digest, max_retries=max_retries, file_path=file_path)
@@ -291,7 +291,7 @@ class LLMBasedCodeParser:
         print(f"Final metadata (from AST summary): {final}")
         return final
 
-    def extract_chunk_summary(self, chunk_text: str, chunk_offset: int = 0, max_retries: int = 3) -> dict:
+    def extract_natural_language_summary(self, chunk_text: str, chunk_offset: int = 0, max_retries: int = 3) -> dict:
         """Extract a natural language summary of metadata from a code chunk instead of structured JSON."""
         if not self.llm_interface:
             return {}
