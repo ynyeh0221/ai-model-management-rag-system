@@ -224,8 +224,6 @@ class ImageSearchManager:
             # Created date fields
             "created_year": "dates.created_year",
             "created_month": "dates.created_month",
-            "creation_year": "dates.created_year",  # Map old name to new field
-            "creation_month": "dates.created_month",  # Map old name to new field
 
             # Last modified date fields
             "last_modified_year": "dates.last_modified_year",
