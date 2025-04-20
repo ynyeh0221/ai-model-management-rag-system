@@ -182,9 +182,9 @@ class UIRunner:
             user_id=self.user_id
         ))
 
-        # print(f"search_results: {search_results}")
         # Process and rerank search results
-        reranked_results = self._process_search_results(search_results, reranker, parsed_query, query_text)
+        # Use max_to_return = 3 as a trade off between details in search result and size of LLM input
+        reranked_results = self._process_search_results(search_results, reranker, parsed_query, query_text, max_to_return=3)
 
         def remove_field(dict_list, field_to_remove):
             return [{k: v for k, v in item.items() if k != field_to_remove} for item in dict_list]

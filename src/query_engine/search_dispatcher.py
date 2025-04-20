@@ -250,15 +250,11 @@ class SearchDispatcher:
 
         # Create search tasks for all tables
         for table_name in table_weights.keys():
-            if table_name == 'model_descriptions':
-                search_limit = requested_limit * 7
-            else:
-                search_limit = requested_limit
             search_tasks.append(self.chroma_manager.search(
                 collection_name=table_name,
                 query=query,
                 where=chroma_filters,
-                limit=search_limit,
+                limit=requested_limit,
                 include=["metadatas", "documents"]  # Don't need distances here
             ))
 
@@ -465,7 +461,7 @@ class SearchDispatcher:
                         collection_name="model_descriptions",
                         query=query,  # Use the same query to find the most relevant chunks
                         where={"model_id": {"$eq": model_id}},  # Only search chunks for this specific model
-                        limit=3,
+                        limit=1,
                         include=["metadatas", "distances"]  # Include distances
                     )
 
