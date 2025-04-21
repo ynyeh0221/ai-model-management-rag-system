@@ -463,22 +463,22 @@ class LLMBasedCodeParser:
             "Based on the following model AST digest summary, create a structured representation of the model metadata.\n\n"
             "The output **must strictly follow this exact JSON structure**:\n"
             "{\n"
-            '  "description": "Short summary of what the model does",\n'
-            '  "framework": { "name": "...", "version": "..." },\n'
-            '  "architecture": { "type": "..." },\n'
-            '  "dataset": { "name": "..." },\n'
-            '  "training_config": {\n'
-            '    "batch_size": 32,\n'
-            '    "learning_rate": 0.001,\n'
-            '    "optimizer": "Adam",\n'
-            '    "epochs": 10,\n'
-            '    "hardware_used": "GPU"\n'
+            '  \"description\": \"Short summary of what the model does\",\n'
+            '  \"framework\": { \"name\": \"...\", \"version\": \"...\" },\n'
+            '  \"architecture\": { \"type\": \"...\" },\n'
+            '  \"dataset\": { \"name\": \"...\" },\n'
+            '  \"training_config\": {\n'
+            '    \"batch_size\": 32,\n'
+            '    \"learning_rate\": 0.001,\n'
+            '    \"optimizer\": \"Adam\",\n'
+            '    \"epochs\": 10,\n'
+            '    \"hardware_used\": \"GPU\"\n'
             '  }\n'
             "}\n\n"
             "Extraction hints:\n"
             "• **framework.name**: look for imports like `import torch` or `import tensorflow`; default to “unknown”.\n"
             "• **framework.version**: look for `torch.__version__` or similar; else “unknown”.\n"
-            "• **architecture.type**: look for class names or keywords (e.g. “Transformer”, “CNN”); else “unknown”.\n"
+            "• **architecture.type**: identify the high‑level components of the model (e.g. “VAE”, “diffusion model”, “UNet”), listing all major submodels separated by commas; do not list low‑level layers like Conv2d or individual blocks; if none found, use “unknown”.\n"
             "• **dataset.name**: look for dataset identifiers (e.g. “FashionMNIST”); else “unknown”.\n"
             "• **batch_size**: look for `batch_size=` in DataLoader; else null.\n"
             "• **learning_rate**: look for `lr=` or “learning rate”; else null.\n"
