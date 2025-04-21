@@ -627,7 +627,6 @@ class UIRunner:
             elif isinstance(response, str):
                 # Try to parse as JSON first
                 try:
-                    import json
                     parsed = json.loads(response)
 
                     if isinstance(parsed, dict):
