@@ -325,7 +325,7 @@ class QueryParser:
         Classify the intent of a query using LangChain, and rule-based logic.
         """
         query_lower = query_text.lower()
-        model_mentions = self._extract_model_mentions(query_lower)
+        model_mentions = self._extract_model_id_mentions(query_lower)
 
         # Step 1: Try LangChain LLM classification
         if self.use_langchain:
@@ -340,6 +340,12 @@ class QueryParser:
                     for intent in QueryIntent:
                         if intent.value == intent_str:
                             self.logger.info(f"Intent: {intent.value} | Reason: {reason}")
+
+                            # Langchain may classify query which contains 'or' to comparison, like "for models using CNN or Transformer"
+                            if intent == QueryIntent.COMPARISON and len(model_mentions) < 2:
+                                intent = QueryIntent.RETRIEVAL
+                                reason = "Fallback to retrieval"
+
                             return intent, reason
             except Exception as e:
                 self.logger.warning(f"LangChain classification failed: {e}")
@@ -513,7 +519,7 @@ class QueryParser:
             "cifar", "cifar-10", "stl", "stl-10", "oxford"
         }
 
-        model_ids = self._extract_model_mentions(query_text)
+        model_ids = self._extract_model_id_mentions(query_text)
         valid_model_ids = [mid for mid in model_ids if mid.lower() not in generic_terms]
 
         if valid_model_ids:
@@ -545,7 +551,7 @@ class QueryParser:
 
         return parameters
 
-    def _extract_model_mentions(self, query_text: str) -> List[str]:
+    def _extract_model_id_mentions(self, query_text: str) -> List[str]:
         """
         Extract mentions of model IDs or names from query text.
 
