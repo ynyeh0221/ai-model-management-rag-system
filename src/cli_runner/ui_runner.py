@@ -453,16 +453,24 @@ class UIRunner:
 
         # 3. Construct the prompt builder logic
         prompt_builder = (
-            "You are a prompt engineer. You will receive two inputs: the user's query and a variable named 'result_schema' describing the structure and entries of all search results."
-            f"User query: {query_text}.\n"
+            "You are a prompt engineer. Think from the user’s perspective and craft a single, high‑level meta‑prompt for a second LLM (LLM2) that will:\n"
+            "  1. Restate the user’s original request so LLM2 knows what to address.\n"
+            "  2. Instruct LLM2 to use **only** the provided `search results` and actual runtime data—no hallucinations or invented details.\n"
+            "  3. When token limits permit, include your own analysis or insights derived solely from the provided data—do not fabricate any information.\n"
+            "The meta‑prompt should be concise and focused on the user’s intent. Do **not** answer the query yourself or include any real data; return only the meta‑prompt text.\n\n"
+            "EXAMPLE:\n"
+            "  User query: \"Describe the model with ID XYZ.\"\n"
+            "  Result schema: { 'model_id': 'string', 'framework': 'string', 'created_date': 'string' }\n"
+            "  => LLM2 meta‑prompt:\n"
+            "     \"Describe the model with ID XYZ using only the provided fields `model_id`, `framework`, and `created_date`. "
+            "Do not add any details beyond those fields. When token limits permit, include your analysis or insights based solely on that data.\"\n\n"
+            f"User query: {query_text}\n"
             f"Result schema: {result_schema}\n"
-            "Your task is to think from the user's perspective and generate the single best, high-level prompt that an LLM can use to answer the user's query effectively using all fields in 'result_schema'. "
-            "Avoid focusing on narrow or trivial specifics; capture the user's overall intent. "
-            "Do not invent additional constraints or details. Return only the prompt text."
         )
+
         builder_response = llm_interface.generate_response(
             prompt=prompt_builder,
-            temperature=0.7,
+            temperature=0.5,
             max_tokens=2000
         )
 
@@ -489,7 +497,7 @@ class UIRunner:
         # 7. Query the answer LLM with the constructed prompt
         final_response = llm_interface.generate_response(
             prompt=constructed_prompt,
-            temperature=0.7,
+            temperature=0.5,
             max_tokens=4000
         )
         print("\nLLM Final Response:")
