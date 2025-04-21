@@ -164,21 +164,70 @@ class LLMBasedCodeParser:
         print(f"updated model_info: {model_info}")
         return model_info
 
-    import ast
-
     def generate_ast_summary(self, code_str: str, file_path: str = "<unknown>") -> str:
         """
         Parse code using AST and generate a human-readable digest of the code structure.
         Now also picks up layer definitions and logs their key dims.
+        Additionally, detects and resolves literal variables for paths (e.g., save_dir), and key config values (batch_size, lr, epochs, device).
+        Values for lr, epoch, batch, device, seed, etc., are reported as Variables.
         """
+        import os
         try:
             tree = ast.parse(code_str, filename=file_path)
         except SyntaxError as e:
             return f"# Failed to parse AST: {e}"
 
         lines = []
+        literal_vars = {}
+        image_folders = set()
 
         class CodeSummaryVisitor(ast.NodeVisitor):
+            def visit_Assign(self, node):
+                # capture literal string or numeric constants for relevant config vars
+                if isinstance(node.value, ast.Constant) and isinstance(node.value.value, (str, int, float, bool)):
+                    for t in node.targets:
+                        if isinstance(t, ast.Name):
+                            name = t.id
+                            key = name.lower()
+                            # path-like vars
+                            if any(k in key for k in ['dir', 'path', 'folder']):
+                                literal_vars[name] = node.value.value
+                            # config vars
+                            if any(k in key for k in ['batch', 'lr', 'epoch', 'device', 'seed']):
+                                literal_vars[name] = node.value.value
+                # existing assign logic for variables and layers
+                targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
+                try:
+                    expr = ast.unparse(node.value)
+                except Exception:
+                    expr = "<complex_expression>"
+                for t in targets:
+                    if any(k in t.lower() for k in ["batch", "lr", "epoch", "optimizer", "device", "model", "train"]):
+                        lines.append(f"Variable: {t} = {expr}")
+                if isinstance(node.value, ast.Call):
+                    func = node.value.func
+                    call_name = ast.unparse(func)
+                    is_layer = (
+                            (isinstance(func, ast.Attribute) and func.attr and func.attr[0].isupper())
+                            or (isinstance(func, ast.Name) and func.id[0].isupper())
+                    )
+                    if targets and is_layer:
+                        args = []
+                        for arg in node.value.args:
+                            try:
+                                args.append(ast.unparse(arg))
+                            except Exception:
+                                args.append("?")
+                        for kw in node.value.keywords:
+                            key = kw.arg or ""
+                            try:
+                                val = ast.unparse(kw.value)
+                            except Exception:
+                                val = "?"
+                            args.append(f"{key}={val}")
+                        short_args = ", ".join(args[:2] + args[2:])
+                        lines.append(f"Layer: {targets[0]} = {call_name}({short_args})")
+
             def visit_Import(self, node):
                 names = [alias.name for alias in node.names]
                 lines.append(f"Import: {', '.join(names)}")
@@ -187,50 +236,6 @@ class LLMBasedCodeParser:
                 module = node.module or ""
                 names = [alias.name for alias in node.names]
                 lines.append(f"From {module} import {', '.join(names)}")
-
-            def visit_Assign(self, node):
-                # find simple name targets
-                targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
-                # try to pretty-print the right-hand side
-                try:
-                    expr = ast.unparse(node.value)
-                except Exception:
-                    expr = "<complex_expression>"
-
-                # 1) existing vars of interest
-                for t in targets:
-                    if any(k in t.lower() for k in ["batch", "lr", "epoch", "optimizer", "device", "model", "train"]):
-                        lines.append(f"Variable: {t} = {expr}")
-
-                # 2) catch layer instantiations: e.g. self.fc1 = nn.Linear(128, 64)
-                if isinstance(node.value, ast.Call):
-                    func = node.value.func
-                    # get fully-unparsed call name
-                    call_name = ast.unparse(func)
-                    # crude filter: module attribute or capitalized name
-                    is_layer = (
-                            (isinstance(func, ast.Attribute) and func.attr and func.attr[0].isupper())
-                            or (isinstance(func, ast.Name) and func.id[0].isupper())
-                    )
-                    if targets and is_layer:
-                        # extract positional args (e.g. in/out features)
-                        args = []
-                        for arg in node.value.args:
-                            try:
-                                args.append(ast.unparse(arg))
-                            except Exception:
-                                args.append("?")
-                        # extract key keywords like in_channels, out_channels, etc.
-                        for kw in node.value.keywords:
-                            key = kw.arg or ""
-                            try:
-                                val = ast.unparse(kw.value)
-                            except Exception:
-                                val = "?"
-                            args.append(f"{key}={val}")
-                        # keep it short: only first two args + any keywords
-                        short_args = ", ".join(args[:2] + args[2:])
-                        lines.append(f"Layer: {targets[0]} = {call_name}({short_args})")
 
             def visit_ClassDef(self, node):
                 bases = [getattr(b, "id", getattr(b, "attr", "object")) for b in node.bases]
@@ -241,10 +246,7 @@ class LLMBasedCodeParser:
 
             def visit_FunctionDef(self, node):
                 args = [arg.arg for arg in node.args.args]
-                defaults = [
-                    ast.unparse(d) if hasattr(ast, "unparse") else repr(d)
-                    for d in node.args.defaults
-                ]
+                defaults = [ast.unparse(d) if hasattr(ast, "unparse") else repr(d) for d in node.args.defaults]
                 pad = [None] * (len(args) - len(defaults))
                 arg_pairs = [f"{a}={d}" if d else a for a, d in zip(args, pad + defaults)]
                 docstring = ast.get_docstring(node)
@@ -252,8 +254,43 @@ class LLMBasedCodeParser:
                 if docstring:
                     lines.append(f"  Docstring: {docstring.strip()}")
 
+            def visit_Call(self, node):
+                # detect plt.savefig or imwrite calls
+                try:
+                    call_name = ast.unparse(node.func)
+                except Exception:
+                    call_name = ""
+                if call_name.endswith("savefig") or call_name.endswith("imwrite"):
+                    if node.args:
+                        arg0 = node.args[0]
+                        if isinstance(arg0, ast.Constant) and isinstance(arg0.value, str):
+                            folder = os.path.dirname(arg0.value)
+                            if folder:
+                                image_folders.add(folder)
+                        elif isinstance(arg0, ast.Name) and arg0.id in literal_vars:
+                            image_folders.add(os.path.dirname(literal_vars[arg0.id]))
+                # detect custom save_dir args
+                for kw in getattr(node, 'keywords', []):
+                    if kw.arg and 'save_dir' in kw.arg and isinstance(kw.value, ast.Name):
+                        var = kw.value.id
+                        if var in literal_vars:
+                            image_folders.add(literal_vars[var])
+                self.generic_visit(node)
+
         visitor = CodeSummaryVisitor()
         visitor.visit(tree)
+
+        # report captured literal vars
+        for name, val in literal_vars.items():
+            key = name.lower()
+            if any(k in key for k in ['dir', 'path', 'folder']):
+                lines.append(f"Path variable: {name} = {val}")
+            else:
+                lines.append(f"Variable: {name} = {val}")
+        # include image folders
+        for folder in sorted(image_folders):
+            lines.append(f"Images folder: {folder}")
+
         return "\n".join(lines)
 
     def _remove_import_lines(self, code: str) -> str:
@@ -296,19 +333,39 @@ class LLMBasedCodeParser:
         if not self.llm_interface:
             return {}
 
+        # Reduce input size of LLM
+        if len(chunk_text) >= 2200:
+            chunk_text = self.filter_ast_summary_for_metadata(chunk_text)
+
         system_prompt = (
-            "You are an expert machine‑learning metadata extractor. "
-            "You will receive a structured AST‑based summary of a Python ML script. "
-            "From that summary, identify **only** the metadata explicitly mentioned, including:\n"
-            "- What the model is designed to do (its purpose)\n"
-            "- Framework (e.g. PyTorch, TensorFlow) and version, if given\n"
-            "- Neural network architecture (Transformer, CNN, etc.)\n"
-            "- Components and their layers: layer types with their input/output dimensions\n"
-            "- Dataset name(s)\n"
-            "- Training setup: batch size, learning rate, optimizer, number of epochs\n"
-            "- Hardware or device information\n\n"
-            "Then compose a coherent, detailed natural‑language description of the model, its architecture (including each component and layer dimensions), "
-            "and its training configuration. Use clear, concise prose, and include every piece of metadata you can extract from the input."
+            "You are a senior ML engineer documenting Python training scripts. "
+            "Given an AST summary of a script, produce a human‑readable report with these sections:\n\n"
+            "1. Purpose:\n"
+            "   • In 1–2 sentences, say what the script accomplishes (e.g. “Trains a CNN on MNIST and visualizes embeddings.”).\n\n"
+            "2. Data & Preprocessing:\n"
+            "   • Dataset class and source directory.\n"
+            "   • Transformations applied.\n"
+            "   • DataLoader settings (batch size, shuffle, splits).\n\n"
+            "3. Model Architecture:\n"
+            "    Describe each layer or block in fluent prose. For example:\n"
+            "      “The first convolutional layer applies 32 filters of size 3×3 to the 1‑channel 28×28 input, producing 32 feature maps of size 26×26. Next, a ReLU activation introduces non‑linearity, followed by a 2×2 max‑pool that halves the spatial dimensions to 13×13.”\n"
+            "    Use complete sentences that explain:\n"
+            "      • What the layer does  \n"
+            "      • Its main parameters  \n"
+            "      • How it transforms the data shape  \n"
+            "    Avoid raw code snippets or parameter lists—focus on a narrative description.\n\n"
+            "4. Training Configuration:\n"
+            "   • Optimizer & hyperparameters (lr, weight_decay, etc.).\n"
+            "   • Scheduler settings.\n"
+            "   • Loss function.\n"
+            "   • Number of epochs & hardware target (CPU/GPU/MPS).\n\n"
+            "5. Evaluation & Testing:\n"
+            "   • How validation or test loops are run.\n"
+            "   • Metrics computed (accuracy, loss, etc.).\n\n"
+            "6. Visualization & Artifacts:\n"
+            "   • Plots generated and any image/output folders with example filenames.\n\n"
+            "Use clear headings and bullet lists, **and write everything in natural, fluent prose**—do not include any code snippets, AST node dumps, or quoted low‑level output. "
+            "Focus on explaining each element in descriptive, human‑readable language that an engineer can follow to reproduce the workflow."
         )
 
         for attempt in range(max_retries):
@@ -368,7 +425,7 @@ class LLMBasedCodeParser:
         lines = summary.splitlines()
         filtered: List[str] = []
         # what prefixes we always keep
-        keep_prefixes = ("Docstring:", "Import:", "From ", "Class:", "Layer:")
+        keep_prefixes = ("Docstring:", "Import:", "From ", "Class:", "Layer:", "Images folder:")
         # which variable names to keep
         var_keys = ("batch", "lr", "epoch", "optimizer", "device")
 
@@ -397,7 +454,7 @@ class LLMBasedCodeParser:
 
         # Reduce input size of LLM
         print(f"len(summary): {len(summary)}, file_path: {file_path}")
-        if len(summary) >= 2000:
+        if len(summary) >= 2200:
             summary = self.filter_ast_summary_for_metadata(summary)
             print(f"len(extracted_summary): {len(summary)}, file_path: {file_path}")
 
