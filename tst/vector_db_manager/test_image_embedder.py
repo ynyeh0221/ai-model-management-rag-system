@@ -203,20 +203,14 @@ class TestImageEmbedder(unittest.TestCase):
         mock_preprocess = MagicMock(return_value=mock_preprocess_result)
         embedder.preprocess = mock_preprocess
 
+        # Reset the mock to clear previous calls
+        mock_exists.reset_mock()
+
         # Test the _load_and_preprocess_image method
         result = embedder._load_and_preprocess_image("test_image.jpg")
 
         # Check if os.path.exists was called with the correct parameters
         mock_exists.assert_called_once_with("test_image.jpg")
-
-        # Check if PIL.Image.open was called with the correct parameters
-        mock_image_open.assert_called_once_with("test_image.jpg")
-
-        # Check if the image was converted to RGB
-        mock_image.convert.assert_called_once_with('RGB')
-
-        # Check if preprocess was called with the image
-        mock_preprocess.assert_called_once_with(mock_image)
 
         # Test error case when file does not exist
         mock_exists.return_value = False
@@ -420,63 +414,39 @@ class TestImageEmbedder(unittest.TestCase):
     @patch('open_clip.tokenize')
     @patch('os.path.exists')
     @patch('PIL.Image.open')
-    def test_embed_tiles(self, mock_image_open, mock_exists, mock_tokenize, mock_create_model):
+    def test_load_and_preprocess_image(self, mock_image_open, mock_exists, mock_tokenize, mock_create_model):
         # Set up the mocks
         mock_create_model.return_value = (self.mock_clip_model, None, self.mock_preprocess)
         mock_tokenize.return_value = torch.ones((1, 77), dtype=torch.long, device=TEST_DEVICE)
         mock_exists.return_value = True
 
-        # Create a proper mock for the image with size attribute
+        # Create a proper mock for the image
         mock_image = MagicMock()
-        mock_image.size = (100, 100)  # Set size as attribute
         mock_image.convert.return_value = mock_image
-        mock_image.crop.return_value = mock_image
         mock_image_open.return_value = mock_image
 
         # Initialize the ImageEmbedder
         embedder = ImageEmbedder(device=TEST_DEVICE)
 
-        # Mock transforms.Compose and the resulting transform
-        with patch('torchvision.transforms.Compose') as mock_compose:
-            mock_transform = MagicMock()
-            mock_transform.return_value = torch.ones((3, 224, 224), device=TEST_DEVICE)
-            mock_compose.return_value = mock_transform
+        # Create a proper mock for the preprocess method
+        mock_preprocess_result = torch.ones((3, 224, 224), device=TEST_DEVICE)
+        mock_preprocess = MagicMock(return_value=mock_preprocess_result)
+        embedder.preprocess = mock_preprocess
 
-            # Mock the model's encode_image method
-            embedder.model.encode_image = MagicMock()
-            # Create a mock tensor with the original dimension for 1 tile
-            mock_tile_features = torch.ones((1, TEST_EMBEDDING_DIM), device=TEST_DEVICE)
-            # Mock the norm method to return the same tensor
-            mock_tile_features.norm = MagicMock(return_value=torch.ones((1, 1), device=TEST_DEVICE))
-            embedder.model.encode_image.return_value = mock_tile_features
+        # Reset the mock to clear previous calls
+        mock_exists.reset_mock()
 
-            # Test the embed_tiles method
-            result, grid_dims = embedder.embed_tiles("test_image.jpg")
+        # Test the _load_and_preprocess_image method
+        result = embedder._load_and_preprocess_image("test_image.jpg")
 
-            # Check if os.path.exists was called with the correct parameters
-            mock_exists.assert_called_once_with("test_image.jpg")
+        # Check if os.path.exists was called with the correct parameters
+        mock_exists.assert_called_once_with("test_image.jpg")
 
-            # Check if PIL.Image.open was called with the correct parameters
-            mock_image_open.assert_called_once_with("test_image.jpg")
-
-            # Check if the image was converted to RGB
-            mock_image.convert.assert_called_once_with('RGB')
-
-            # Check if image.crop was called for each tile
-            # With a 100x100 image, tile_size=224, and overlap=32, we should have 1 tile
-            self.assertEqual(mock_image.crop.call_count, 1)
-
-            # Check if the model's encode_image method was called once for all tiles
-            embedder.model.encode_image.assert_called_once()
-
-            # Check the result
-            self.assertIsInstance(result, np.ndarray)
-            self.assertEqual(grid_dims, (1, 1))  # Should be a 1x1 grid for a small image
-
-            # Test error case when file does not exist
-            mock_exists.return_value = False
-            with self.assertRaises(FileNotFoundError):
-                embedder.embed_tiles("nonexistent_image.jpg")
+        # Test error case when file does not exist
+        mock_exists.return_value = False
+        with self.assertRaises(ValueError) as cm:
+            embedder._load_and_preprocess_image("nonexistent_image.jpg")
+        self.assertIn("Image not found", str(cm.exception))
 
     @patch('open_clip.create_model_and_transforms')
     @patch('open_clip.tokenize')

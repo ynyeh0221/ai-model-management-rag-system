@@ -146,6 +146,11 @@ class SearchDispatcher:
             # Define metadata tables to search with their weights
             table_weights = self._get_metadata_table_weights()
 
+            # STEP 0: Get global min/max distances for all collections
+            collections = list(table_weights.keys()) + ["model_scripts_chunks"]
+            collection_stats = await self._get_collection_distance_stats_for_query(query, collections, user_id)
+            self.logger.info(f"Collection stats for query: {collection_stats}")
+
             # STEP 1: Search all metadata tables in parallel to collect model_ids
             metadata_search_start = time.time()
             all_results = await self._search_all_metadata_tables(query, chroma_filters, requested_limit, table_weights,
@@ -168,7 +173,7 @@ class SearchDispatcher:
             all_results = await self._process_model_descriptions_text_search(query, all_results)
 
             # STEP 4: Calculate weighted distance sum for all models using all gathered metadata
-            all_results = self._calculate_model_distances(all_results, table_weights)
+            all_results = self._calculate_model_distances(all_results, table_weights, collection_stats)
 
             # STEP 5 & 6: Convert to list, sort by distance, and limit results
             output_list = self._sort_and_limit_search_results(all_results, requested_limit)
@@ -532,39 +537,221 @@ class SearchDispatcher:
 
         return all_results
 
-    def _calculate_model_distances(self, all_results: Dict[str, Any], table_weights: Dict[str, float]) -> Dict[
-        str, Any]:
-        """Calculate weighted distance sum for all models."""
+    async def _get_collection_distance_stats_for_query(self, query: str, collections: List[str],
+                                                       user_id: Optional[str] = None) -> Dict[str, Dict[str, float]]:
+        """
+        Get min and max distances for each collection based on the actual user query.
+        This gets a much larger sample size than the actual search will use.
+
+        Args:
+            query: The user's query
+            collections: List of collection names to get stats for
+            user_id: Optional user ID for access control
+
+        Returns:
+            Dictionary with collection names as keys and min/max distance stats as values
+        """
+        self.logger.info(f"Getting min/max distances for all collections using query: {query}")
+
+        # Initialize result dictionary
+        collection_stats = {}
+
+        # For each collection, run the query with a large limit to get distance distribution
+        for collection_name in collections:
+            try:
+                # Get access control filter if needed
+                filters = {}
+                if self.access_control_manager and user_id:
+                    filters = self.access_control_manager.create_access_filter(user_id)
+
+                # Run the query with a large limit to get a good distribution
+                result = await self.chroma_manager.search(
+                    collection_name=collection_name,
+                    query=query,
+                    where=filters,  # Apply access control filters only
+                    limit=10000,  # Very large limit to get good distribution
+                    include=["distances"]
+                )
+
+                # Extract all distances
+                distances = []
+                for idx, item in enumerate(result.get('results', [])):
+                    distance = self._extract_search_distance(result, idx, item, collection_name)
+                    if distance is not None:
+                        distances.append(distance)
+
+                # Calculate min and max if we have distances
+                if distances:
+                    # Sort distances
+                    distances.sort()
+
+                    # Get min and max (with some buffer to avoid edge cases)
+                    min_distance = distances[0]
+                    max_distance = distances[-1]
+
+                    # Log some statistics about the distribution
+                    percentile_10 = distances[int(len(distances) * 0.1)] if len(distances) > 10 else min_distance
+                    percentile_90 = distances[int(len(distances) * 0.9)] if len(distances) > 10 else max_distance
+                    median = distances[int(len(distances) * 0.5)] if len(distances) > 2 else min_distance
+
+                    collection_stats[collection_name] = {
+                        'min': min_distance,
+                        'max': max_distance,
+                        'median': median,
+                        'percentile_10': percentile_10,
+                        'percentile_90': percentile_90,
+                        'count': len(distances)
+                    }
+
+                    self.logger.info(
+                        f"Collection {collection_name} stats: "
+                        f"min={min_distance}, max={max_distance}, "
+                        f"10th={percentile_10}, median={median}, 90th={percentile_90}, "
+                        f"count={len(distances)}"
+                    )
+                else:
+                    # Default values if no distances found
+                    collection_stats[collection_name] = {
+                        'min': 0.0,
+                        'max': 2.0,  # Typical max distance in embeddings
+                        'median': 1.0,
+                        'percentile_10': 0.5,
+                        'percentile_90': 1.5,
+                        'count': 0
+                    }
+                    self.logger.warning(f"No distances found for collection {collection_name}, using defaults")
+
+            except Exception as e:
+                self.logger.error(f"Error getting distance stats for collection {collection_name}: {e}")
+                # Use default values on error
+                collection_stats[collection_name] = {
+                    'min': 0.0,
+                    'max': 2.0,
+                    'median': 1.0,
+                    'percentile_10': 0.5,
+                    'percentile_90': 1.5,
+                    'count': 0
+                }
+
+        return collection_stats
+
+    def _normalize_distance(self, distance: float, stats: Dict[str, float]) -> float:
+        """
+        Normalize a distance value using distribution statistics.
+        Uses percentiles for more robust normalization.
+
+        Args:
+            distance: The distance value to normalize
+            stats: Dictionary with distance statistics ('min', 'max', 'percentile_10', 'percentile_90', etc.)
+
+        Returns:
+            Normalized distance value in range [0, 1]
+        """
+        # Get percentile values for more robust normalization
+        min_val = stats.get('percentile_10', stats.get('min', 0.0))
+        max_val = stats.get('percentile_90', stats.get('max', 2.0))
+
+        # Check for division by zero
+        if max_val == min_val:
+            return 0.0  # If all distances are the same, normalized distance is 0
+
+        # Normalize to [0, 1] range where 0 is best match and 1 is worst match
+        normalized = (distance - min_val) / (max_val - min_val)
+
+        # Ensure the value stays within [0, 1] even in edge cases
+        normalized = max(0.0, min(1.0, normalized))
+
+        self.logger.debug(f"Normalized distance: {distance} -> {normalized} (range: {min_val} - {max_val})")
+
+        return normalized
+
+    def _calculate_model_distances(self, all_results: Dict[str, Any], table_weights: Dict[str, float],
+                                   collection_stats: Dict[str, Dict[str, float]]) -> Dict[str, Any]:
+        """Calculate weighted distance sum for all models using normalized distances."""
+        self.logger.info(f"Calculating model distances using collection stats")
+
         for model_id, model_data in all_results.items():
+            # Skip special keys
+            if not isinstance(model_data, dict) or 'model_id' not in model_data:
+                continue
+
             # Calculate weighted distance from metadata tables
             weighted_sum = 0.0
             weight_sum = 0.0
 
+            # Initialize normalized distances dictionary
+            model_data['table_normalized_distances'] = {}
+
             for table_name, table_weight in table_weights.items():
                 if table_name in model_data.get('table_initial_distances', {}):
-                    distance = model_data['table_initial_distances'][table_name]
-                    weighted_sum += distance * table_weight
+                    # Get the raw distance
+                    raw_distance = model_data['table_initial_distances'][table_name]
+
+                    # Get stats for this table from collection stats
+                    table_stats = collection_stats.get(table_name, {
+                        'min': 0.0,
+                        'max': 2.0,
+                        'percentile_10': 0.5,
+                        'percentile_90': 1.5
+                    })
+
+                    # Normalize the distance using the robust method
+                    normalized_distance = self._normalize_distance(raw_distance, table_stats)
+
+                    # Store the normalized distance
+                    model_data['table_normalized_distances'][table_name] = normalized_distance
+
+                    # Add to weighted sum
+                    weighted_sum += normalized_distance * table_weight
                     weight_sum += table_weight
 
-            # Calculate metadata distance (weighted average)
+                    self.logger.debug(
+                        f"Model {model_id}, table {table_name}: raw={raw_distance}, "
+                        f"normalized={normalized_distance}, weight={table_weight}"
+                    )
+
+            # Calculate metadata distance (weighted average of normalized distances)
             if weight_sum > 0:
                 metadata_distance = weighted_sum / weight_sum
             else:
-                metadata_distance = 2.0  # Default to maximum distance if no metadata
+                metadata_distance = 1.0  # Default to maximum normalized distance (1.0) if no metadata
 
-            # Combine metadata and chunk distances if both exist
+            # Normalize chunk distance if it exists
             if 'chunk_initial_distance' in model_data:
-                # Parameters: 0.9, 0.1, 0.95
+                chunk_stats = collection_stats.get('model_scripts_chunks', {
+                    'min': 0.0,
+                    'max': 2.0,
+                    'percentile_10': 0.5,
+                    'percentile_90': 1.5
+                })
+
+                raw_chunk_distance = model_data['chunk_initial_distance']
+                normalized_chunk_distance = self._normalize_distance(raw_chunk_distance, chunk_stats)
+
+                model_data['chunk_normalized_distance'] = normalized_chunk_distance
+
+                # Parameters: 0.9, 0.1
                 # Rationale: We significantly favor metadata matches (90%) over chunk matches (10%)
                 if model_data['match_source'] == 'metadata+chunks':
-                    final_distance = 0.9 * metadata_distance + 0.1 * (model_data['chunk_initial_distance'] * 0.95)
+                    final_distance = 0.9 * metadata_distance + 0.1 * normalized_chunk_distance
                 else:  # 'chunks' only
-                    final_distance = model_data['chunk_initial_distance'] * 0.95
+                    final_distance = normalized_chunk_distance
             else:
                 final_distance = metadata_distance
 
             # Store the final calculated distance
             model_data['distance'] = final_distance
+
+            # Also store the metadata_distance for comparison
+            model_data['metadata_distance'] = metadata_distance
+
+            # Add raw distance stats for debugging
+            model_data['distance_stats'] = {
+                'weighted_sum': weighted_sum,
+                'weight_sum': weight_sum,
+                'metadata_tables_count': len(model_data.get('table_normalized_distances', {})),
+                'has_chunks': 'chunk_initial_distance' in model_data
+            }
 
         return all_results
 
@@ -637,6 +824,11 @@ class SearchDispatcher:
             # Define metadata tables to search with their weights
             table_weights = self._get_metadata_table_weights()
 
+            # STEP 0: Get global min/max distances for all collections
+            collections = list(table_weights.keys()) + ["model_scripts_chunks"]
+            collection_stats = await self._get_collection_distance_stats_for_query(query, collections, user_id)
+            self.logger.info(f"Collection stats for query: {collection_stats}")
+
             # STEP 1: Search all metadata tables in parallel to collect model_ids
             metadata_search_start = time.time()
             all_results = await self._search_all_metadata_tables(
@@ -654,7 +846,7 @@ class SearchDispatcher:
             all_results = await self._process_model_descriptions_text_search(query, all_results)
 
             # STEP 3: Calculate weighted distance sum for all models using all gathered metadata
-            all_results = self._calculate_model_distances(all_results, table_weights)
+            all_results = self._calculate_model_distances(all_results, table_weights, collection_stats)
 
             # STEP 4 & 5: Convert to list, sort by distance, and limit results
             output_list = self._sort_and_limit_search_results(all_results, requested_limit)
