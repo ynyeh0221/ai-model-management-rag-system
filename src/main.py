@@ -8,8 +8,8 @@ from src.colab_generator.code_generator import CodeGenerator
 from src.colab_generator.colab_api_client import ColabAPIClient
 from src.colab_generator.reproducibility_manager import ReproducibilityManager
 from src.colab_generator.resource_quota_manager import ResourceQuotaManager
-from src.document_processor.llm_based_code_parser import LLMBasedCodeParser
 from src.document_processor.image_processor import ImageProcessor
+from src.document_processor.llm_based_code_parser import LLMBasedCodeParser
 from src.document_processor.metadata_extractor import MetadataExtractor
 from src.document_processor.schema_validator import SchemaValidator
 from src.query_engine.query_analytics import QueryAnalytics
@@ -17,8 +17,6 @@ from src.query_engine.query_parser import QueryParser
 from src.query_engine.result_reranker import CrossEncoderReranker
 from src.query_engine.search_dispatcher import SearchDispatcher
 from src.response_generator.llm_interface import LLMInterface
-from src.response_generator.prompt_visualizer import PromptVisualizer
-from src.response_generator.template_manager import TemplateManager
 from src.vector_db_manager.access_control import AccessControlManager
 from src.vector_db_manager.chroma_manager import ChromaManager
 from src.vector_db_manager.image_embedder import ImageEmbedder
@@ -47,10 +45,6 @@ def initialize_components(config_path="./config"):
     search_dispatcher = SearchDispatcher(chroma_manager, text_embedder, image_embedder)
     query_analytics = QueryAnalytics()
     result_reranker = CrossEncoderReranker(device="mps")
-
-    # Initialize response generator components
-    template_manager = TemplateManager("./templates")
-    prompt_visualizer = PromptVisualizer(template_manager)
     
     # Initialize Colab notebook generator components
     code_generator = CodeGenerator()
@@ -79,8 +73,6 @@ def initialize_components(config_path="./config"):
         },
         "response_generator": {
             "llm_interface": llm_interface,
-            "template_manager": template_manager,
-            "prompt_visualizer": prompt_visualizer
         },
         "colab_generator": {
             "code_generator": code_generator,

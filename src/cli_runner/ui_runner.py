@@ -2,7 +2,6 @@ import asyncio
 import json
 import logging
 import os
-import re
 from datetime import datetime
 
 import nbformat
@@ -136,7 +135,6 @@ class UIRunner:
         query_analytics = self.components["query_engine"]["query_analytics"]
         reranker = self.components["query_engine"]["reranker"]
         llm_interface = self.components["response_generator"]["llm_interface"]
-        template_manager = self.components["response_generator"]["template_manager"]
 
         # Get query text
         if cmd.lower() == "query":
@@ -185,7 +183,7 @@ class UIRunner:
             reranked_results = remove_field(reranked_results, "content")
 
             # Generate response using appropriate template
-            self._generate_query_response(query_text, reranked_results, parsed_query, template_manager, llm_interface)
+            self._generate_query_response(query_text, reranked_results, llm_interface)
 
     def _process_search_results(self, search_results, reranker, parsed_query, query_text, max_to_return=10,
                                 rerank_threshold=0.05):
@@ -397,65 +395,105 @@ class UIRunner:
 
         print(table)
 
-    def _generate_query_response(self, query_text, reranked_results, parsed_query, template_manager, llm_interface):
+    def _generate_query_response(self, query_text, reranked_results, llm_interface):
         """
-        Generate a response to the query using the appropriate template.
-
-        Prints reranked results in a pretty table, then uses a simplified template
-        to generate thinking steps and analysis.
-
-        Args:
-            query_text (str): The original query text.
-            reranked_results (list): The reranked search results.
-            parsed_query (dict): The parsed query information.
-            template_manager (object): Component for rendering templates.
-            llm_interface (object): Component for generating LLM responses.
+        Generate a response prompt by using an LLM to construct an answer prompt based on
+        the user's query and the search results, then querying another LLM.
         """
-
-        print("\nGenerating response with thinking steps and analysis...")
-
-        # Print reranked results in a pretty table
+        # 1. Display reranked results for user visibility
+        print("\nRetrieving and displaying reranked search results:\n")
         self._display_reranked_results_pretty(reranked_results)
 
-        # Select template based on query type
-        if parsed_query["type"] == "comparison":
-            template_id = "model_comparison"
-        elif parsed_query["type"] == "retrieval":
-            # Pseudocode / Python-style
-            if re.search(r"\b(common|most used|typically used|usually used)\b", query_text, re.IGNORECASE):
-                template_id = "aggregation_query"  # the one with dataset summarization etc.
-            else:
-                template_id = "information_retrieval"
-        else:
-            if re.search(r"\b(common|most used|typically used|usually used)\b", query_text, re.IGNORECASE):
-                template_id = "aggregation_query"  # the one with dataset summarization etc.
-            else:
-                template_id = "general_query"
+        # 2. Build structured text of search results (to be attached to the constructed prompt)
+        results_text = ""
+        for idx, model in enumerate(reranked_results, 1):
+            # Ensure model dict and safely parse nested metadata
+            if not isinstance(model, dict):
+                model = {"model_id": str(model), "metadata": {}}
 
-        # Prepare context for template
-        context = self._prepare_template_context(query_text, reranked_results, parsed_query)
-        # Print context for debug
-        # print(f"context: {context}")
+            # Extract description (prefer top-level merged_description, then metadata fields)
+            description = model.get('merged_description') or model.get('description')
+            md = model.get('metadata') or {}
+            if not description:
+                description = md.get('description') or md.get('merged_description') or 'N/A'
 
-        try:
-            # Try to render the template with the context
-            rendered_prompt = template_manager.render_template(template_id, context)
-            # Print rendered prompt for debug
-            # print(f"prompt: {rendered_prompt}")
+            # Safely parse nested JSON fields in metadata
+            for key in ["file", "framework", "architecture", "dataset", "training_config"]:
+                val = md.get(key)
+                if isinstance(val, str):
+                    try:
+                        md[key] = json.loads(val)
+                    except json.JSONDecodeError:
+                        md[key] = {}
 
-            # Generate response using LLM interface
-            llm_response = llm_interface.generate_response(
-                prompt=rendered_prompt,
-                temperature=0.5,
-                max_tokens=4000
+            # Extract fields with fallbacks
+            model_id = model.get('model_id') or model.get('id') or 'Unknown'
+            file_md = md.get('file') or {}
+            fw = md.get('framework') or {}
+            arch = md.get('architecture') or {}
+            ds = md.get('dataset') or {}
+            training = md.get('training_config') or {}
+
+            # Compose block
+            results_text += f"Model #{idx}:\n"
+            results_text += f"- Model ID: {model_id}\n"
+            results_text += f"- File Size: {file_md.get('size_bytes', 'Unknown')}\n"
+            results_text += f"- Created On: {file_md.get('creation_date', 'Unknown')}\n"
+            results_text += f"- Last Modified: {file_md.get('last_modified_date', 'Unknown')}\n"
+            results_text += f"- Framework: {fw.get('name', 'Unknown')} {fw.get('version', '')}\n"
+            results_text += f"- Architecture: {arch.get('type', 'Unknown')}\n"
+            results_text += f"- Dataset: {ds.get('name', 'Unknown')}\n"
+            if training:
+                results_text += "- Training Configuration:\n"
+                for field in ['batch_size', 'learning_rate', 'optimizer', 'epochs', 'hardware_used']:
+                    results_text += f"  - {field.replace('_', ' ').title()}: {training.get(field, 'Unknown')}\n"
+            results_text += f"- Description: {description}\n\n"
+
+        result_schema = "Model ID, File Size, Created On, Last Modified, Framework, Architecture, Dataset, Training Configuration, Description"
+
+        # 3. Construct the prompt builder logic
+        prompt_builder = (
+            "You are a prompt engineer. You will receive two inputs: the user's query and a variable named 'result_schema' describing the structure and entries of all search results."
+            f"User query: {query_text}.\n"
+            f"Result schema: {result_schema}\n"
+            "Your task is to think from the user's perspective and generate the single best, high-level prompt that an LLM can use to answer the user's query effectively using all fields in 'result_schema'. "
+            "Avoid focusing on narrow or trivial specifics; capture the user's overall intent. "
+            "Do not invent additional constraints or details. Return only the prompt text."
+        )
+        builder_response = llm_interface.generate_response(
+            prompt=prompt_builder,
+            temperature=0.7,
+            max_tokens=2000
+        )
+
+        # 4. Safely extract constructed prompt text
+        if isinstance(builder_response, dict):
+            constructed_prompt = (
+                    builder_response.get('content')
+                    or builder_response.get('text')
+                    or (builder_response.get('message') or {}).get('content')
+                    or str(builder_response)
             )
+        else:
+            constructed_prompt = str(builder_response)
+        constructed_prompt = constructed_prompt.strip()
 
-            print("\nLLM Response:")
-            self._print_llm_content(llm_response)
+        # 5. Output the complete prompt stub
+        print("\n--- Constructed Prompt for Answer LLM ---")
+        print(constructed_prompt)
 
-        except Exception as e:
-            print(f"Error generating response: {str(e)}")
-            self._handle_fallback_response(query_text, reranked_results, llm_interface)
+        # 6. Append user query and search results
+        constructed_prompt += f"\nUser query: {query_text}\n"
+        constructed_prompt += f"Search results:\n{results_text}"
+
+        # 7. Query the answer LLM with the constructed prompt
+        final_response = llm_interface.generate_response(
+            prompt=constructed_prompt,
+            temperature=0.7,
+            max_tokens=4000
+        )
+        print("\nLLM Final Response:")
+        self._print_llm_content(final_response)
 
     def _prepare_template_context(self, query_text, results, parsed_query):
         """
