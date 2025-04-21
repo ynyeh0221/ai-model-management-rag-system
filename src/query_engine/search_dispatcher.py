@@ -4,6 +4,8 @@ import time
 from enum import Enum
 from typing import Dict, List, Any, Optional, Union, Tuple
 
+from src.query_engine.image_search_manager import ImageSearchManager
+
 
 class QueryIntent(Enum):
     RETRIEVAL = "retrieval"
@@ -21,7 +23,7 @@ class SearchDispatcher:
     """
 
     def __init__(self, chroma_manager, text_embedder, image_embedder,
-                 access_control_manager=None, analytics=None):
+                 access_control_manager=None, analytics=None, image_search_manager=None):
         """
         Initialize the SearchDispatcher with required dependencies.
 
@@ -31,6 +33,7 @@ class SearchDispatcher:
             image_embedder: Component for generating image embeddings
             access_control_manager: Optional manager for access control
             analytics: Optional analytics collector
+            image_search_manager: Optional manager for image searches
         """
         self.chroma_manager = chroma_manager
         self.text_embedder = text_embedder
@@ -39,12 +42,20 @@ class SearchDispatcher:
         self.analytics = analytics
         self.logger = logging.getLogger(__name__)
 
+        # Initialize the image search manager if not provided
+        self.image_search_manager = image_search_manager or ImageSearchManager(
+            chroma_manager=chroma_manager,
+            image_embedder=image_embedder,
+            access_control_manager=access_control_manager,
+            analytics=analytics
+        )
+
         # Define handlers mapping for dispatching
         self.handlers = {
-            QueryIntent.RETRIEVAL: self.handle_metadata_search, # Update to metadata search since we have AST summary stored in metadata
+            QueryIntent.RETRIEVAL: self.handle_metadata_search,
             QueryIntent.COMPARISON: self.handle_comparison,
             QueryIntent.NOTEBOOK: self.handle_notebook_request,
-            QueryIntent.IMAGE_SEARCH: self.handle_image_search,
+            QueryIntent.IMAGE_SEARCH: self.handle_image_search,  # Now using image_search_manager
             QueryIntent.METADATA: self.handle_metadata_search,
             QueryIntent.UNKNOWN: self.handle_fallback_search
         }
@@ -878,7 +889,7 @@ class SearchDispatcher:
 
     async def handle_image_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Handle an image search query.
+        Handle an image search query by delegating to the ImageSearchManager.
 
         Args:
             query: The processed query text
@@ -887,134 +898,42 @@ class SearchDispatcher:
         Returns:
             Dictionary containing search results for images
         """
-        self.logger.debug(f"Handling image search: {query}")
+        self.logger.debug(f"Delegating image search to ImageSearchManager: {query}")
         start_time = time.time()
 
         try:
-            # Get user_id from parameters for access control
-            user_id = parameters.get('user_id')
+            # Delegate to the image search manager
+            results = await self.image_search_manager.handle_image_search(query, parameters)
 
-            # Generate embedding for the query
-            embedding_start = time.time()
+            # Add performance metrics if not already included
+            if 'performance' not in results:
+                results['performance'] = {}
 
-            # Check if we're doing a text-to-image search or image-to-image search
-            if 'image_data' in parameters:
-                # Image-to-image search
-                query_embedding = await self.image_embedder.generate_embedding(
-                    image_data=parameters['image_data']
-                )
-            else:
-                # Text-to-image search (using CLIP's multimodal capabilities)
-                query_embedding = await self.image_embedder.generate_text_embedding(query)
-
-            embedding_time = (time.time() - embedding_start) * 1000
-
-            # Extract search parameters
-            limit = parameters.get('limit', 10)
-            style_tags = parameters.get('style_tags', [])
-            prompt_terms = parameters.get('prompt_terms', "")
-            resolution = parameters.get('resolution', None)
-
-            # Build filters
-            filters = {}
-
-            if style_tags:
-                filters['style_tags'] = {'$in': style_tags}
-
-            if prompt_terms:
-                filters['prompt'] = {'$contains': prompt_terms}
-
-            if resolution:
-                filters['resolution.width'] = {'$eq': resolution.get('width')}
-                filters['resolution.height'] = {'$eq': resolution.get('height')}
-
-            # Add any model-specific filters
-            if 'model_ids' in parameters and parameters['model_ids']:
-                filters['source_model_id'] = {'$in': parameters['model_ids']}
-
-            # Apply access control filter if applicable
-            if self.access_control_manager and user_id:
-                access_filter = self.access_control_manager.create_access_filter(user_id)
-
-                # Merge access control filter with existing filters
-                if filters:
-                    # If both have conditions, combine with $and
-                    filters = {
-                        "$and": [
-                            filters,
-                            access_filter
-                        ]
-                    }
-                else:
-                    # If no existing filters, just use access filter
-                    filters = access_filter
-
-            # Prepare Chroma query
-            search_params = {
-                'query': {'embedding': query_embedding},
-                'where': filters if filters else None,
-                'limit': limit,
-                'include': ["metadatas", "distances"]
-            }
-
-            # Execute vector search
-            search_start = time.time()
-            image_results = await self.chroma_manager.search(
-                collection_name="generated_images",
-                **search_params
-            )
-            search_time = (time.time() - search_start) * 1000
-
-            # Process results
-            items = []
-            for idx, result in enumerate(image_results.get('results', [])):
-                metadata = result.get('metadata', {})
-
-                # Apply additional access control check
-                if self.access_control_manager and user_id:
-                    # Check if user has access to this image
-                    if not self.access_control_manager.check_access(
-                            {'metadata': metadata}, user_id, "view"
-                    ):
-                        # Skip this result if user doesn't have access
-                        continue
-
-                # Add the image URL/path
-                image_path = metadata.get('image_path', "")
-                thumbnail_path = metadata.get('thumbnail_path', "")
-
-                items.append({
-                    'id': result.get('id'),
-                    'metadata': metadata,
-                    'image_path': image_path,
-                    'thumbnail_path': thumbnail_path,
-                    'rank': idx + 1
-                })
+            results['performance']['total_time_ms'] = (time.time() - start_time) * 1000
 
             # Log performance metrics if analytics available
             if self.analytics and 'query_id' in parameters:
                 self.analytics.log_performance_metrics(
                     query_id=parameters['query_id'],
-                    embedding_time_ms=int(embedding_time),
-                    search_time_ms=int(search_time),
                     total_time_ms=int((time.time() - start_time) * 1000)
                 )
 
-            return {
-                'success': True,
-                'type': 'image_search',
-                'items': items,
-                'total_found': len(items),
-                'performance': {
-                    'embedding_time_ms': embedding_time,
-                    'search_time_ms': search_time,
-                    'total_time_ms': (time.time() - start_time) * 1000
-                }
-            }
+            return results
 
         except Exception as e:
             self.logger.error(f"Error in image search: {e}", exc_info=True)
-            raise
+
+            # Return a properly structured error response
+            return {
+                'success': False,
+                'error': str(e),
+                'type': 'image_search',
+                'items': [],
+                'total_found': 0,
+                'performance': {
+                    'total_time_ms': (time.time() - start_time) * 1000
+                }
+            }
 
     async def handle_comparison(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """

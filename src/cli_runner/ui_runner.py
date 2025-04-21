@@ -73,8 +73,6 @@ class UIRunner:
                     self._handle_list_images_command()
                 elif cmd.lower().startswith("query"):
                     self._handle_query_command(cmd)
-                elif cmd.lower().startswith("compare-models"):
-                    self._handle_compare_models_command(cmd)
                 elif cmd.lower().startswith("generate-notebook"):
                     self._handle_generate_notebook_command(cmd)
                 else:
@@ -99,7 +97,6 @@ class UIRunner:
             "query": "Search for model scripts or images",
             "list-models": "List available models",
             "list-images": "List available images",
-            "compare-models": "Compare two or more models",
             "generate-notebook": "Generate a Colab notebook for a model",
             "help": "Show available commands",
             "exit": "Exit the program"
@@ -122,24 +119,6 @@ class UIRunner:
         available_models = access_control.get_accessible_models(self.user_id)
         print("\nAvailable models:")
         self._display_models_pretty(available_models)
-
-    def _handle_list_images_command(self):
-        """
-        List all images accessible to the current user.
-
-        Retrieves and displays images that the current user has permission
-        to access in a formatted table.
-        """
-        access_control = self.components["vector_db_manager"]["access_control"]
-
-        # Get images the user has access to
-        available_images = access_control.get_accessible_images(self.user_id)
-
-        print("\nAvailable images:")
-        if not available_images:
-            print("  No images available")
-        else:
-            self._display_images_pretty(available_images)
 
     def _handle_query_command(self, cmd):
         """
@@ -174,6 +153,15 @@ class UIRunner:
 
         print("Searching...")
 
+        # Special handling for image searches if needed
+        if parsed_query["intent"] == "image_search":
+            # For image uploads (not implemented in CLI mode)
+            # In a real UI, this would handle file uploads for image-to-image search
+            print("Note: Image uploads for image-to-image similarity search are not supported in CLI mode.")
+
+            # If UI mode had an image upload, you would add:
+            # parsed_query["parameters"]["query_image"] = uploaded_image_data
+
         # Dispatch the query
         search_results = asyncio.run(search_dispatcher.dispatch(
             query=parsed_query.get("processed_query", query_text),
@@ -182,16 +170,22 @@ class UIRunner:
             user_id=self.user_id
         ))
 
-        # Process and rerank search results
-        # Use max_to_return = 3 as a trade off between details in search result and size of LLM input
-        reranked_results = self._process_search_results(search_results, reranker, parsed_query, query_text, max_to_return=3)
+        # Different handling based on query type
+        if parsed_query["intent"] == "image_search":
+            self._display_image_search_results(search_results)
+        else:
+            # Process and rerank search results
+            # Use max_to_return = 3 as a trade off between details in search result and size of LLM input
+            reranked_results = self._process_search_results(search_results, reranker, parsed_query, query_text,
+                                                            max_to_return=3)
 
-        def remove_field(dict_list, field_to_remove):
-            return [{k: v for k, v in item.items() if k != field_to_remove} for item in dict_list]
-        reranked_results = remove_field(reranked_results, "content")
+            def remove_field(dict_list, field_to_remove):
+                return [{k: v for k, v in item.items() if k != field_to_remove} for item in dict_list]
 
-        # Generate response using appropriate template
-        self._generate_query_response(query_text, reranked_results, parsed_query, template_manager, llm_interface)
+            reranked_results = remove_field(reranked_results, "content")
+
+            # Generate response using appropriate template
+            self._generate_query_response(query_text, reranked_results, parsed_query, template_manager, llm_interface)
 
     def _process_search_results(self, search_results, reranker, parsed_query, query_text, max_to_return=10,
                                 rerank_threshold=0.05):
@@ -635,29 +629,6 @@ class UIRunner:
             except:
                 print("Could not print raw response")
 
-    def _handle_compare_models_command(self, cmd):
-        """
-        Handle the compare-models command.
-
-        Parses model IDs to compare and displays a placeholder message.
-
-        Args:
-            cmd (str): The command string, which may include model IDs.
-        """
-        if cmd.lower() == "compare-models":
-            models_to_compare = input("Enter model IDs to compare (comma separated): ").split(",")
-        else:
-            models_to_compare = cmd[14:].strip().split(",")
-
-        models_to_compare = [model.strip() for model in models_to_compare]
-
-        if len(models_to_compare) < 2:
-            print("Please specify at least two models to compare.")
-            return
-
-        print(f"Comparing models: {', '.join(models_to_compare)}...")
-        print("Model comparison functionality will be implemented in a future update.")
-
     def _handle_generate_notebook_command(self, cmd):
         """
         Handle the generate-notebook command.
@@ -741,38 +712,158 @@ class UIRunner:
 
         print(table)
 
-    def _display_images_pretty(self, available_images):
+    def _display_image_search_results(self, search_results):
         """
-        Display images in a nicely formatted table.
-
-        Creates and prints a table showing image information with proper
-        column alignment and truncation for long values.
+        Display image search results in a table format with ASCII thumbnails.
 
         Args:
-            available_images (list): List of image dictionaries to display.
+            search_results (dict): Results from the image search.
         """
-        table = PrettyTable()
-        table.field_names = ["Image ID", "Prompt", "File Path"]
+        if not search_results.get('success', False):
+            print(f"Image search failed: {search_results.get('error', 'Unknown error')}")
+            return
 
-        # Align all columns to the left
-        table.align["Image ID"] = "l"
-        table.align["Prompt"] = "l"
-        table.align["File Path"] = "l"
+        items = search_results.get('items', [])
+        if not items:
+            print("No images found matching your search criteria.")
+            return
 
-        for image in available_images:
-            image_id = image['id']
-            prompt = image.get('prompt', 'No prompt')
-            filepath = image.get('filepath', 'No path')
+        print(f"\nFound {len(items)} images:")
 
-            # Optional: truncate long values
+        # Try to import necessary libraries for image processing
+        try:
+            from PIL import Image
+            import numpy as np
+            has_pil = True
+        except ImportError:
+            print("PIL/Pillow not installed. Thumbnails will not be displayed.")
+            has_pil = False
+
+        # Define ASCII characters for grayscale representation (from dark to light)
+        ascii_chars = '@%#*+=-:. '
+
+        # Function to convert image to ASCII art
+        def image_to_ascii(image_path, width=30, height=15):
+            try:
+                # Open the image and resize it
+                img = Image.open(image_path)
+                img = img.resize((width, height))
+                img = img.convert('L')  # Convert to grayscale
+
+                # Convert pixels to ASCII characters
+                pixels = np.array(img)
+                ascii_img = []
+                for row in pixels:
+                    ascii_row = ''
+                    for pixel in row:
+                        # Map pixel value to ASCII character
+                        index = int(pixel * (len(ascii_chars) - 1) / 255)
+                        ascii_row += ascii_chars[index]
+                    ascii_img.append(ascii_row)
+
+                return ascii_img
+            except Exception as e:
+                return [f"Error loading image: {e}"]
+
+        # Custom table class to include ASCII thumbnails
+        class ThumbnailTable:
+            def __init__(self):
+                self.rows = []
+                self.headers = ["#", "ID", "Source Model", "Prompt", "Thumbnail", "Image Path"]
+
+            def add_row(self, row_data, ascii_img=None):
+                if ascii_img:
+                    row_data_with_thumbnail = row_data.copy()
+                    row_data_with_thumbnail.insert(-1, ascii_img)  # Insert thumbnail before image path
+                    self.rows.append(row_data_with_thumbnail)
+                else:
+                    row_data.insert(-1, ["Thumbnail not available"])  # Insert placeholder
+                    self.rows.append(row_data)
+
+            def __str__(self):
+                # Calculate column widths for text columns
+                col_widths = [max([len(str(row[i])) for row in self.rows] + [len(self.headers[i])])
+                              for i in range(len(self.headers)) if i != 4]  # Skip thumbnail column
+
+                # Create header line
+                header = " | ".join(
+                    f"{self.headers[i]:<{width}}" if i < 4 else
+                    (f"{self.headers[i]}" if i == 4 else f"{self.headers[i]:<{col_widths[i - 1]}}")
+                    for i, width in enumerate(col_widths + [0])
+                )
+                separator = "-" * len(header)
+
+                # Build the table string
+                result = [header, separator]
+
+                for row in self.rows:
+                    # Format each non-thumbnail column
+                    formatted_row = [
+                        f"{row[0]:>{col_widths[0]}}" if i == 0 else  # Right-align first column (#)
+                        f"{str(row[i]):<{col_widths[i]}}" if i < 4 else  # Left-align other text columns
+                        f"{str(row[i]):<{col_widths[i - 1]}}" if i == 5 else  # Skip thumbnail index adjustment
+                        ""  # Placeholder for thumbnail
+                        for i in range(len(row)) if i != 4  # Skip thumbnail in this formatting
+                    ]
+
+                    # Add the row header
+                    result.append(" | ".join(formatted_row[:4]) + " |")
+
+                    # Add thumbnail lines
+                    for line in row[4]:  # Thumbnail is at index 4
+                        result.append(f"{' ' * (len(' | '.join(formatted_row[:4])) + 2)}| {line}")
+
+                    # Add the file path
+                    result.append(f"{' ' * (len(' | '.join(formatted_row[:4])) + 2)}| {formatted_row[4]}")
+
+                    # Add separator
+                    result.append(separator)
+
+                return "\n".join(result)
+
+        # Create and populate the table
+        table = ThumbnailTable()
+
+        for i, item in enumerate(items, 1):
+            metadata = item.get('metadata', {})
+
+            # Get values with fallbacks
+            image_id = item.get('id', 'Unknown')
+            model_id = metadata.get('source_model_id', metadata.get('model_id', 'Unknown'))
+            prompt = metadata.get('prompt', 'No prompt')
+            image_path = item.get('image_path', metadata.get('image_path', 'Not available'))
+
+            # Get thumbnail path if available
+            thumbnail_path = item.get('thumbnail_path', metadata.get('thumbnail_path', image_path))
+
+            # Truncate long values
             if len(prompt) > 40:
                 prompt = prompt[:37] + "..."
-            if len(filepath) > 50:
-                filepath = filepath[:47] + "..."
+            if len(image_path) > 40:
+                image_path = image_path[:37] + "..."
 
-            table.add_row([image_id, prompt, filepath])
+            # Generate ASCII thumbnail if PIL is available
+            if has_pil and thumbnail_path and thumbnail_path != 'Not available':
+                import os
+                if os.path.exists(thumbnail_path):
+                    ascii_img = image_to_ascii(thumbnail_path)
+                else:
+                    ascii_img = ["Image file not found"]
+            else:
+                ascii_img = ["Thumbnail not available"]
 
+            table.add_row([i, image_id, model_id, prompt, image_path], ascii_img)
+
+        # Print the table
         print(table)
+
+        # Print performance metrics if available
+        if 'performance' in search_results:
+            perf = search_results['performance']
+            print("\nPerformance:")
+            for metric, value in perf.items():
+                if isinstance(value, (int, float)):
+                    print(f"  {metric}: {value:.2f} ms")
 
     def generate_notebook(self, components, model_id, output_path):
         """
@@ -892,3 +983,279 @@ class UIRunner:
                 })
 
         return chunk_contents
+
+    def _handle_list_images_command(self):
+        """
+        List all images accessible to the current user.
+
+        Retrieves and displays images that the current user has permission
+        to access in a formatted table with thumbnails.
+        """
+        try:
+            access_control = self.components["vector_db_manager"]["access_control"]
+
+            # Get images the user has access to
+            # Modified to handle the case where get_accessible_images might fail
+            try:
+                available_images = access_control.get_accessible_images(self.user_id)
+            except AttributeError:
+                # Fallback: Get all images if access control is not properly implemented
+                print("Warning: Access control not fully implemented. Showing all available images.")
+                chroma_manager = self.components["vector_db_manager"]["chroma_manager"]
+                # Use a safer method to get images
+                available_images = asyncio.run(self._get_all_images(chroma_manager))
+
+            print("\nAvailable images:")
+            self._display_images_with_thumbnails(available_images, is_search_result=False)
+        except Exception as e:
+            print(f"Error listing images: {str(e)}")
+            print("Please ensure the vector database and access control are properly configured.")
+
+    async def _get_all_images(self, chroma_manager):
+        """
+        Fallback method to get all images when access control fails.
+
+        Args:
+            chroma_manager: The Chroma database manager
+
+        Returns:
+            List of image dictionaries
+        """
+        try:
+            # Query for all images in the generated_images collection
+            results = await chroma_manager.get(
+                collection_name="generated_images",
+                include=["metadatas"],
+                limit=100  # Set a reasonable limit
+            )
+
+            if results and "results" in results:
+                images = []
+                for item in results["results"]:
+                    metadata = item.get("metadata", {})
+                    images.append({
+                        "id": item.get("id", "Unknown"),
+                        "prompt": metadata.get("prompt", "No prompt"),
+                        "image_path": metadata.get("image_path", "Not available"),
+                        "thumbnail_path": metadata.get("thumbnail_path", metadata.get("image_path", "Not available")),
+                        "metadata": metadata
+                    })
+                return images
+            return []
+        except Exception as e:
+            print(f"Error retrieving images: {str(e)}")
+            return []
+
+    def _display_images_with_thumbnails(self, images, is_search_result=False):
+        """
+        Display images in a formatted table with ASCII thumbnails.
+        Works for both image lists and search results.
+
+        Args:
+            images (list): List of image dictionaries to display.
+            is_search_result (bool): Whether the images are from search results.
+        """
+        if not images:
+            print("  No images available")
+            return
+
+        # Try to import necessary libraries for image processing
+        try:
+            from PIL import Image
+            import numpy as np
+            has_pil = True
+        except ImportError:
+            print("PIL/Pillow not installed. Thumbnails will not be displayed.")
+            has_pil = False
+
+        # Define ASCII characters for grayscale representation (from dark to light)
+        ascii_chars = '@%#*+=-:. '
+
+        # Function to convert image to ASCII art
+        def image_to_ascii(image_path, width=30, height=15):
+            try:
+                # Check if path exists
+                import os
+                if not os.path.exists(image_path):
+                    return ["Image file not found"]
+
+                # Open the image and resize it
+                img = Image.open(image_path)
+                img = img.resize((width, height))
+                img = img.convert('L')  # Convert to grayscale
+
+                # Convert pixels to ASCII characters
+                pixels = np.array(img)
+                ascii_img = []
+                for row in pixels:
+                    ascii_row = ''
+                    for pixel in row:
+                        # Map pixel value to ASCII character
+                        index = int(pixel * (len(ascii_chars) - 1) / 255)
+                        ascii_row += ascii_chars[index]
+                    ascii_img.append(ascii_row)
+
+                return ascii_img
+            except Exception as e:
+                return [f"Error loading image: {str(e)}"]
+
+        # Custom table class to include ASCII thumbnails
+        class ThumbnailTable:
+            def __init__(self, is_search_result):
+                self.rows = []
+                # Different headers based on the context
+                if is_search_result:
+                    self.headers = ["#", "ID", "Source Model", "Prompt", "Thumbnail", "Image Path"]
+                else:
+                    self.headers = ["Image ID", "Prompt", "Thumbnail", "File Path"]
+
+            def add_row(self, row_data, ascii_img=None):
+                if ascii_img:
+                    row_data_with_thumbnail = row_data.copy()
+                    # Insert thumbnail before the last column (file path)
+                    row_data_with_thumbnail.insert(len(row_data_with_thumbnail) - 1, ascii_img)
+                    self.rows.append(row_data_with_thumbnail)
+                else:
+                    # Insert placeholder before the last column
+                    row_data.insert(len(row_data) - 1, ["Thumbnail not available"])
+                    self.rows.append(row_data)
+
+            def __str__(self):
+                if not self.rows:
+                    return "No rows to display"
+
+                # Calculate column widths for text columns (excluding thumbnail)
+                thumbnail_idx = self.headers.index("Thumbnail")
+                col_widths = [
+                    max([len(str(row[i])) for row in self.rows] + [len(self.headers[i])])
+                    for i in range(len(self.headers)) if i != thumbnail_idx
+                ]
+
+                # Create header line
+                header_parts = []
+                col_idx = 0
+                for i, header in enumerate(self.headers):
+                    if i != thumbnail_idx:
+                        width = col_widths[col_idx]
+                        # Right align first column if it's a number (#)
+                        if i == 0 and header == "#":
+                            header_parts.append(f"{header:>{width}}")
+                        else:
+                            header_parts.append(f"{header:<{width}}")
+                        col_idx += 1
+                    else:
+                        header_parts.append(header)
+
+                header = " | ".join(header_parts)
+                separator = "-" * len(header)
+
+                # Build the table string
+                result = [header, separator]
+
+                for row in self.rows:
+                    # Format each non-thumbnail column
+                    formatted_row = []
+                    col_idx = 0
+                    for i in range(len(row)):
+                        if i != thumbnail_idx:
+                            width = col_widths[col_idx]
+                            # Right align first column if it's a number (#)
+                            if i == 0 and self.headers[0] == "#":
+                                formatted_row.append(f"{row[i]:>{width}}")
+                            else:
+                                formatted_row.append(f"{str(row[i]):<{width}}")
+                            col_idx += 1
+
+                    # Calculate where to split the row (before thumbnail)
+                    first_part = " | ".join(formatted_row[:thumbnail_idx])
+                    second_part = " | ".join(formatted_row[thumbnail_idx:])
+
+                    # Add the row header
+                    result.append(f"{first_part} |")
+
+                    # Add thumbnail lines
+                    for line in row[thumbnail_idx]:
+                        result.append(f"{' ' * (len(first_part) + 2)}| {line}")
+
+                    # Add the file path
+                    result.append(f"{' ' * (len(first_part) + 2)}| {second_part}")
+
+                    # Add separator
+                    result.append(separator)
+
+                return "\n".join(result)
+
+        # Create and populate the table
+        table = ThumbnailTable(is_search_result)
+
+        # Ensure images is always treated as a list
+        if isinstance(images, dict) and 'items' in images:
+            image_list = images.get('items', [])
+            performance_data = images.get('performance', {})
+        else:
+            image_list = images if isinstance(images, list) else []
+            performance_data = None
+
+        for i, image in enumerate(image_list, 1):
+            if is_search_result:
+                # Handle search result format
+                metadata = image.get('metadata', {})
+                image_id = image.get('id', 'Unknown')
+                model_id = metadata.get('source_model_id', metadata.get('model_id', 'Unknown'))
+                prompt = metadata.get('prompt', 'No prompt')
+                image_path = image.get('image_path', metadata.get('image_path', 'Not available'))
+                thumbnail_path = image.get('thumbnail_path', metadata.get('thumbnail_path', image_path))
+                row_data = [i, image_id, model_id, prompt, image_path]
+            else:
+                # Handle list format
+                image_id = image.get('id', 'Unknown')
+                prompt = image.get('prompt', 'No prompt')
+                image_path = image.get('filepath', image.get('image_path', 'No path'))
+                thumbnail_path = image.get('thumbnail_path', image_path)
+                row_data = [image_id, prompt, image_path]
+
+            # Truncate long values
+            for j in range(len(row_data)):
+                if isinstance(row_data[j], str) and len(row_data[j]) > 40:
+                    row_data[j] = row_data[j][:37] + "..."
+
+            # Generate ASCII thumbnail if PIL is available
+            if has_pil and thumbnail_path and thumbnail_path not in ['No path', 'Not available']:
+                import os
+                if os.path.exists(thumbnail_path):
+                    ascii_img = image_to_ascii(thumbnail_path)
+                else:
+                    ascii_img = ["Image file not found"]
+            else:
+                ascii_img = ["Thumbnail not available"]
+
+            table.add_row(row_data, ascii_img)
+
+        # Print the table
+        print(table)
+
+        # Print performance metrics if available
+        if performance_data:
+            print("\nPerformance:")
+            for metric, value in performance_data.items():
+                if isinstance(value, (int, float)):
+                    print(f"  {metric}: {value:.2f} ms")
+
+    def _display_image_search_results(self, search_results):
+        """
+        Display image search results in a table format with ASCII thumbnails.
+
+        Args:
+            search_results (dict): Results from the image search.
+        """
+        if not search_results.get('success', False):
+            print(f"Image search failed: {search_results.get('error', 'Unknown error')}")
+            return
+
+        items = search_results.get('items', [])
+        if not items:
+            print("No images found matching your search criteria.")
+            return
+
+        print(f"\nFound {len(items)} images:")
+        self._display_images_with_thumbnails(items, is_search_result=True)

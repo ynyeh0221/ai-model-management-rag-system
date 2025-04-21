@@ -667,16 +667,102 @@ class QueryParser:
             Dictionary of image search parameters
         """
         params = {}
+        query_lower = query_text.lower()
 
-        # Extract prompt terms
+        # Determine search type based on query patterns
+        if re.search(r"highest\s+epoch|latest\s+epoch", query_lower):
+            params["search_type"] = "highest_epoch"
+        elif re.search(r"epoch\s*[=:]\s*\d+", query_lower) or re.search(r"from\s+epoch\s+\d+", query_lower):
+            params["search_type"] = "epoch"
+            # Extract epoch number
+            epoch_match = re.search(r"epoch\s*[=:]\s*(\d+)", query_lower) or re.search(r"from\s+epoch\s+(\d+)",
+                                                                                       query_lower)
+            if epoch_match:
+                params["epoch"] = int(epoch_match.group(1))
+        elif re.search(r"tag[s]?\s*[=:]\s*|with\s+tags?\s+", query_lower):
+            params["search_type"] = "tag"
+            # Extract tags
+            tags_pattern = r"tag[s]?\s*[=:]\s*\"?([^\"]+)\"?|with\s+tags?\s+\"?([^\"]+)\"?"
+            tags_match = re.search(tags_pattern, query_lower)
+            if tags_match:
+                # Get whichever group matched
+                tags_str = tags_match.group(1) if tags_match.group(1) else tags_match.group(2)
+                # Split by commas or 'and'
+                tags = re.split(r',|\sand\s', tags_str)
+                params["tags"] = [tag.strip() for tag in tags if tag.strip()]
+                params["require_all"] = "all" in query_lower and "tags" in query_lower
+        elif re.search(r"color[s]?\s*[=:]\s*|with\s+color[s]?\s+", query_lower):
+            params["search_type"] = "color"
+            # Extract colors
+            colors_pattern = r"color[s]?\s*[=:]\s*\"?([^\"]+)\"?|with\s+color[s]?\s+\"?([^\"]+)\"?"
+            colors_match = re.search(colors_pattern, query_lower)
+            if colors_match:
+                # Get whichever group matched
+                colors_str = colors_match.group(1) if colors_match.group(1) else colors_match.group(2)
+                # Split by commas or 'and'
+                colors = re.split(r',|\sand\s', colors_str)
+                params["colors"] = [color.strip() for color in colors if color.strip()]
+        elif re.search(r"date\s*[=:]\s*|created\s+(on|in)\s+", query_lower):
+            params["search_type"] = "date"
+            # Extract date components
+            date_filter = {}
+
+            # Look for year
+            year_match = re.search(r"(20\d{2})", query_lower)
+            if year_match:
+                date_filter["created_year"] = year_match.group(1)
+
+            # Look for month
+            months = ["january", "february", "march", "april", "may", "june",
+                      "july", "august", "september", "october", "november", "december"]
+            for i, month in enumerate(months, 1):
+                if month in query_lower:
+                    date_filter["created_month"] = str(i).zfill(2)  # "01" for January, etc.
+                    break
+
+            params["date_filter"] = date_filter
+        elif re.search(r"content\s*[=:]\s*|subject\s*[=:]\s*|scene\s*[=:]\s*", query_lower):
+            params["search_type"] = "content"
+            # Extract content filter components
+            content_filter = {}
+
+            # Subject type
+            subject_match = re.search(r"subject\s*[=:]\s*\"?([^\"]+)\"?", query_lower)
+            if subject_match:
+                content_filter["subject_type"] = subject_match.group(1).strip()
+
+            # Scene type
+            scene_match = re.search(r"scene\s*[=:]\s*\"?([^\"]+)\"?", query_lower)
+            if scene_match:
+                content_filter["scene_type"] = scene_match.group(1).strip()
+
+            params["content_filter"] = content_filter
+        elif re.search(r"model[_\-\s]?id\s*[=:]\s*|generated\s+by\s+", query_lower):
+            params["search_type"] = "model_id"
+            # Extract model ID
+            model_id_match = re.search(r"model[_\-\s]?id\s*[=:]\s*\"?([^\"]+)\"?", query_lower)
+            if not model_id_match:
+                model_id_match = re.search(r"generated\s+by\s+\"?([^\"]+)\"?", query_lower)
+
+            if model_id_match:
+                params["model_id"] = model_id_match.group(1).strip()
+        else:
+            # Default to similarity search
+            params["search_type"] = "similarity"
+
+        # Extract prompt terms (for similarity search)
         prompt_pattern = r"(prompt|prompts|text)[:\s]+[\"']?([\w\s,]+)[\"']?"
-        match = re.search(prompt_pattern, query_text.lower())
+        match = re.search(prompt_pattern, query_lower)
         if match:
             params["prompt_terms"] = match.group(2).strip()
 
+            # If search_type is similarity, set query_text as well
+            if params.get("search_type") == "similarity":
+                params["query_text"] = match.group(2).strip()
+
         # Extract style tags
         style_pattern = r"(style|type|category|look)[:\s]+[\"']?([\w\s,]+)[\"']?"
-        match = re.search(style_pattern, query_text.lower())
+        match = re.search(style_pattern, query_lower)
         if match:
             # Split by commas and clean up
             styles = re.split(r',|\sand\s', match.group(2))
@@ -684,16 +770,21 @@ class QueryParser:
 
         # Extract resolution preference
         resolution_pattern = r"(resolution|size|dimensions)[:\s]+(\d+)\s*[x×]\s*(\d+)"
-        match = re.search(resolution_pattern, query_text.lower())
+        match = re.search(resolution_pattern, query_lower)
         if match:
             params["resolution"] = {
                 "width": int(match.group(2)),
                 "height": int(match.group(3))
             }
 
-        # Flag to show model ID and image path
-        params["show_model_id"] = True
-        params["show_image_path"] = True
+        # Extract limit for results
+        limit_pattern = r"(limit|top|first)\s+(\d+)"
+        match = re.search(limit_pattern, query_lower)
+        if match:
+            params["limit"] = int(match.group(2))
+        else:
+            # Default limit
+            params["limit"] = 10
 
         return params
 
