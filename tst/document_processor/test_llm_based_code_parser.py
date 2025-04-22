@@ -23,6 +23,7 @@ class TestCodeParser(unittest.TestCase):
                 "framework": {"name": "PyTorch", "version": "1.13"},
                 "architecture": {"type": "CNN"},
                 "dataset": {"name": "CIFAR-10"},
+                "images_folder": {"name": "a/b/c"},
                 "training_config": {
                     "batch_size": 64,
                     "learning_rate": 0.001,
@@ -119,6 +120,13 @@ eval_dataset = "CIFAR-10-test"
         self.assertIsInstance(dataset, dict)
         self.assertIn("name", dataset)
         self.assertIsInstance(dataset["name"], str)
+
+    def test_images_folder_extraction(self):
+        model_info = self.parser.parse_file(self.test_file_path)
+        images_folder = model_info.get("images_folder", {})
+        self.assertIsInstance(images_folder, dict)
+        self.assertIn("name", images_folder)
+        self.assertIsInstance(images_folder["name"], str)
 
     def test_training_config_extraction(self):
         model_info = self.parser.parse_file(self.test_file_path)

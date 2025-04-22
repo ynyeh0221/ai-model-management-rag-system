@@ -150,6 +150,35 @@
       "updated_date": "2025-04-17T00:00:00"
     },
     {
+      "schema_id": "model_images_folder_schema",
+      "schema_version": "1.0.0",
+      "schema_definition": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "content": {"type": "string"},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model_id": {"type": "string"},
+              "images_folder": {
+                "path": "object",
+                "properties": {
+                  "name": {"type": ["string", "null"]}
+                },
+                "required": ["name"]
+              },
+              "access_control": {"type": "object"}
+            },
+            "required": ["model_id", "images_folder"]
+          }
+        },
+        "required": ["id", "content", "metadata"]
+      },
+      "description": "Schema for model datasets information",
+      "updated_date": "2025-04-22T00:00:00"
+    },
+    {
       "schema_id": "model_training_configs_schema",
       "schema_version": "1.0.0",
       "schema_definition": {

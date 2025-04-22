@@ -3,9 +3,11 @@ import datetime
 import json
 import os
 import re
-from typing import List
+from typing import List, Tuple
 
 from git import Repo
+from overrides.signature import is_param_defined_in_sub
+from torchgen.packaged.autograd.gen_python_functions import is_py_sparse_function
 
 """
 LLMBasedCodeParser: A class for extracting structured metadata from ML model code using AST and LLMs.
@@ -135,6 +137,16 @@ class LLMBasedCodeParser:
         else:
             model_info["dataset"] = {"name": None}
 
+        images_folder = self.llm_metadata_cache.get("images_folder", {})
+        if isinstance(images_folder, str):
+            model_info["images_folder"] = {"name": images_folder}
+        elif isinstance(images_folder, dict):
+            model_info["images_folder"] = {
+                "name": images_folder.get("name") if isinstance(images_folder.get("name"), str) else None
+            }
+        else:
+            model_info["images_folder"] = {"name": None}
+
         tc = self.llm_metadata_cache.get("training_config", {})
         if isinstance(tc, dict):
             model_info["training_config"] = {
@@ -167,11 +179,15 @@ class LLMBasedCodeParser:
     def generate_ast_summary(self, code_str: str, file_path: str = "<unknown>") -> str:
         """
         Parse code using AST and generate a human-readable digest of the code structure.
-        Now also picks up layer definitions and logs their key dims.
-        Additionally, detects and resolves literal variables for paths (e.g., save_dir), and key config values (batch_size, lr, epochs, device).
-        Values for lr, epoch, batch, device, seed, etc., are reported as Variables.
+        - Retains original parsing of imports, classes, functions, variables, and layers.
+        - Captures literal config vars (batch_size, lr, epochs, device, seed).
+        - Captures path-like vars (dir, path, folder) into literal_vars.
+        - Detects savefig/imwrite calls and os.path.join usage.
+        - Additionally, post-processes literal_vars to extract image output directories for any save_dir, results_dir, save_path, etc.
+          Uses heuristic: if the literal string appears to be a file (has extension), take its dirname; otherwise treat it as the directory itself.
+          Filters out any folders that match default parameter values for save_* in function signatures.
+          If no image directories are found, outputs "Images path: N/A".
         """
-        import os
         try:
             tree = ast.parse(code_str, filename=file_path)
         except SyntaxError as e:
@@ -180,54 +196,37 @@ class LLMBasedCodeParser:
         lines = []
         literal_vars = {}
         image_folders = set()
+        default_paths = set()
+
+        def eval_constant(node):
+            """Resolve simple constants, string concatenation, and basic f-strings."""
+            if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, float, bool)):
+                return node.value
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+                left = eval_constant(node.left)
+                right = eval_constant(node.right)
+                if isinstance(left, str) and isinstance(right, str):
+                    return left + right
+            if isinstance(node, ast.JoinedStr):
+                parts = []
+                for v in node.values:
+                    if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                        parts.append(v.value)
+                    elif isinstance(v, ast.Str):
+                        parts.append(v.s)
+                    else:
+                        return None
+                return "".join(parts)
+            return None
+
+        def determine_folder(path_str: str) -> str:
+            """If value has file extension, return dirname; else return itself."""
+            base, ext = os.path.splitext(path_str)
+            if ext:
+                return os.path.dirname(path_str) or path_str
+            return path_str
 
         class CodeSummaryVisitor(ast.NodeVisitor):
-            def visit_Assign(self, node):
-                # capture literal string or numeric constants for relevant config vars
-                if isinstance(node.value, ast.Constant) and isinstance(node.value.value, (str, int, float, bool)):
-                    for t in node.targets:
-                        if isinstance(t, ast.Name):
-                            name = t.id
-                            key = name.lower()
-                            # path-like vars
-                            if any(k in key for k in ['dir', 'path', 'folder']):
-                                literal_vars[name] = node.value.value
-                            # config vars
-                            if any(k in key for k in ['batch', 'lr', 'epoch', 'device', 'seed']):
-                                literal_vars[name] = node.value.value
-                # existing assign logic for variables and layers
-                targets = [t.id for t in node.targets if isinstance(t, ast.Name)]
-                try:
-                    expr = ast.unparse(node.value)
-                except Exception:
-                    expr = "<complex_expression>"
-                for t in targets:
-                    if any(k in t.lower() for k in ["batch", "lr", "epoch", "optimizer", "device", "model", "train"]):
-                        lines.append(f"Variable: {t} = {expr}")
-                if isinstance(node.value, ast.Call):
-                    func = node.value.func
-                    call_name = ast.unparse(func)
-                    is_layer = (
-                            (isinstance(func, ast.Attribute) and func.attr and func.attr[0].isupper())
-                            or (isinstance(func, ast.Name) and func.id[0].isupper())
-                    )
-                    if targets and is_layer:
-                        args = []
-                        for arg in node.value.args:
-                            try:
-                                args.append(ast.unparse(arg))
-                            except Exception:
-                                args.append("?")
-                        for kw in node.value.keywords:
-                            key = kw.arg or ""
-                            try:
-                                val = ast.unparse(kw.value)
-                            except Exception:
-                                val = "?"
-                            args.append(f"{key}={val}")
-                        short_args = ", ".join(args[:2] + args[2:])
-                        lines.append(f"Layer: {targets[0]} = {call_name}({short_args})")
-
             def visit_Import(self, node):
                 names = [alias.name for alias in node.names]
                 lines.append(f"Import: {', '.join(names)}")
@@ -238,60 +237,113 @@ class LLMBasedCodeParser:
                 lines.append(f"From {module} import {', '.join(names)}")
 
             def visit_ClassDef(self, node):
-                bases = [getattr(b, "id", getattr(b, "attr", "object")) for b in node.bases]
-                docstring = ast.get_docstring(node)
+                bases = [getattr(b, 'id', getattr(b, 'attr', 'object')) for b in node.bases]
                 lines.append(f"\nClass: {node.name} (inherits from {', '.join(bases)})")
-                if docstring:
-                    lines.append(f"  Docstring: {docstring.strip()}")
+                doc = ast.get_docstring(node)
+                if doc:
+                    lines.append(f"  Docstring: {doc.strip()}")
+                self.generic_visit(node)
 
             def visit_FunctionDef(self, node):
+                # record default paths for save_* parameters
+                params = [arg.arg for arg in node.args.args]
+                for name_node, default_node in zip(params[-len(node.args.defaults):], node.args.defaults):
+                    lname = name_node.lower()
+                    if any(k in lname for k in ('save_dir', 'results_dir', 'save_path', 'output_dir')):
+                        val = eval_constant(default_node)
+                        if isinstance(val, str):
+                            default_paths.add(determine_folder(val))
+                # existing signature logging
                 args = [arg.arg for arg in node.args.args]
-                defaults = [ast.unparse(d) if hasattr(ast, "unparse") else repr(d) for d in node.args.defaults]
+                defaults = [ast.unparse(d) if hasattr(ast, 'unparse') else '<default>' for d in node.args.defaults]
                 pad = [None] * (len(args) - len(defaults))
-                arg_pairs = [f"{a}={d}" if d else a for a, d in zip(args, pad + defaults)]
-                docstring = ast.get_docstring(node)
-                lines.append(f"\nFunction: {node.name}({', '.join(arg_pairs)})")
-                if docstring:
-                    lines.append(f"  Docstring: {docstring.strip()}")
+                arg_list = [f"{a}={d}" if d else a for a, d in zip(args, pad + defaults)]
+                lines.append(f"\nFunction: {node.name}({', '.join(arg_list)})")
+                doc = ast.get_docstring(node)
+                if doc:
+                    lines.append(f"  Docstring: {doc.strip()}")
+                self.generic_visit(node)
+
+            def visit_Assign(self, node):
+                # capture literal vars
+                val = eval_constant(node.value)
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name):
+                        name = tgt.id
+                        key = name.lower()
+                        if val is not None:
+                            if any(k in key for k in ('dir', 'path', 'folder')):
+                                literal_vars[name] = val
+                            if any(k in key for k in ('batch', 'lr', 'epoch', 'device', 'seed')):
+                                literal_vars[name] = val
+                # detect layer definitions
+                if isinstance(node.value, ast.Call):
+                    call_name = ast.unparse(node.value.func)
+                    if call_name and call_name[0].isupper():
+                        args_repr = []
+                        for a in node.value.args + node.value.keywords:
+                            try:
+                                args_repr.append(ast.unparse(a))
+                            except:
+                                args_repr.append('?')
+                        for tgt in node.targets:
+                            if isinstance(tgt, ast.Name):
+                                lines.append(f"Layer: {tgt.id} = {call_name}({', '.join(args_repr)})")
+                # log variables
+                expr = ast.unparse(node.value) if hasattr(ast, 'unparse') else '<expr>'
+                for tgt in node.targets:
+                    if isinstance(tgt, ast.Name) and any(k in tgt.id.lower() for k in
+                                                         ('batch', 'lr', 'epoch', 'optimizer', 'device', 'model',
+                                                          'train')):
+                        lines.append(f"Variable: {tgt.id} = {expr}")
+                self.generic_visit(node)
 
             def visit_Call(self, node):
-                # detect plt.savefig or imwrite calls
-                try:
-                    call_name = ast.unparse(node.func)
-                except Exception:
-                    call_name = ""
-                if call_name.endswith("savefig") or call_name.endswith("imwrite"):
+                name = ast.unparse(node.func)
+                if name.endswith('savefig') or name.endswith('imwrite'):
                     if node.args:
-                        arg0 = node.args[0]
-                        if isinstance(arg0, ast.Constant) and isinstance(arg0.value, str):
-                            folder = os.path.dirname(arg0.value)
-                            if folder:
-                                image_folders.add(folder)
-                        elif isinstance(arg0, ast.Name) and arg0.id in literal_vars:
-                            image_folders.add(os.path.dirname(literal_vars[arg0.id]))
-                # detect custom save_dir args
-                for kw in getattr(node, 'keywords', []):
-                    if kw.arg and 'save_dir' in kw.arg and isinstance(kw.value, ast.Name):
-                        var = kw.value.id
-                        if var in literal_vars:
-                            image_folders.add(literal_vars[var])
+                        lit = eval_constant(node.args[0])
+                        if isinstance(lit, str):
+                            image_folders.add(os.path.dirname(lit) or '.')
+                    for kw in node.keywords:
+                        if kw.arg and 'save_dir' in kw.arg and isinstance(kw.value, ast.Name):
+                            var = kw.value.id
+                            if var in literal_vars:
+                                image_folders.add(determine_folder(literal_vars[var]))
+                if isinstance(node.func, ast.Attribute) and ast.unparse(node.func).endswith('path.join'):
+                    parts = [eval_constant(a) for a in node.args]
+                    if all(isinstance(p, str) for p in parts):
+                        joined = os.path.join(*parts)
+                        image_folders.add(os.path.dirname(joined) or '.')
                 self.generic_visit(node)
 
         visitor = CodeSummaryVisitor()
         visitor.visit(tree)
 
-        # report captured literal vars
+        # Post-process literal_vars for save/results paths
         for name, val in literal_vars.items():
-            key = name.lower()
-            if any(k in key for k in ['dir', 'path', 'folder']):
+            low = name.lower()
+            if any(k in low for k in ('save_dir', 'results_dir', 'save_path', 'output_dir')):
+                image_folders.add(determine_folder(val))
+
+        # filter out default signature paths
+        image_folders -= default_paths
+
+        # append captured vars
+        for name, val in literal_vars.items():
+            if any(k in name.lower() for k in ('dir', 'path', 'folder')):
                 lines.append(f"Path variable: {name} = {val}")
             else:
                 lines.append(f"Variable: {name} = {val}")
-        # include image folders
-        for folder in sorted(image_folders):
-            lines.append(f"Images folder: {folder}")
 
-        return "\n".join(lines)
+        # append image folders or N/A
+        if image_folders:
+            for folder in sorted(image_folders):
+                lines.append(f"Images folder: {folder}")
+        else:
+            lines.append("Images folder: N/A")
+
+        return '\n'.join(lines)
 
     def _remove_import_lines(self, code: str) -> str:
         filtered_lines = [
@@ -302,8 +354,8 @@ class LLMBasedCodeParser:
 
     def _extract_llm_metadata(self, code_str: str, file_path: str = "<unknown>", max_retries: int = 15) -> dict:
         # STEP 1: Generate AST digest/summary
-        ast_digest = self.clean_empty_lines(self.generate_ast_summary(code_str, file_path=file_path))
-        # print(f"Total AST digest: {ast_digest}")
+        ast_digest = self.clean_empty_lines(self.generate_ast_summary(code_str=code_str, file_path=file_path))
+        print(f"Total AST digest: {ast_digest}")
 
         # STEP 2: Extract natural-language summary for each digest chunk
         summary = self.extract_natural_language_summary(
@@ -322,7 +374,6 @@ class LLMBasedCodeParser:
         final['ast_summary'] = ast_digest
 
         # STEP 5: Remove unneeded fields
-        final.pop("description", None)
         final.pop("_trace", None)
 
         print(f"Final metadata (from AST summary): {final}")
@@ -334,7 +385,7 @@ class LLMBasedCodeParser:
             return {}
 
         # Reduce input size of LLM
-        if len(chunk_text) >= 2200:
+        if len(chunk_text) >= 2500:
             chunk_text = self.filter_ast_summary_for_metadata(chunk_text)
 
         system_prompt = (
@@ -454,10 +505,14 @@ class LLMBasedCodeParser:
         """
         lines = summary.splitlines()
         filtered: List[str] = []
-        # what prefixes we always keep
-        keep_prefixes = ("Docstring:", "Import:", "From ", "Class:", "Layer:", "Images folder:")
-        # which variable names to keep
-        var_keys = ("batch", "lr", "epoch", "optimizer", "device")
+        if len(summary) <= 9000:
+            # what prefixes we always keep
+            keep_prefixes = ("Docstring:", "Import:", "From ", "Class:", "Layer:", "Images folder:")
+            # which variable names to keep
+            var_keys = ("batch", "lr", "epoch", "optimizer", "device")
+        else: # For long summary, skip some information to trade off llm's input size
+            keep_prefixes = ("Docstring:", "Class:", "Layer:", "Images folder:")
+            var_keys = ("batch", "lr", "optimizer", "device")
 
         for line in lines:
             stripped = line.strip()
@@ -484,7 +539,7 @@ class LLMBasedCodeParser:
 
         # Reduce input size of LLM
         print(f"len(summary): {len(summary)}, file_path: {file_path}")
-        if len(summary) >= 2200:
+        if len(summary) >= 2500:
             summary = self.filter_ast_summary_for_metadata(summary)
             print(f"len(extracted_summary): {len(summary)}, file_path: {file_path}")
 
@@ -493,10 +548,10 @@ class LLMBasedCodeParser:
             "Based on the following model AST digest summary, create a structured representation of the model metadata.\n\n"
             "The output **must strictly follow this exact JSON structure**:\n"
             "{\n"
-            '  \"description\": \"Short summary of what the model does\",\n'
             '  \"framework\": { \"name\": \"...\", \"version\": \"...\" },\n'
             '  \"architecture\": { \"type\": \"...\" },\n'
             '  \"dataset\": { \"name\": \"...\" },\n'
+            '  \"images_folder\": { \"name\": \"...\" },\n'
             '  \"training_config\": {\n'
             '    \"batch_size\": 32,\n'
             '    \"learning_rate\": 0.001,\n'
@@ -510,6 +565,7 @@ class LLMBasedCodeParser:
             "• **framework.version**: look for `torch.__version__` or similar; else “unknown”.\n"
             "• **architecture.type**: identify the high‑level components of the model (e.g. “VAE”, “diffusion model”, “UNet”), listing all major submodels separated by commas; do not list low‑level layers like Conv2d or individual blocks; if none found, use “unknown”.\n"
             "• **dataset.name**: look for dataset identifiers (e.g. “FashionMNIST”); else “unknown”.\n"
+            "• **imaged_folder.name**: look for image folders (e.g. “/a/b/c”); else “unknown”.\n"
             "• **batch_size**: look for `batch_size=` in DataLoader; else null.\n"
             "• **learning_rate**: look for `lr=` or “learning rate”; else null.\n"
             "• **optimizer**: look for optimizer names (Adam, SGD); else “unknown”.\n"
@@ -540,10 +596,11 @@ class LLMBasedCodeParser:
                     json_str = self.sanitize_json_string(match.group())
                     try:
                         parsed = json.loads(json_str)
-                        if self._validate_metadata_structure(parsed):
+                        is_parse_success, reason = self._validate_metadata_structure(parsed)
+                        if is_parse_success:
                             return parsed
                         else:
-                            print(f"[Retry {attempt + 1}] Invalid metadata structure, file_path: {file_path}")
+                            print(f"[Retry {attempt + 1}] Invalid metadata structure: {reason}, file_path: {file_path}")
                     except json.JSONDecodeError:
                         print(f"[Retry {attempt + 1}] Invalid JSON format, file_path: {file_path}")
                 else:
@@ -557,10 +614,10 @@ class LLMBasedCodeParser:
     def _create_default_metadata(self) -> dict:
         """Create default metadata structure with empty/null values."""
         return {
-            "description": "Unknown model purpose",
             "framework": {"name": "unknown", "version": "unknown"},
             "architecture": {"type": "unknown"},
             "dataset": {"name": "unknown"},
+            "imaged_folder": {"name": "unknown"},
             "training_config": {
                 "batch_size": None,
                 "learning_rate": None,
@@ -570,33 +627,36 @@ class LLMBasedCodeParser:
             }
         }
 
-    def _validate_metadata_structure(self, metadata: dict) -> bool:
+    def _validate_metadata_structure(self, metadata: dict) -> Tuple[bool, str]:
         """Validate that the metadata has the required structure."""
         # Check that all required top-level fields exist
-        required_fields = ["description", "framework", "architecture", "dataset", "training_config"]
+        required_fields = ["framework", "architecture", "dataset", "images_folder", "training_config"]
         if not all(field in metadata for field in required_fields):
-            return False
+            return False, "Missing required fields"
 
         # Check that framework has name and version
         if not isinstance(metadata["framework"], dict) or not all(
                 field in metadata["framework"] for field in ["name", "version"]):
-            return False
+            return False, "Invalid framework structure"
 
         # Check that architecture has type
         if not isinstance(metadata["architecture"], dict) or "type" not in metadata["architecture"]:
-            return False
+            return False, "Invalid architecture structure"
 
         # Check that dataset has name
         if not isinstance(metadata["dataset"], dict) or "name" not in metadata["dataset"]:
-            return False
+            return False, "Invalid dataset structure"
+
+        if not isinstance(metadata["images_folder"], dict) or "name" not in metadata["images_folder"]:
+            return False, "Invalid images folder structure"
 
         # Check that training_config has all required fields
         training_config_fields = ["batch_size", "learning_rate", "optimizer", "epochs", "hardware_used"]
         if not isinstance(metadata["training_config"], dict) or not all(
                 field in metadata["training_config"] for field in training_config_fields):
-            return False
+            return False, "Invalid training configuration structure"
 
-        return True
+        return True, ""
 
     def _extract_model_info(self, file_content: str, file_path: str) -> dict:
         try:

@@ -127,7 +127,7 @@ class ScriptProcessorRunner:
         chunks = code_parser.split_ast_and_subsplit_chunks(
             file_content=parse_result["content"],
             file_path=file_path,
-            chunk_size=5000,
+            chunk_size=20000,
             overlap=1000
         )
 
@@ -315,7 +315,18 @@ class ScriptProcessorRunner:
                     "model_id": model_id,
                     "ast_summary": llm_fields["ast_summary"]
                 }
-            }
+            },
+
+            # 10. Model images path information
+            "model_images_folder": {
+                "id": f"model_images_folder_{model_id}",
+                "$schema_version": "1.0.0",
+                "content": f"Model images folder: {model_id}",
+                "metadata": {
+                    "model_id": model_id,
+                    "images_folder": llm_fields["images_folder"]
+                }
+            },
         }
 
         # Add all model_descriptions documents
@@ -351,7 +362,8 @@ class ScriptProcessorRunner:
             "architecture": parse_result.get("architecture", {}),
             "dataset": parse_result.get("dataset", {}),
             "training_config": parse_result.get("training_config", {}),
-            "ast_summary": parse_result.get("ast_summary", {})
+            "ast_summary": parse_result.get("ast_summary", {}),
+            "images_folder": parse_result.get("images_folder", {})
         }
 
         # Ensure all fields are the correct type
@@ -365,6 +377,8 @@ class ScriptProcessorRunner:
             llm_fields["training_config"] = {}
         if isinstance(llm_fields["ast_summary"], str):
             llm_fields["ast_summary"] = {"ast_summary": llm_fields["ast_summary"]}
+        if isinstance(llm_fields["images_folder"], str):
+            llm_fields["images_folder"] = {"name": llm_fields["images_folder"]}
 
         return llm_fields
 
@@ -372,7 +386,7 @@ class ScriptProcessorRunner:
                                                chroma_manager, access_control):
         """Validate and store metadata documents in different tables."""
         critical_failure = False
-        critical_collections = ["model_file", "model_architectures", "model_frameworks", "model_descriptions", "model_ast_summaries"]
+        critical_collections = ["model_file", "model_architectures", "model_frameworks", "model_descriptions", "model_ast_summaries", "model_images_folder"]
 
         for key, value in metadata_documents.items():
             documents = value if isinstance(value, list) else [value]
@@ -543,6 +557,15 @@ class ScriptProcessorRunner:
                 "description": f"""
                                 AST summary type: {ast_summary.get('type', 'N/A')}.
                             """
+            }
+
+        elif doc_type == "model_images_folder":
+            images_folder = metadata.get("images_folder", {})
+            return {
+                "title": f"Images path information for {model_id}",
+                "description": f"""
+                    Images path: {images_folder.get('path', 'N/A')}.
+                """
             }
 
         # Default case
