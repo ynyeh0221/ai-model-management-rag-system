@@ -47,17 +47,18 @@ All metadata is normalized and can be extended or validated against versioned sc
 
 Each piece of metadata is stored as a document in a dedicated vector collection:
 
-| Collection               | Purpose                        | Example Metadata                       |
-|--------------------------|--------------------------------|----------------------------------------|
-| `model_file`             | File-level attributes          | Path, size, creation/modification dates|
-| `model_date`             | Timestamp-based indexing       | Month/year created, last modified      |
-| `model_frameworks`       | Framework metadata             | `{"name": "PyTorch", "version": "2.0"}`|
-| `model_architectures`    | Model type and structure       | `{"type": "Transformer"}`              |
-| `model_datasets`         | Dataset references             | `{"name": "CIFAR-10"}`                 |
-| `model_training_configs` | Training configuration         | Optimizer, epochs, batch size, etc.    |
-| `model_descriptions`     | LLM-generated text summaries   | Concise explanation of each code chunk |
-| `model_ast_summaries`    | Model AST digest summaries     | Concise explanation of code            |
-| `model_scripts_chunks`   | Code snippets and AST sections | Actual Python source segments          |
+| Collection               | Purpose                            | Example Metadata                       |
+|--------------------------|------------------------------------|----------------------------------------|
+| `model_file`             | File-level attributes              | Path, size, creation/modification dates|
+| `model_date`             | Timestamp-based indexing           | Month/year created, last modified      |
+| `model_frameworks`       | Framework metadata                 | `{"name": "PyTorch", "version": "2.0"}`|
+| `model_architectures`    | Model type and structure           | `{"type": "Transformer"}`              |
+| `model_datasets`         | Dataset references                 | `{"name": "CIFAR-10"}`                 |
+| `model_training_configs` | Training configuration             | Optimizer, epochs, batch size, etc.    |
+| `model_descriptions`     | LLM-generated text summaries       | Concise explanation of each code chunk |
+| `model_ast_summaries`    | Model AST digest summaries         | Concise explanation of code            |
+| `model_images_folder`    | Folders to store generated images  | Folder in /a/b/c format                |
+| `model_scripts_chunks`   | Code snippets and AST sections     | Actual Python source segments          |
 
 ---
 
