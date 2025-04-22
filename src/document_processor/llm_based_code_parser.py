@@ -315,7 +315,7 @@ class LLMBasedCodeParser:
 
         # STEP 3: Feed merged summary to LLM for structured metadata generation
         final = self.generate_metadata_from_summary(ast_digest, max_retries=max_retries, file_path=file_path)
-        final['chunk_descriptions'] = self.split_summary_into_chunks(summary_text=summary.get("summary", ""), overlap_lines=0, max_lines_per_chunk=50)
+        final['chunk_descriptions'] = self.split_summary_into_chunks(summary_text=summary.get("summary", ""), overlap_sentences=0, max_sentences_per_chunk=1)
         print(f"Chunk descriptions count: {len(final['chunk_descriptions'])}")
 
         # STEP 4: Store AST digest summary
@@ -339,33 +339,63 @@ class LLMBasedCodeParser:
 
         system_prompt = (
             "You are a senior ML engineer documenting Python training scripts. "
-            "Given an AST summary of a script, produce a human‑readable report with these sections:\n\n"
+            "Given an AST summary of a script, **carefully examine every detail** to produce a complete, human-readable English report.\n\n"
+
+            "**CRITICAL REQUIREMENTS**:\n"
+            "• Thoroughly analyze the AST summary before writing - do not skip or overlook any nodes or attributes.\n"
+            "• Ensure all model components, configurations, and operations in the AST are reflected in your summary.\n"
+            "• Pay special attention to hyperparameters, layer dimensions, conditional logic, and data transformations.\n\n"
+
+            "Produce a report with these sections:\n\n"
             "1. Purpose:\n"
-            "   • In 1–2 sentences, say what the script accomplishes (e.g. “Trains a CNN on MNIST and visualizes embeddings.”).\n\n"
+            "   • In 1–2 sentences, precisely describe what the script accomplishes, mentioning all major features present in the AST.\n\n"
+
             "2. Data & Preprocessing:\n"
-            "   • Dataset class and source directory.\n"
-            "   • Transformations applied.\n"
-            "   • DataLoader settings (batch size, shuffle, splits).\n\n"
+            "   • **Comprehensively document** all dataset classes, sources, and directories from the AST.\n"
+            "   • List **every** transformation and preprocessing step, including normalization, augmentation, or custom functions.\n"
+            "   • Detail **all** DataLoader configurations: batch sizes, shuffle settings, train/val/test splits, num_workers, etc.\n\n"
+
             "3. Model Architecture:\n"
-            "    Describe each layer or block in fluent prose. For example:\n"
-            "      “The first convolutional layer applies 32 filters of size 3×3 to the 1‑channel 28×28 input, producing 32 feature maps of size 26×26. Next, a ReLU activation introduces non‑linearity, followed by a 2×2 max‑pool that halves the spatial dimensions to 13×13.”\n"
-            "    Use complete sentences that explain:\n"
-            "      • What the layer does  \n"
-            "      • Its main parameters  \n"
-            "      • How it transforms the data shape  \n"
-            "    Avoid raw code snippets or parameter lists—focus on a narrative description.\n\n"
+            "   • Describe **every layer** or block found in the AST using fluent prose. For example:\n"
+            "     \"The first convolutional layer applies 32 filters of size 3×3 to the 1‑channel 28×28 input, producing 32 feature maps of size 26×26. Next, a ReLU activation introduces non‑linearity, followed by a 2×2 max‑pool that halves the spatial dimensions to 13×13.\"\n"
+            "   • For each component, explain:\n"
+            "     - What it does and its role in the architecture\n"
+            "     - Its exact parameters (e.g., kernel sizes, strides, padding)\n"
+            "     - How it transforms the data shape through the network\n"
+            "     - Any regularization (dropout, batch norm) or special operations\n"
+            "   • Do NOT omit auxiliary modules, custom layers, or architectural details.\n\n"
+    
             "4. Training Configuration:\n"
-            "   • Optimizer & hyperparameters (lr, weight_decay, etc.).\n"
-            "   • Scheduler settings.\n"
-            "   • Loss function.\n"
-            "   • Number of epochs & hardware target (CPU/GPU/MPS).\n\n"
+            "   • **Document every training parameter** from the AST:\n"
+            "     - Optimizer (type and all hyperparameters like lr, momentum, weight_decay)\n"
+            "     - Learning rate schedules (type, step size, gamma, etc.)\n"
+            "     - Loss function(s) and any weights/parameters\n"
+            "     - Exact number of epochs, early stopping criteria\n"
+            "     - Hardware settings (CPU/GPU/MPS), device allocations\n"
+            "     - Gradient clipping, mixed precision, or other training modifications\n\n"
+    
             "5. Evaluation & Testing:\n"
-            "   • How validation or test loops are run.\n"
-            "   • Metrics computed (accuracy, loss, etc.).\n\n"
+            "   • Detail **all evaluation procedures** found in the AST:\n"
+            "     - Validation frequency and process\n"
+            "     - Test protocols and checkpointing strategies\n"
+            "     - **Every metric** computed (accuracy, F1, confusion matrix, etc.)\n"
+            "     - Any custom evaluation logic or callbacks\n\n"
+    
             "6. Visualization & Artifacts:\n"
-            "   • Plots generated and any image/output folders with example filenames.\n\n"
-            "Use clear headings and bullet lists, **and write everything in natural, fluent prose**—do not include any code snippets, AST node dumps, or quoted low‑level output. "
-            "Focus on explaining each element in descriptive, human‑readable language that an engineer can follow to reproduce the workflow."
+            "   • **List all visualization components**:\n"
+            "     - Plot types (loss curves, confusion matrices, embeddings, etc.)\n"
+            "     - Saving directories and file formats\n"
+            "     - Logging systems (TensorBoard, Wandb, etc.)\n"
+            "     - Model checkpoints and saved artifacts\n\n"
+    
+            "**WRITING GUIDELINES**:\n"
+            "• Use clear headings and bullet lists.\n"
+            "• Write in natural, fluent prose - no code snippets or raw AST output.\n"
+            "• Be comprehensive - if it's in the AST, it must be in your summary.\n"
+            "• Double-check that your summary includes ALL components mentioned in the AST.\n"
+            "• Ensure an ML engineer could reproduce the exact workflow from your description.\n\n"
+    
+            "Remember: Missing important details means failing the task. Be meticulous and thorough."
         )
 
         for attempt in range(max_retries):
@@ -636,20 +666,26 @@ class LLMBasedCodeParser:
 
         return chunks
 
-
-    def split_summary_into_chunks(self, summary_text, overlap_lines=2, max_lines_per_chunk=50):
+    def split_summary_into_chunks(self, summary_text, overlap_sentences=2, max_sentences_per_chunk=10):
         """
         Splits a summary into semantic chunks based on headings (markdown # or underlined headings),
-        with an overlap of lines between chunks. Falls back to fixed-size chunking if no headings detected.
+        with an overlap of sentences between chunks. Falls back to fixed-size chunking if no headings detected.
 
         Parameters:
         - summary_text (str): The full summary text.
-        - overlap_lines (int): Number of lines to overlap between chunks.
-        - max_lines_per_chunk (int): Maximum lines per chunk when no headings detected.
+        - overlap_sentences (int): Number of sentences to overlap between chunks.
+        - max_sentences_per_chunk (int): Maximum sentences per chunk when no headings detected.
 
         Returns:
         - List[str]: A list of text chunks.
         """
+        # Import and download NLTK resources
+        import nltk
+        try:
+            nltk.data.find('tokenizers/punkt_tab')
+        except LookupError:
+            nltk.download('punkt_tab')
+
         lines = summary_text.splitlines(keepends=True)
         heading_indices = set()
 
@@ -663,29 +699,40 @@ class LLMBasedCodeParser:
             if lines[i].strip() and re.match(r'^[=-]{3,}\s*$', lines[i + 1]):
                 heading_indices.add(i)
 
-        # If no headings found, fallback to fixed-size chunking
+        # If no headings found, fallback to fixed-size chunking by sentences
         if not heading_indices:
+            sentences = nltk.sent_tokenize(summary_text)
+
             chunks = []
-            total = len(lines)
-            for start in range(0, total, max_lines_per_chunk):
-                chunk = lines[start:start + max_lines_per_chunk]
+            total = len(sentences)
+            for start in range(0, total, max_sentences_per_chunk):
+                chunk_sentences = sentences[start:start + max_sentences_per_chunk]
                 if start > 0:
-                    overlap = lines[start - overlap_lines:start]
-                    chunk = overlap + chunk
-                chunks.append(''.join(chunk))
+                    overlap = sentences[start - overlap_sentences:start]
+                    chunk_sentences = overlap + chunk_sentences
+                chunks.append(' '.join(chunk_sentences))
             return chunks
 
-        # Otherwise, split at heading lines
+        # Otherwise, split at heading lines but process by sentences within each section
         sorted_idxs = sorted(heading_indices)
         chunks = []
         for idx, start in enumerate(sorted_idxs):
             end = sorted_idxs[idx + 1] if idx + 1 < len(sorted_idxs) else len(lines)
             chunk_lines = lines[start:end]
+            chunk_text = ''.join(chunk_lines)
+
+            # Tokenize the chunk text into sentences
+            chunk_sentences = nltk.sent_tokenize(chunk_text)
+
             if idx > 0:
-                prev_end = start
-                overlap = lines[prev_end - overlap_lines:prev_end]
-                chunk_lines = overlap + chunk_lines
-            chunks.append(''.join(chunk_lines))
+                # Get overlap from previous chunk
+                prev_chunk_text = ''.join(lines[sorted_idxs[idx - 1]:start])
+                prev_sentences = nltk.sent_tokenize(prev_chunk_text)
+                overlap = prev_sentences[-overlap_sentences:] if len(
+                    prev_sentences) >= overlap_sentences else prev_sentences
+                chunk_sentences = overlap + chunk_sentences
+
+            chunks.append(' '.join(chunk_sentences))
 
         return chunks
 

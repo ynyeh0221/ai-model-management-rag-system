@@ -214,13 +214,13 @@ class SearchDispatcher:
     def _get_metadata_table_weights(self) -> Dict[str, float]:
         """Define metadata tables to search with their weights."""
         return {
-            "model_descriptions": 0.30,
-            "model_architectures": 0.15,
-            "model_frameworks": 0.05,
-            "model_datasets": 0.15,
+            "model_descriptions": 0.3,
+            "model_architectures": 0.2,
+            "model_frameworks": 0.0,
+            "model_datasets": 0.2,
             "model_training_configs": 0.15,
             "model_date": 0.15,
-            "model_file": 0.05,
+            "model_file": 0.0,
             "model_git": 0.0
         }
 
@@ -649,22 +649,22 @@ class SearchDispatcher:
     def _normalize_distance(self, distance: float, stats: Dict[str, float]) -> float:
         """
         Normalize a distance value using distribution statistics.
-        Uses percentiles for more robust normalization.
 
         Args:
             distance: The distance value to normalize
-            stats: Dictionary with distance statistics ('min', 'max', 'percentile_10', 'percentile_90', etc.)
+            stats: Dictionary with distance statistics ('min', 'max', etc.)
 
         Returns:
             Normalized distance value in range [0, 1]
         """
-        # Get percentile values for more robust normalization
-        min_val = stats.get('percentile_10', stats.get('min', 0.0))
-        max_val = stats.get('percentile_90', stats.get('max', 2.0))
+        # Use min/max for more reliable normalization
+        min_val = stats.get('min', 0.0)
+        max_val = stats.get('max', 2.0)
 
         # Check for division by zero
         if max_val == min_val:
-            return 0.0  # If all distances are the same, normalized distance is 0
+            # If all distances are the same, return 0 if distance equals min, else 1
+            return 0.0 if distance == min_val else 1.0
 
         # Normalize to [0, 1] range where 0 is best match and 1 is worst match
         normalized = (distance - min_val) / (max_val - min_val)
@@ -688,7 +688,6 @@ class SearchDispatcher:
 
             # Calculate weighted distance from metadata tables
             weighted_sum = 0.0
-            weight_sum = 0.0
 
             # Initialize normalized distances dictionary
             model_data['table_normalized_distances'] = {}
@@ -708,24 +707,23 @@ class SearchDispatcher:
 
                     # Normalize the distance using the robust method
                     normalized_distance = self._normalize_distance(raw_distance, table_stats)
+                else:
+                    # Missing table data should be treated as worst possible match
+                    normalized_distance = 1.0
 
-                    # Store the normalized distance
-                    model_data['table_normalized_distances'][table_name] = normalized_distance
+                # Store the normalized distance
+                model_data['table_normalized_distances'][table_name] = normalized_distance
 
-                    # Add to weighted sum
-                    weighted_sum += normalized_distance * table_weight
-                    weight_sum += table_weight
+                # Add to weighted sum
+                weighted_sum += normalized_distance * table_weight
 
-                    self.logger.debug(
-                        f"Model {model_id}, table {table_name}: raw={raw_distance}, "
-                        f"normalized={normalized_distance}, weight={table_weight}"
-                    )
+                self.logger.debug(
+                    f"Model {model_id}, table {table_name}: "
+                    f"normalized={normalized_distance}, weight={table_weight}"
+                )
 
-            # Calculate metadata distance (weighted average of normalized distances)
-            if weight_sum > 0:
-                metadata_distance = weighted_sum / weight_sum
-            else:
-                metadata_distance = 1.0  # Default to maximum normalized distance (1.0) if no metadata
+            # Since table_weights sum to 1.0, weighted_sum is already the weighted average
+            metadata_distance = weighted_sum
 
             # Normalize chunk distance if it exists
             if 'chunk_initial_distance' in model_data:
@@ -759,7 +757,7 @@ class SearchDispatcher:
             # Add raw distance stats for debugging
             model_data['distance_stats'] = {
                 'weighted_sum': weighted_sum,
-                'weight_sum': weight_sum,
+                'weight_sum': 1.0,  # Now always 1.0 since we use full weights
                 'metadata_tables_count': len(model_data.get('table_normalized_distances', {})),
                 'has_chunks': 'chunk_initial_distance' in model_data
             }
@@ -773,6 +771,8 @@ class SearchDispatcher:
 
         # Sort by distance (lower is better)
         output_list.sort(key=lambda x: x.get('distance', 2.0))
+
+        print(f"All results: {output_list}")
 
         # Limit to requested number of results
         return output_list[:requested_limit]

@@ -332,7 +332,7 @@ class QueryParser:
                     continue
 
                 # Chroma's filter does exact-match. Not including architecture and framework to filter to prevent finding no result
-                if key == "architecture" or key == "framework":
+                if key == "architecture" or key == "framework" or key == "dataset":
                     continue
 
                 # Handle dictionary values
