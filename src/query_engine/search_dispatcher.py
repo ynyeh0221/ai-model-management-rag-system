@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import math
 import time
 from enum import Enum
 from typing import Dict, List, Any, Optional, Union, Tuple
@@ -266,11 +267,15 @@ class SearchDispatcher:
 
         # Create search tasks for all tables
         for table_name in table_weights.keys():
+            if table_name == "model_descriptions":
+                search_limit = requested_limit * 40
+            else:
+                search_limit = requested_limit
             search_tasks.append(self.chroma_manager.search(
                 collection_name=table_name,
                 query=query,
                 where=chroma_filters,
-                limit=requested_limit,
+                limit=search_limit,
                 include=["metadatas", "documents"]  # Don't need distances here
             ))
 
@@ -477,7 +482,7 @@ class SearchDispatcher:
                         collection_name="model_descriptions",
                         query=query,  # Use the same query to find the most relevant chunks
                         where={"model_id": {"$eq": model_id}},  # Only search chunks for this specific model
-                        limit=1,
+                        limit=5,
                         include=["metadatas", "distances"]  # Include distances
                     )
 
@@ -648,31 +653,34 @@ class SearchDispatcher:
 
     def _normalize_distance(self, distance: float, stats: Dict[str, float]) -> float:
         """
-        Normalize a distance value using distribution statistics.
+        Normalize a distance value using an inverted exponential kernel.
 
-        Args:
-            distance: The distance value to normalize
-            stats: Dictionary with distance statistics ('min', 'max', etc.)
-
-        Returns:
-            Normalized distance value in range [0, 1]
+        After linearly scaling into [0,1], we do:
+            normalized = 1 - exp(-α * d_norm)
+        so:
+          - d == min → d_norm=0 → normalized=0
+          - d == max → d_norm=1 → normalized=1-exp(-α)≈1
+          - small differences around zero get pulled even closer to zero
         """
-        # Use min/max for more reliable normalization
         min_val = stats.get('min', 0.0)
         max_val = stats.get('max', 2.0)
 
-        # Check for division by zero
+        # avoid division by zero
         if max_val == min_val:
-            # If all distances are the same, return 0 if distance equals min, else 1
             return 0.0 if distance == min_val else 1.0
 
-        # Normalize to [0, 1] range where 0 is best match and 1 is worst match
-        normalized = (distance - min_val) / (max_val - min_val)
+        # linear [0,1]
+        d0 = (distance - min_val) / (max_val - min_val)
+        d0 = max(0.0, min(1.0, d0))
 
-        # Ensure the value stays within [0, 1] even in edge cases
-        normalized = max(0.0, min(1.0, normalized))
+        # invertible exponential kernel
+        α = 5.0  # higher α → sharper falloff
+        normalized = 1.0 - math.exp(-α * d0)
 
-        self.logger.debug(f"Normalized distance: {distance} -> {normalized} (range: {min_val} - {max_val})")
+        self.logger.debug(
+            f"Exp‑kernel normalize: raw={distance:.4f}, d0={d0:.4f}, "
+            f"α={α}, result={normalized:.4f} (range {min_val}-{max_val})"
+        )
 
         return normalized
 

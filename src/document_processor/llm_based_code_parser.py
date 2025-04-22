@@ -686,55 +686,21 @@ class LLMBasedCodeParser:
         except LookupError:
             nltk.download('punkt_tab')
 
-        lines = summary_text.splitlines(keepends=True)
-        heading_indices = set()
+        sentences = nltk.sent_tokenize(summary_text)
 
-        # Detect markdown headings (#, ##, ###, etc.)
-        for i, line in enumerate(lines):
-            if re.match(r'^\s{0,3}#{1,6}\s+', line):
-                heading_indices.add(i)
-
-        # Detect underlined headings (text followed by === or ---)
-        for i in range(len(lines) - 1):
-            if lines[i].strip() and re.match(r'^[=-]{3,}\s*$', lines[i + 1]):
-                heading_indices.add(i)
-
-        # If no headings found, fallback to fixed-size chunking by sentences
-        if not heading_indices:
-            sentences = nltk.sent_tokenize(summary_text)
-
-            chunks = []
-            total = len(sentences)
-            for start in range(0, total, max_sentences_per_chunk):
-                chunk_sentences = sentences[start:start + max_sentences_per_chunk]
-                if start > 0:
-                    overlap = sentences[start - overlap_sentences:start]
-                    chunk_sentences = overlap + chunk_sentences
-                chunks.append(' '.join(chunk_sentences))
-            return chunks
-
-        # Otherwise, split at heading lines but process by sentences within each section
-        sorted_idxs = sorted(heading_indices)
         chunks = []
-        for idx, start in enumerate(sorted_idxs):
-            end = sorted_idxs[idx + 1] if idx + 1 < len(sorted_idxs) else len(lines)
-            chunk_lines = lines[start:end]
-            chunk_text = ''.join(chunk_lines)
-
-            # Tokenize the chunk text into sentences
-            chunk_sentences = nltk.sent_tokenize(chunk_text)
-
-            if idx > 0:
-                # Get overlap from previous chunk
-                prev_chunk_text = ''.join(lines[sorted_idxs[idx - 1]:start])
-                prev_sentences = nltk.sent_tokenize(prev_chunk_text)
-                overlap = prev_sentences[-overlap_sentences:] if len(
-                    prev_sentences) >= overlap_sentences else prev_sentences
+        total = len(sentences)
+        for start in range(0, total, max_sentences_per_chunk):
+            chunk_sentences = sentences[start:start + max_sentences_per_chunk]
+            if start > 0:
+                overlap = sentences[start - overlap_sentences:start]
                 chunk_sentences = overlap + chunk_sentences
-
             chunks.append(' '.join(chunk_sentences))
 
-        return chunks
+        # Filter out chunks with less than or equal to 5 characters
+        filtered_chunks = [chunk for chunk in chunks if len(chunk) > 5]
+
+        return filtered_chunks
 
     def _get_creation_date(self, file_path):
         try:
