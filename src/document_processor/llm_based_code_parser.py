@@ -193,6 +193,9 @@ class LLMBasedCodeParser:
         except SyntaxError as e:
             return f"# Failed to parse AST: {e}"
 
+        # Determine base directory from the file_path for resolving relative paths
+        base_dir = os.path.dirname(os.path.abspath(file_path))
+
         lines = []
         literal_vars = {}
         image_folders = set()
@@ -220,11 +223,17 @@ class LLMBasedCodeParser:
             return None
 
         def determine_folder(path_str: str) -> str:
-            """If value has file extension, return dirname; else return itself."""
-            base, ext = os.path.splitext(path_str)
+            """Resolve to an absolute folder: if path_str is relative, join with base_dir; strip file name if ext exists."""
+            # Resolve absolute path based on base_dir
+            if not os.path.isabs(path_str):
+                full_path = os.path.abspath(os.path.join(base_dir, path_str))
+            else:
+                full_path = os.path.abspath(path_str)
+            # If it's a file (has extension), return its directory, else the path itself
+            base, ext = os.path.splitext(full_path)
             if ext:
-                return os.path.dirname(path_str) or path_str
-            return path_str
+                return os.path.dirname(full_path) or full_path
+            return full_path
 
         class CodeSummaryVisitor(ast.NodeVisitor):
             def visit_Import(self, node):
@@ -304,7 +313,7 @@ class LLMBasedCodeParser:
                     if node.args:
                         lit = eval_constant(node.args[0])
                         if isinstance(lit, str):
-                            image_folders.add(os.path.dirname(lit) or '.')
+                            image_folders.add(determine_folder(lit))
                     for kw in node.keywords:
                         if kw.arg and 'save_dir' in kw.arg and isinstance(kw.value, ast.Name):
                             var = kw.value.id
@@ -314,7 +323,7 @@ class LLMBasedCodeParser:
                     parts = [eval_constant(a) for a in node.args]
                     if all(isinstance(p, str) for p in parts):
                         joined = os.path.join(*parts)
-                        image_folders.add(os.path.dirname(joined) or '.')
+                        image_folders.add(determine_folder(joined))
                 self.generic_visit(node)
 
         visitor = CodeSummaryVisitor()
@@ -336,12 +345,17 @@ class LLMBasedCodeParser:
             else:
                 lines.append(f"Variable: {name} = {val}")
 
-        # append image folders or N/A
+        # append image folders if exists, else append missing
         if image_folders:
             for folder in sorted(image_folders):
-                lines.append(f"Images folder: {folder}")
+                # ensure we report an absolute path
+                if not os.path.isabs(folder):
+                    abs_folder = os.path.abspath(os.path.join(base_dir, folder))
+                else:
+                    abs_folder = folder
+                lines.append(f"Images folder: {abs_folder}")
         else:
-            lines.append("Images folder: N/A")
+            lines.append(f"Images folder: missing")
 
         return '\n'.join(lines)
 
@@ -355,7 +369,7 @@ class LLMBasedCodeParser:
     def _extract_llm_metadata(self, code_str: str, file_path: str = "<unknown>", max_retries: int = 15) -> dict:
         # STEP 1: Generate AST digest/summary
         ast_digest = self.clean_empty_lines(self.generate_ast_summary(code_str=code_str, file_path=file_path))
-        print(f"Total AST digest: {ast_digest}")
+        # print(f"Total AST digest: {ast_digest}")
 
         # STEP 2: Extract natural-language summary for each digest chunk
         summary = self.extract_natural_language_summary(
@@ -561,16 +575,16 @@ class LLMBasedCodeParser:
             '  }\n'
             "}\n\n"
             "Extraction hints:\n"
-            "• **framework.name**: look for imports like `import torch` or `import tensorflow`; default to “unknown”.\n"
-            "• **framework.version**: look for `torch.__version__` or similar; else “unknown”.\n"
-            "• **architecture.type**: identify the high‑level components of the model (e.g. “VAE”, “diffusion model”, “UNet”), listing all major submodels separated by commas; do not list low‑level layers like Conv2d or individual blocks; if none found, use “unknown”.\n"
-            "• **dataset.name**: look for dataset identifiers (e.g. “FashionMNIST”); else “unknown”.\n"
-            "• **imaged_folder.name**: look for image folders (e.g. “/a/b/c”); else “unknown”.\n"
+            "• **framework.name**: look for imports like `import torch` or `import tensorflow`; default to “missing”.\n"
+            "• **framework.version**: look for `torch.__version__` or similar; else “missing”.\n"
+            "• **architecture.type**: identify the high‑level components of the model (e.g. “VAE”, “diffusion model”, “UNet”), listing all major submodels separated by commas; do not list low‑level layers like Conv2d or individual blocks; if none found, use “missing”.\n"
+            "• **dataset.name**: look for dataset identifiers (e.g. “FashionMNIST”); else “missing”.\n"
+            "• **images_folder.name**: look for images folder (e.g. “/a/b/c”); else “missing”.\n"
             "• **batch_size**: look for `batch_size=` in DataLoader; else null.\n"
             "• **learning_rate**: look for `lr=` or “learning rate”; else null.\n"
-            "• **optimizer**: look for optimizer names (Adam, SGD); else “unknown”.\n"
+            "• **optimizer**: look for optimizer names (Adam, SGD); else “missing”.\n"
             "• **epochs**: look for `epochs =`; else null.\n"
-            "• **hardware_used**: look for device settings (`cuda`, `mps`, `cpu`); map to “GPU”, “CPU” or “Both”; else “unknown”.\n\n"
+            "• **hardware_used**: look for device settings (`cuda`, `mps`, `cpu`); map to “GPU”, “CPU” or “Both”; else “missing”.\n\n"
             "🚨 **Output ONLY** the JSON object—no commentary, no markdown."
         )
 
@@ -601,8 +615,8 @@ class LLMBasedCodeParser:
                             return parsed
                         else:
                             print(f"[Retry {attempt + 1}] Invalid metadata structure: {reason}, file_path: {file_path}")
-                    except json.JSONDecodeError:
-                        print(f"[Retry {attempt + 1}] Invalid JSON format, file_path: {file_path}")
+                    except json.JSONDecodeError as e:
+                        print(f"[Retry {attempt + 1}] Invalid JSON format: {e}, file_path: {file_path}")
                 else:
                     print(f"[Retry {attempt + 1}] No valid JSON object found in LLM response, file_path: {file_path}")
             except Exception as e:
