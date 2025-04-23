@@ -175,7 +175,7 @@ class UIRunner:
             # Process and rerank search results
             # Use max_to_return = 3 as a trade off between details in search result and size of LLM input
             reranked_results = self._process_search_results(search_results, reranker, parsed_query, query_text,
-                                                            max_to_return=3)
+                                                            max_to_return=5)
 
             def remove_field(dict_list, field_to_remove):
                 return [{k: v for k, v in item.items() if k != field_to_remove} for item in dict_list]
@@ -186,7 +186,7 @@ class UIRunner:
             self._generate_query_response(query_text, reranked_results, llm_interface)
 
     def _process_search_results(self, search_results, reranker, parsed_query, query_text, max_to_return=10,
-                                rerank_threshold=0.05):
+                                rerank_threshold=0.11):
         """
         Process and rerank search results.
 
@@ -198,7 +198,7 @@ class UIRunner:
             parsed_query (dict): The parsed query information.
             query_text (str): The original query text.
             max_to_return (int, optional): Maximum number of results to return. Defaults to 10.
-            rerank_threshold (float, optional): Similarity threshold for reranking. Defaults to 0.3.
+            rerank_threshold (float, optional): Similarity threshold for reranking. Defaults to 0.1.
 
         Returns:
             list: Reranked search results.
@@ -449,21 +449,28 @@ class UIRunner:
                     results_text += f"  - {field.replace('_', ' ').title()}: {training.get(field, 'Unknown')}\n"
             results_text += f"- Description: {description}\n\n"
 
+        result_count = len(reranked_results)
         result_schema = "Model ID, File Size, Created On, Last Modified, Framework, Architecture, Dataset, Training Configuration, Description"
 
         # 3. Construct the prompt builder logic
         prompt_builder = (
-            "You are a prompt engineer. Think from the user’s perspective and craft a single, high‑level meta‑prompt for a second LLM (LLM2) that will:\n"
-            "  1. Restate the user’s original request so LLM2 knows what to address.\n"
-            "  2. Instruct LLM2 to use **only** the provided `search results` and actual runtime data—no hallucinations or invented details.\n"
-            "  3. When token limits permit, include your own analysis or insights derived solely from the provided data—do not fabricate any information.\n"
-            "The meta‑prompt should be concise and focused on the user’s intent. Do **not** answer the query yourself or include any real data; return only the meta‑prompt text.\n\n"
+            "You are a senior machine-learning architect. "
+            "Your task is to craft a concise meta-prompt to generate clear, comprehensive reports for junior ML engineers to learn and understand the system. "
+            "Define all technical terms and leave no gaps in explanation. "
+            "Now, construct a single, high-level meta-prompt that will:\n"
+            "  1. Restate the user’s original request so the LLM knows what to address.\n"
+            "  2. Instruct the LLM to use **only** the provided `search results` and actual runtime data—no hallucinations or invented details.\n"
+            "  3. Instruct the LLM that, when token limits permit, it should include its analysis or insights derived solely from the provided data—do not fabricate any information.\n"
+            f"  4. Inform the LLM that there are {result_count} results available and to never request more items than this count.\n"
+            "  5. Provide this background: the LLM assumes the role of a senior machine-learning architect writing for junior ML engineers who will read the report to understand, reproduce, and extend the model; language must be clear, define all technical terms, and leave no gaps.\n"
+            "The meta-prompt should not mention any other LLM identifiers; it should be concise and focused on the user’s intent. Do **not** answer the query yourself or include any data; return only the meta-prompt text.\n\n"
             "EXAMPLE:\n"
             "  User query: \"Describe the model with ID XYZ.\"\n"
             "  Result schema: { 'model_id': 'string', 'framework': 'string', 'created_date': 'string' }\n"
-            "  => LLM2 meta‑prompt:\n"
-            "     \"Describe the model with ID XYZ using only the provided fields `model_id`, `framework`, and `created_date`. "
-            "Do not add any details beyond those fields. When token limits permit, include your analysis or insights based solely on that data.\"\n\n"
+            "  => Meta-prompt:\n"
+            "     \"You are a senior machine-learning architect. Define all technical terms and ensure clarity for junior engineers. "
+            "Describe the model with ID XYZ using only the provided fields `model_id`, `framework`, and `created_date`. "
+            "Do not add any details beyond those fields. Instruct that, when token limits permit, analysis or insights based solely on that data should be included.\"\n\n"
             f"User query: {query_text}\n"
             f"Result schema: {result_schema}\n"
         )
@@ -471,7 +478,7 @@ class UIRunner:
         builder_response = llm_interface.generate_response(
             prompt=prompt_builder,
             temperature=0.5,
-            max_tokens=2000
+            max_tokens=4000
         )
 
         # 4. Safely extract constructed prompt text
