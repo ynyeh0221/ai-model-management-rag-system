@@ -93,7 +93,7 @@ class LLMBasedCodeParser:
         with open(file_path, "r", encoding="utf-8") as f:
             file_content = f.read()
 
-        self.llm_metadata_cache = self._extract_llm_metadata(file_content, file_path, max_retries=15)
+        self.llm_metadata_cache = self._extract_metadata_by_llm(file_content, file_path, max_retries=15)
 
         model_info = {
             "creation_date": self._get_creation_date(file_path),
@@ -360,14 +360,7 @@ class LLMBasedCodeParser:
 
         return '\n'.join(lines)
 
-    def _remove_import_lines(self, code: str) -> str:
-        filtered_lines = [
-            line for line in code.splitlines()
-            if not line.strip().lower().startswith("import") and not line.strip().lower().startswith("from")
-        ]
-        return "\n".join(filtered_lines)
-
-    def _extract_llm_metadata(self, code_str: str, file_path: str = "<unknown>", max_retries: int = 15) -> dict:
+    def _extract_metadata_by_llm(self, code_str: str, file_path: str = "<unknown>", max_retries: int = 15) -> dict:
         # STEP 1: Generate AST digest/summary
         ast_digest = self.clean_empty_lines(self.generate_ast_summary(code_str=code_str, file_path=file_path))
         # print(f"Total AST digest: {ast_digest}")
@@ -388,14 +381,42 @@ class LLMBasedCodeParser:
         # STEP 4: Store AST digest summary
         final['ast_summary'] = ast_digest
 
-        # STEP 5: Add images folder. Tried to use LLM for parsing, but finally moved back to manual parse way since this field needs exact value
+        # STEP 5: Add framework
+        final['framework'] = {'name': self.parse_framework(ast_digest), 'version': 'missing'}
+
+        # STEP 6: Add images folder. Tried to use LLM for parsing, but finally moved back to manual parse way since this field needs exact value
         final['images_folder'] = {'name': self.get_images_folder(ast_digest)}
 
-        # STEP 6: Remove unneeded fields
+        # STEP 7: Remove unneeded fields
         final.pop("_trace", None)
 
         print(f"Final metadata (from AST summary): {final}")
         return final
+
+    def parse_framework(self, ast_summary: str) -> str:
+        """
+        Detect the deep-learning framework used, based on imports in the AST summary.
+
+        Args:
+            ast_summary: A single string containing lines like "Import: torch" or "From tensorflow import ...".
+
+        Returns:
+            The framework name: one of "PyTorch", "TensorFlow", "JAX", or "missing" if none recognized.
+        """
+        # Normalize to lower-case for matching
+        txt = ast_summary.lower()
+
+        # Check in priority order
+        if re.search(r"\bimport:\s+torch\b|\bfrom\s+torch\b", txt):
+            return "PyTorch"
+        if re.search(r"\bimport:\s+tensorflow\b|\bfrom\s+tensorflow\b|\btf\.", txt):
+            return "TensorFlow"
+        if re.search(r"\bimport:\s+jax\b|\bfrom\s+jax\b", txt):
+            return "JAX"
+        if re.search(r"\bimport:\s+keras\b|\bfrom\s+keras\b", txt):
+            # note: standalone Keras
+            return "TensorFlow"  # Keras now lives under TF
+        return "missing"
 
     def extract_natural_language_summary(self, chunk_text: str, chunk_offset: int = 0, max_retries: int = 3) -> dict:
         """Extract a natural language summary of metadata from a code chunk instead of structured JSON."""
@@ -566,9 +587,8 @@ class LLMBasedCodeParser:
             "Based on the following model AST digest summary, create a structured representation of the model metadata.\n\n"
             "The output **must strictly follow this exact JSON structure**:\n"
             "{\n"
-            '  \"framework\": { \"name\": \"...\", \"version\": \"...\" },\n'
-            '  \"architecture\": { \"reason\": \"...\", \"type\": \"...\" },\n'
-            '  \"dataset\": { \"reason\": \"...\", \"name\": \"...\" },\n'
+            '  \"architecture\": { \"type\": \"...\", \"reason\": \"...\" },\n'
+            '  \"dataset\": { \"name\": \"...\", \"reason\": \"...\" },\n'
             '  \"training_config\": {\n'
             '    \"batch_size\": 32,\n'
             '    \"learning_rate\": 0.001,\n'
@@ -578,19 +598,8 @@ class LLMBasedCodeParser:
             '  }\n'
             "}\n\n"
             "Extraction hints:\n"
-            "• **framework.name**: look for imports like `import torch` or `import tensorflow`; default to “missing”.\n"
-            "• **framework.version**: look for `torch.__version__` or similar; else “missing”.\n"
-            "• **architecture.reason**: in one sentence, cite exactly the AST elements that triggered your choice—e.g. “Found both `Generator` and `Discriminator` classes indicating a GAN,” or “Detected Conv2d and Linear layers in class VisualNN indicating a CNN.”\n"
-            "• **architecture.type**: scan the *entire* AST summary and collect all high‑level paradigm indicators—e.g. Generator, Discriminator, reparameterize, q_sample, Conv2d, Linear, MultiHeadAttention, TransformerEncoder, UNetAttentionBlock, etc.  Then in this exact priority order, choose one and stop:\n"
-            "  1. If both Generator & Discriminator appear → output exactly “GAN”.\n"
-            "  2. Else if any VAE indicators (reparameterize, kl_divergence) → output exactly “VAE”.\n"
-            "  3. Else if diffusion indicators (q_sample, p_sample) → output exactly “Diffusion model”.\n"
-            "  4. Else if you see both Conv2d & Linear (fully‑connected) layers in the model class → output exactly “CNN”.\n"
-            "  5. Else if transformer indicators (MultiHeadAttention, TransformerEncoder) → output exactly “Transformer”.\n"
-            "  6. Otherwise, list every other detected high‑level component (e.g. Autoencoder, ConditionalUNet) as a single comma‑separated string.\n"
-            "  Always output a non‑empty string, and do not append extra components once you’ve matched a higher‑priority paradigm.\n"
-            "• **dataset.reason**: cite the specific evidence from the AST summary (e.g. dataset class names, loader calls, file paths) that justifies your choice of dataset. Keep it brief and focused on the key cue."
-            "• **dataset.name**: look for dataset identifiers (e.g. “FashionMNIST”); else “missing”.\n"
+            "• **architecture**: scan the *entire* AST summary for high-level paradigm cues (e.g. Generator, Discriminator, reparameterize, kl_divergence, q_sample, p_sample, Conv2d, Linear, MultiHeadAttention, TransformerEncoder, UNetAttentionBlock, etc.). Then infer the canonical paradigm name—even if it’s not literally in the code—or list other detected components as a comma-separated string. **Format this field as a JSON object**: `{ \"type\": \"<ArchitectureType>\", \"reason\": \"<concise reason citing the exact AST cues>\" }`.\n"
+            "• **dataset**: scan the *entire* AST summary for dataset definitions or loader calls (e.g. `datasets.MNIST`, custom Dataset subclasses, DataLoader instantiations, file paths). Extract the dataset identifier and **format this field as a JSON object**: `{ \"name\": \"<DatasetName>\", \"reason\": \"<concise reason citing the exact AST cues>\" }`.\n"
             "• **batch_size**: look for `batch_size=` in DataLoader; else null.\n"
             "• **learning_rate**: look for `lr=` or “learning rate”; else null.\n"
             "• **optimizer**: look for optimizer names (Adam, SGD); else “missing”.\n"
@@ -639,7 +648,6 @@ class LLMBasedCodeParser:
     def _create_default_metadata(self) -> dict:
         """Create default metadata structure with empty/null values."""
         return {
-            "framework": {"name": "missing", "version": "missing"},
             "architecture": {"type": "missing"},
             "dataset": {"name": "missing"},
             "imaged_folder": {"name": "missing"},
@@ -655,27 +663,17 @@ class LLMBasedCodeParser:
     def _validate_metadata_structure(self, metadata: dict) -> Tuple[bool, str]:
         """Validate that the metadata has the required structure."""
         # Check that all required top-level fields exist
-        required_fields = ["framework", "architecture", "dataset", "training_config"]
+        required_fields = ["architecture", "dataset", "training_config"]
         if not all(field in metadata for field in required_fields):
             return False, "Missing required fields"
 
-        # Check that framework has name and version
-        if not isinstance(metadata["framework"], dict) or not all(
-                field in metadata["framework"] for field in ["name", "version"]):
-            return False, "Invalid framework structure"
-
-        minimum_reason_length = 6
-
         # Check that architecture has type
-        if not isinstance(metadata["architecture"], dict) or "type" not in metadata["architecture"] or "reason" not in metadata["architecture"] or metadata["architecture"].get("type") == "missing" or \
-                metadata["architecture"].get("type") == "unknown" or metadata["architecture"].get("type") == "N/A" or metadata["architecture"].get("type") is None or\
-                len(metadata["architecture"].get("reason", "")) <= minimum_reason_length or \
-                (metadata["architecture"].get("type") == "missing" and "missing" not in metadata["architecture"].get("reason").lower()):
+        if not isinstance(metadata["architecture"], dict) or "type" not in metadata["architecture"] or metadata["architecture"].get("type") == "missing" or \
+                metadata["architecture"].get("type") == "unknown" or metadata["architecture"].get("type") == "N/A" or metadata["architecture"].get("type") is None:
             return False, "Invalid architecture structure"
 
         # Check that dataset has name
-        if not isinstance(metadata["dataset"], dict) or "name" not in metadata["dataset"] or len(metadata["dataset"].get("reason", "")) <= minimum_reason_length or \
-            (metadata["dataset"].get("name") == "missing" and "missing" not in metadata["dataset"].get("reason").lower()):
+        if not isinstance(metadata["dataset"], dict) or "name" not in metadata["dataset"]:
             return False, "Invalid dataset structure"
 
         # Check that training_config has all required fields
