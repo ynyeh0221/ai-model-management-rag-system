@@ -6,8 +6,6 @@ import re
 from typing import List, Tuple
 
 from git import Repo
-from overrides.signature import is_param_defined_in_sub
-from torchgen.packaged.autograd.gen_python_functions import is_py_sparse_function
 
 """
 LLMBasedCodeParser: A class for extracting structured metadata from ML model code using AST and LLMs.
@@ -128,9 +126,7 @@ class LLMBasedCodeParser:
             model_info["architecture"] = {"type": None}
 
         dataset = self.llm_metadata_cache.get("dataset", {})
-        if isinstance(dataset, str):
-            model_info["dataset"] = {"name": dataset}
-        elif isinstance(dataset, dict):
+        if isinstance(dataset, dict):
             model_info["dataset"] = {
                 "name": dataset.get("name") if isinstance(dataset.get("name"), str) else None
             }
@@ -138,9 +134,7 @@ class LLMBasedCodeParser:
             model_info["dataset"] = {"name": None}
 
         images_folder = self.llm_metadata_cache.get("images_folder", {})
-        if isinstance(images_folder, str):
-            model_info["images_folder"] = {"name": images_folder}
-        elif isinstance(images_folder, dict):
+        if isinstance(images_folder, dict):
             model_info["images_folder"] = {
                 "name": images_folder.get("name") if isinstance(images_folder.get("name"), str) else None
             }
@@ -175,6 +169,13 @@ class LLMBasedCodeParser:
 
         print(f"updated model_info: {model_info}")
         return model_info
+
+    def get_images_folder(self, text):
+        # splits on the literal and takes the part before the newline
+        try:
+            return text.split("Images folder:")[1].split("\n", 1)[0]
+        except IndexError:
+            return None
 
     def generate_ast_summary(self, code_str: str, file_path: str = "<unknown>") -> str:
         """
@@ -387,7 +388,10 @@ class LLMBasedCodeParser:
         # STEP 4: Store AST digest summary
         final['ast_summary'] = ast_digest
 
-        # STEP 5: Remove unneeded fields
+        # STEP 5: Add images folder. Tried to use LLM for parsing, but finally moved back to manual parse way since this field needs exact value
+        final['images_folder'] = {'name': self.get_images_folder(ast_digest)}
+
+        # STEP 6: Remove unneeded fields
         final.pop("_trace", None)
 
         print(f"Final metadata (from AST summary): {final}")
@@ -563,9 +567,8 @@ class LLMBasedCodeParser:
             "The output **must strictly follow this exact JSON structure**:\n"
             "{\n"
             '  \"framework\": { \"name\": \"...\", \"version\": \"...\" },\n'
-            '  \"architecture\": { \"type\": \"...\" },\n'
-            '  \"dataset\": { \"name\": \"...\" },\n'
-            '  \"images_folder\": { \"name\": \"...\" },\n'
+            '  \"architecture\": { \"reason\": \"...\", \"type\": \"...\" },\n'
+            '  \"dataset\": { \"reason\": \"...\", \"name\": \"...\" },\n'
             '  \"training_config\": {\n'
             '    \"batch_size\": 32,\n'
             '    \"learning_rate\": 0.001,\n'
@@ -577,14 +580,22 @@ class LLMBasedCodeParser:
             "Extraction hints:\n"
             "• **framework.name**: look for imports like `import torch` or `import tensorflow`; default to “missing”.\n"
             "• **framework.version**: look for `torch.__version__` or similar; else “missing”.\n"
-            "• **architecture.type**: identify the high‑level components of the model (e.g. “VAE”, “diffusion model”, “UNet”), listing all major submodels separated by commas; do not list low‑level layers like Conv2d or individual blocks; if none found, use “missing”.\n"
+            "• **architecture.reason**: in one sentence, cite exactly the AST elements that triggered your choice—e.g. “Found both `Generator` and `Discriminator` classes indicating a GAN,” or “Detected Conv2d and Linear layers in class VisualNN indicating a CNN.”\n"
+            "• **architecture.type**: scan the *entire* AST summary and collect all high‑level paradigm indicators—e.g. Generator, Discriminator, reparameterize, q_sample, Conv2d, Linear, MultiHeadAttention, TransformerEncoder, UNetAttentionBlock, etc.  Then in this exact priority order, choose one and stop:\n"
+            "  1. If both Generator & Discriminator appear → output exactly “GAN”.\n"
+            "  2. Else if any VAE indicators (reparameterize, kl_divergence) → output exactly “VAE”.\n"
+            "  3. Else if diffusion indicators (q_sample, p_sample) → output exactly “Diffusion model”.\n"
+            "  4. Else if you see both Conv2d & Linear (fully‑connected) layers in the model class → output exactly “CNN”.\n"
+            "  5. Else if transformer indicators (MultiHeadAttention, TransformerEncoder) → output exactly “Transformer”.\n"
+            "  6. Otherwise, list every other detected high‑level component (e.g. Autoencoder, ConditionalUNet) as a single comma‑separated string.\n"
+            "  Always output a non‑empty string, and do not append extra components once you’ve matched a higher‑priority paradigm.\n"
+            "• **dataset.reason**: cite the specific evidence from the AST summary (e.g. dataset class names, loader calls, file paths) that justifies your choice of dataset. Keep it brief and focused on the key cue."
             "• **dataset.name**: look for dataset identifiers (e.g. “FashionMNIST”); else “missing”.\n"
-            "• **images_folder.name**: look for images folder (e.g. “/a/b/c”); else “missing”.\n"
             "• **batch_size**: look for `batch_size=` in DataLoader; else null.\n"
             "• **learning_rate**: look for `lr=` or “learning rate”; else null.\n"
             "• **optimizer**: look for optimizer names (Adam, SGD); else “missing”.\n"
             "• **epochs**: look for `epochs =`; else null.\n"
-            "• **hardware_used**: look for device settings (`cuda`, `mps`, `cpu`); map to “GPU”, “CPU” or “Both”; else “missing”.\n\n"
+            "• **hardware_used**: look for device settings (`cuda`, `mps`, `cpu`); map to “GPU”, “CePU” or “Both”; else “missing”.\n\n"
             "🚨 **Output ONLY** the JSON object—no commentary, no markdown."
         )
 
@@ -628,10 +639,10 @@ class LLMBasedCodeParser:
     def _create_default_metadata(self) -> dict:
         """Create default metadata structure with empty/null values."""
         return {
-            "framework": {"name": "unknown", "version": "unknown"},
-            "architecture": {"type": "unknown"},
-            "dataset": {"name": "unknown"},
-            "imaged_folder": {"name": "unknown"},
+            "framework": {"name": "missing", "version": "missing"},
+            "architecture": {"type": "missing"},
+            "dataset": {"name": "missing"},
+            "imaged_folder": {"name": "missing"},
             "training_config": {
                 "batch_size": None,
                 "learning_rate": None,
@@ -644,7 +655,7 @@ class LLMBasedCodeParser:
     def _validate_metadata_structure(self, metadata: dict) -> Tuple[bool, str]:
         """Validate that the metadata has the required structure."""
         # Check that all required top-level fields exist
-        required_fields = ["framework", "architecture", "dataset", "images_folder", "training_config"]
+        required_fields = ["framework", "architecture", "dataset", "training_config"]
         if not all(field in metadata for field in required_fields):
             return False, "Missing required fields"
 
@@ -653,16 +664,19 @@ class LLMBasedCodeParser:
                 field in metadata["framework"] for field in ["name", "version"]):
             return False, "Invalid framework structure"
 
+        minimum_reason_length = 6
+
         # Check that architecture has type
-        if not isinstance(metadata["architecture"], dict) or "type" not in metadata["architecture"]:
+        if not isinstance(metadata["architecture"], dict) or "type" not in metadata["architecture"] or "reason" not in metadata["architecture"] or metadata["architecture"].get("type") == "missing" or \
+                metadata["architecture"].get("type") == "unknown" or metadata["architecture"].get("type") == "N/A" or metadata["architecture"].get("type") is None or\
+                len(metadata["architecture"].get("reason", "")) <= minimum_reason_length or \
+                (metadata["architecture"].get("type") == "missing" and "missing" not in metadata["architecture"].get("reason").lower()):
             return False, "Invalid architecture structure"
 
         # Check that dataset has name
-        if not isinstance(metadata["dataset"], dict) or "name" not in metadata["dataset"]:
+        if not isinstance(metadata["dataset"], dict) or "name" not in metadata["dataset"] or len(metadata["dataset"].get("reason", "")) <= minimum_reason_length or \
+            (metadata["dataset"].get("name") == "missing" and "missing" not in metadata["dataset"].get("reason").lower()):
             return False, "Invalid dataset structure"
-
-        if not isinstance(metadata["images_folder"], dict) or "name" not in metadata["images_folder"]:
-            return False, "Invalid images folder structure"
 
         # Check that training_config has all required fields
         training_config_fields = ["batch_size", "learning_rate", "optimizer", "epochs", "hardware_used"]

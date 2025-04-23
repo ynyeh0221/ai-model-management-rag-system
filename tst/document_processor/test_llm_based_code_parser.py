@@ -19,10 +19,9 @@ class TestCodeParser(unittest.TestCase):
         mock_llm_interface = Mock()
         mock_llm_interface.generate_structured_response.return_value = {
             "content": json.dumps({
-                "description": "Simple CNN model",
                 "framework": {"name": "PyTorch", "version": "1.13"},
-                "architecture": {"type": "CNN"},
-                "dataset": {"name": "CIFAR-10"},
+                "architecture": {"type": "CNN", "reason": "reason for unit testing"},
+                "dataset": {"name": "CIFAR-10", "reason": "reason for unit testing"},
                 "images_folder": {"name": "a/b/c"},
                 "training_config": {
                     "batch_size": 64,

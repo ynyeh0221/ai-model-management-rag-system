@@ -65,7 +65,7 @@ class ScriptProcessorRunner:
         processed_count = 0
 
         # Process files in parallel using a thread pool
-        with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future_to_file = {executor.submit(self.process_single_script, components, file_path, logger): file_path
                               for file_path in script_files}
 
