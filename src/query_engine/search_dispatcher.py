@@ -780,7 +780,7 @@ class SearchDispatcher:
         # Sort by distance (lower is better)
         output_list.sort(key=lambda x: x.get('distance', 2.0))
 
-        print(f"All results: {output_list}")
+        # print(f"All results: {output_list}")
 
         # Limit to requested number of results
         return output_list[:requested_limit]

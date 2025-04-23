@@ -186,7 +186,7 @@ class UIRunner:
             self._generate_query_response(query_text, reranked_results, llm_interface)
 
     def _process_search_results(self, search_results, reranker, parsed_query, query_text, max_to_return=10,
-                                rerank_threshold=0.11):
+                                rerank_threshold=0.1):
         """
         Process and rerank search results.
 
@@ -211,7 +211,9 @@ class UIRunner:
         items_to_rerank = search_results['items']
         # Loop through each item and add the content field
         for item in items_to_rerank:
-            item['content'] = item.get('model_id', '') + ", " + item.get('merged_description', '')
+            item['content'] = ("Model description: " + item.get('merged_description', '') +
+                               ", created year: " + item.get('created_year', '') + ", created month: " + item.get('created_month', '') +
+                               ", last modified year: " + item.get('last_modified_year', '') + ", last modified month: " + item.get('last_modified_month', ''))
 
         if reranker and items_to_rerank:
             print(f"Sending {len(items_to_rerank)} items to reranker")
@@ -455,7 +457,7 @@ class UIRunner:
         # 3. Construct the prompt builder logic
         prompt_builder = (
             "You are a senior machine-learning architect. "
-            "Your task is to craft a concise meta-prompt to generate clear, comprehensive reports for junior ML engineers to learn and understand the system. "
+            "Your task is to craft a concise meta-prompt to generate clear, comprehensive reports for ML engineers to learn and understand the system. "
             "Define all technical terms and leave no gaps in explanation. "
             "Now, construct a single, high-level meta-prompt that will:\n"
             "  1. Restate the user’s original request so the LLM knows what to address.\n"
@@ -468,7 +470,7 @@ class UIRunner:
             "  User query: \"Describe the model with ID XYZ.\"\n"
             "  Result schema: { 'model_id': 'string', 'framework': 'string', 'created_date': 'string' }\n"
             "  => Meta-prompt:\n"
-            "     \"You are a senior machine-learning architect. Define all technical terms and ensure clarity for junior engineers. "
+            "     \"You are a senior machine-learning architect. Define all technical terms and ensure clarity for ML engineers. "
             "Describe the model with ID XYZ using only the provided fields `model_id`, `framework`, and `created_date`. "
             "Do not add any details beyond those fields. Instruct that, when token limits permit, analysis or insights based solely on that data should be included.\"\n\n"
             f"User query: {query_text}\n"

@@ -230,7 +230,21 @@ class QueryParser:
             "stable diffusion", "dalle", "cnn", "resnet", "vit",
             "swin", "yolo", "diffusion", "vae", "gan", "bard",
             "mistral", "gemini", "baichuan", "claude", "ernie",
-            "chatglm", "falcon", "phi", "qwen", "yi", "bloom"
+            "chatglm", "falcon", "phi", "qwen", "yi", "bloom", "dqn"
+        ]
+
+        # Year extraction patterns with context
+        self.created_year_patterns = [
+            r"created\s+in\s+(?:the\s+year\s+)?(20\d{2})",
+            r"from\s+(?:the\s+year\s+)?(20\d{2})",
+            r"developed\s+in\s+(?:the\s+year\s+)?(20\d{2})",
+            r"implemented\s+in\s+(?:the\s+year\s+)?(20\d{2})",
+            r"built\s+in\s+(?:the\s+year\s+)?(20\d{2})",
+            r"made\s+in\s+(?:the\s+year\s+)?(20\d{2})",
+            r"dating\s+from\s+(?:the\s+year\s+)?(20\d{2})",
+            r"models\s+from\s+(?:the\s+year\s+)?(20\d{2})",
+            r"in\s+(?:the\s+year\s+)?(20\d{2})",
+            r"year[:\s]+(20\d{2})"
         ]
 
     def parse_query(self, query_text: str) -> Dict[str, Any]:
@@ -327,12 +341,8 @@ class QueryParser:
                 if value is None:
                     continue
 
-                # Skip "all" for model_id
-                if key == "model_id" and (value == "all" or value == ["all"]):
-                    continue
-
-                # Chroma's filter does exact-match. Not including architecture and framework to filter to prevent finding no result
-                if key == "architecture" or key == "framework" or key == "dataset":
+                # Chroma's filter does exact-match. Not including model_id, architecture and framework to filter to prevent finding no result
+                if key == "model_id" or key == "architecture" or key == "framework" or key == "dataset":
                     continue
 
                 # Handle dictionary values
@@ -386,11 +396,12 @@ class QueryParser:
                 filters["created_month"] = month.capitalize()
                 break
 
-        # Extract 4-digit year if mentioned
-        year_pattern = r"(20\d{2})"
-        year_match = re.search(year_pattern, query_text)
-        if year_match:
-            filters["created_year"] = year_match.group(1)
+        # Extract year using context-aware patterns
+        for pattern in self.created_year_patterns:
+            year_match = re.search(pattern, query_lower)
+            if year_match:
+                filters["created_year"] = year_match.group(1)
+                break
 
         # Try LangChain extraction if available
         if self.use_langchain:
@@ -432,7 +443,7 @@ class QueryParser:
             "rnn", "recurrent", "lstm", "transformer", "attention",
             "diffusion", "gan", "generative adversarial", "vae",
             "variational", "autoencoder", "bert", "gpt", "mlp",
-            "cifar", "cifar-10", "stl", "stl-10", "oxford"
+            "cifar", "cifar-10", "stl", "stl-10", "oxford", "dqn"
         }
 
         model_ids = self._extract_model_id_mentions(query_text)
