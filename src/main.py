@@ -1,9 +1,9 @@
 import argparse
 import os
 
-from cli_runner.image_processor_runner import ImageProcessorRunner
-from cli_runner.script_processor_runner import ScriptProcessorRunner
-from cli_runner.ui_runner import UIRunner
+from cli_runner.images.image_processor_runner import ImageProcessorRunner
+from cli_runner.model_scripts.script_processor_runner import ScriptProcessorRunner
+from cli_runner.ui.ui_runner import UIRunner
 from src.colab_generator.code_generator import CodeGenerator
 from src.colab_generator.colab_api_client import ColabAPIClient
 from src.colab_generator.reproducibility_manager import ReproducibilityManager

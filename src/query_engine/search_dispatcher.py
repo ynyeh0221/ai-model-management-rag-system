@@ -619,12 +619,14 @@ class SearchDispatcher:
                         'count': len(distances)
                     }
 
+                    """
                     self.logger.info(
                         f"Collection {collection_name} stats: "
                         f"min={min_distance}, max={max_distance}, "
                         f"10th={percentile_10}, median={median}, 90th={percentile_90}, "
                         f"count={len(distances)}"
                     )
+                    """
                 else:
                     # Default values if no distances found
                     collection_stats[collection_name] = {
