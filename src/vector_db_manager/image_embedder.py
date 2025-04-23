@@ -99,7 +99,7 @@ class ImageEmbedder:
 
             return resized
 
-    async def generate_text_embedding(self, text: str) -> np.ndarray:
+    async def embed_text(self, text: str) -> np.ndarray:
         """
         Generate embedding for a text query, making it compatible with image embeddings.
         Async method for compatibility with SearchDispatcher.
@@ -110,9 +110,9 @@ class ImageEmbedder:
         Returns:
             np.ndarray: L2-normalized embedding vector in the same space as image embeddings
         """
-        return self._generate_text_embedding_sync(text)
+        return self._embed_text_sync(text)
 
-    def _generate_text_embedding_sync(self, text: str) -> np.ndarray:
+    def _embed_text_sync(self, text: str) -> np.ndarray:
         """
         Synchronous implementation of text embedding generation.
 

@@ -624,10 +624,7 @@ class ChromaManager:
                 # Text query - generate embedding
                 if collection_name == "generated_images":
                     # For text-to-image search
-                    query_embedding = await self._run_in_executor(
-                        self.image_embedding_function,
-                        [query]
-                    )
+                    query_embedding = [await self.image_embedder.embed_text(query)]
                 else:
                     query_embedding = await self._run_in_executor(
                         self.text_embedding_function,

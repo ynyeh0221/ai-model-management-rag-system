@@ -129,15 +129,15 @@ class TestImageEmbedder(unittest.TestCase):
         embedder = ImageEmbedder(device=TEST_DEVICE)
 
         # Mock the _generate_text_embedding_sync method
-        embedder._generate_text_embedding_sync = MagicMock()
-        embedder._generate_text_embedding_sync.return_value = np.ones(TEST_TARGET_DIM)
+        embedder._embed_text_sync = MagicMock()
+        embedder._embed_text_sync.return_value = np.ones(TEST_TARGET_DIM)
 
         # Test the async generate_text_embedding method
         import asyncio
-        result = asyncio.run(embedder.generate_text_embedding("test query"))
+        result = asyncio.run(embedder.embed_text("test query"))
 
         # Check if _generate_text_embedding_sync was called with the correct parameters
-        embedder._generate_text_embedding_sync.assert_called_once_with("test query")
+        embedder._embed_text_sync.assert_called_once_with("test query")
         self.assertIsInstance(result, np.ndarray)
         self.assertEqual(result.shape, (TEST_TARGET_DIM,))
 
@@ -167,7 +167,7 @@ class TestImageEmbedder(unittest.TestCase):
         embedder._resize_embedding = MagicMock(return_value=np.ones(TEST_TARGET_DIM))
 
         # Run the actual method
-        result = embedder._generate_text_embedding_sync("test query")
+        result = embedder._embed_text_sync("test query")
 
         # Check if tokenizer function was called properly
         mock_tokenizer_fn.assert_called_once_with(["test query"])

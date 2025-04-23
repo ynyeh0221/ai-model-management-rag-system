@@ -308,14 +308,6 @@ class ImageSearchManager:
         if not self.image_embedder:
             raise ValueError("Image embedder is required for similarity search but not provided")
 
-        # Generate embedding from image or text
-        if query_image is not None:
-            query_embedding = await self.image_embedder.embed_image(query_image)
-        elif query_text is not None:
-            query_embedding = await self.image_embedder.embed_text(query_text)
-        else:
-            raise ValueError("Either query_image or query_text must be provided")
-
         # Build filter
         filter_query = {}
 
@@ -345,7 +337,7 @@ class ImageSearchManager:
         # Execute the search
         search_results = await self.chroma_manager.search(
             collection_name="generated_images",
-            query_embedding=query_embedding,
+            query=query_text if query_text else query_image,
             where=filter_query if filter_query else None,
             limit=limit,
             include=["metadatas", "documents", "distances"]
