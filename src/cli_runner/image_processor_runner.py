@@ -73,7 +73,6 @@ class ImageProcessorRunner:
             future_to_file = {executor.submit(self.process_single_image,
                                               components,
                                               file_path,
-                                              model_id,
                                               extract_epoch): file_path for file_path in filtered_image_files}
 
             for future in concurrent.futures.as_completed(future_to_file):
@@ -140,7 +139,7 @@ class ImageProcessorRunner:
             self.logger.warning(f"Error extracting epoch from path: {e}")
             return None
 
-    def process_single_image(self, components, file_path, model_id=None, extract_epoch=True, logger=None):
+    def process_single_image(self, components, file_path, extract_epoch=True, logger=None):
         """Process a single image file.
 
         Args:
@@ -172,10 +171,12 @@ class ImageProcessorRunner:
             logger.error(f"File {file_path} does not exist")
             return None
 
-        # 1. Generate model_id if not provided
-        if model_id is None:
-            file_path_obj = Path(file_path).resolve()
-            model_id = str(file_path_obj.parent)
+        # 1. Generate model_id as the absolute path of the folder containing the file
+        # Replace any previously provided model_id to fix the issue
+        file_path_obj = Path(file_path).resolve()
+        # Get the absolute directory path of the file
+        model_id = str(file_path_obj.parent.absolute())
+        logger.info(f"Using directory of file as model_id: {model_id}")
 
         # Check if model_id already contains epoch information to avoid duplication
         epoch_in_model_id = None
@@ -418,11 +419,7 @@ class ImageProcessorRunner:
             # Reprocess the image
             try:
                 # Extract model_id and epoch from existing metadata
-                existing_model_id = metadata.get("model_id")
                 existing_epoch = metadata.get("epoch")
-
-                # If model_id or epoch not found in metadata, use the ones from parameters
-                model_id_to_use = existing_model_id if existing_model_id else model_id
 
                 # Reprocess the image
                 # Use existing epoch if available, otherwise extract from path if requested
@@ -431,7 +428,6 @@ class ImageProcessorRunner:
                 result = self.process_single_image(
                     components,
                     image_path,
-                    model_id=model_id_to_use,
                     extract_epoch=should_extract_epoch,
                     logger=logger
                 )
