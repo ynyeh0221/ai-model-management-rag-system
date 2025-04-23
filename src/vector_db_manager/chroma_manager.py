@@ -732,7 +732,8 @@ class ChromaManager:
             if where and len(where) > 0:
                 get_args["where"] = where
 
-            print(f"Get args: {get_args}")
+            # Print for debug
+            # print(f"Get args: {get_args}")
 
             # Get documents
             results = await self._run_in_executor(
@@ -740,7 +741,8 @@ class ChromaManager:
                 **get_args
             )
 
-            print(f"Get results: {results}")
+            # Print for debug
+            # print(f"Get results: {results}")
 
             # Process results into a more user-friendly format
             processed_results = self._process_search_results(results, include)

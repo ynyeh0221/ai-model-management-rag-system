@@ -307,41 +307,6 @@ class AccessControlManager:
         metadata["access_control"] = json.dumps(access_control)
         return self._update_document_metadata(document_id, metadata)
 
-    def create_access_filter(self, user_id):
-        """
-        Create a filter for access control in queries.
-        This generates a filter that can be applied to database queries to only return
-        documents the user has permission to view.
-
-        Args:
-            user_id: The ID of the user making the query
-
-        Returns:
-            dict: A filter dictionary that can be passed to the database query method
-        """
-        user_groups = self._get_user_groups(user_id)
-
-        # Create a filter that matches documents where:
-        # 1. The user is explicitly in any permission list
-        # 2. Any of the user's groups are in any permission list
-        # 3. The document is public (has "public" in any permission list)
-
-        filter_dict = {
-            "$or": [
-                {"metadata.access_control": {"$contains": f'"{user_id}"'}},  # User in any permission list
-                {"metadata.access_control": {"$contains": '"public"'}}  # Public access
-            ]
-        }
-
-        # Add group permissions if user belongs to any groups
-        if user_groups:
-            for group in user_groups:
-                filter_dict["$or"].append(
-                    {"metadata.access_control": {"$contains": f'"{group}"'}}
-                )
-
-        return filter_dict
-
     def _get_access_control(self, document):
         """
         Get access control information from a document.
@@ -385,13 +350,49 @@ class AccessControlManager:
 
         try:
             # Example implementation - adapt based on actual storage mechanism
-            user_record = self.db_client.get_user(user_id)
-            if user_record and "groups" in user_record:
-                return user_record["groups"]
+            if hasattr(self.db_client, 'get_user'):
+                user_record = self.db_client.get_user(user_id)
+                if user_record and "groups" in user_record:
+                    return user_record["groups"]
         except Exception as e:
             print(f"Error retrieving user groups: {e}")
 
         return []
+
+    def create_access_filter(self, user_id):
+        """
+        Create a filter for access control in queries.
+        This generates a filter that can be applied to database queries to only return
+        documents the user has permission to view.
+
+        Args:
+            user_id: The ID of the user making the query
+
+        Returns:
+            dict: A filter dictionary that can be passed to the database query method
+        """
+        user_groups = self._get_user_groups(user_id)
+
+        # Create a filter that matches documents where:
+        # 1. The user is explicitly in any permission list
+        # 2. Any of the user's groups are in any permission list
+        # 3. The document is public (has "public" in any permission list)
+
+        filter_dict = {
+            "$or": [
+                {"metadata.access_control": {"$contains": f'"{user_id}"'}},  # User in any permission list
+                {"metadata.access_control": {"$contains": '"public"'}}  # Public access
+            ]
+        }
+
+        # Add group permissions if user belongs to any groups
+        if user_groups:
+            for group in user_groups:
+                filter_dict["$or"].append(
+                    {"metadata.access_control": {"$contains": f'"{group}"'}}
+                )
+
+        return filter_dict
 
     def _get_document(self, document_id):
         """
@@ -499,79 +500,173 @@ class AccessControlManager:
 
     def get_accessible_models(self, user_id):
         """
-        Get a deduplicated list of models that the user has access to.
+        Get a list of models that the user has access to by first getting all model IDs from
+        the model_date table and then fetching metadata for each accessible model.
 
         Args:
             user_id: The ID of the user
 
         Returns:
-            list: List of models the user can access
+            list: List of models the user can access with their metadata
         """
         if not self.db_client:
             return []
 
         try:
-            # Check if db_client.get is an async method
-            if hasattr(self.db_client, 'get') and asyncio.iscoroutinefunction(self.db_client.get):
-                try:
+            # Step 1: Get all model IDs from model_date table
+            try:
+                # Check if db_client.get is an async method
+                if hasattr(self.db_client, 'get') and asyncio.iscoroutinefunction(self.db_client.get):
                     try:
-                        loop = asyncio.get_event_loop()
-                    except RuntimeError:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
+                        try:
+                            loop = asyncio.get_event_loop()
+                        except RuntimeError:
+                            loop = asyncio.new_event_loop()
+                            asyncio.set_event_loop(loop)
 
-                    coro = self.db_client.get(
-                        collection_name="model_scripts",
+                        coro = self.db_client.get(
+                            collection_name="model_date",
+                            include=["metadatas"]
+                        )
+                        all_models = loop.run_until_complete(coro)
+                    except Exception as e:
+                        print(f"Error running async db call: {e}")
+                        return []
+                else:
+                    all_models = self.db_client.get(
+                        collection_name="model_date",
                         include=["metadatas"]
                     )
-                    all_models = loop.run_until_complete(coro)
-                except Exception as e:
-                    print(f"Error running async db call: {e}")
-                    return []
-            else:
-                all_models = self.db_client.get(
-                    collection_name="model_scripts",
-                    include=["metadatas"]
-                )
 
-            accessible_models = []
-            seen_model_ids = set()
+                # Define metadata tables to fetch (excluding model_descriptions)
+                metadata_tables = [
+                    "model_architectures",
+                    "model_frameworks",
+                    "model_datasets",
+                    "model_training_configs",
+                    "model_file",
+                    "model_git",
+                    "model_images_folder"
+                ]
 
-            if isinstance(all_models, dict) and 'results' in all_models:
-                for model in all_models['results']:
-                    try:
-                        metadata = model.get("metadata", {})
-                        model_id = metadata.get("model_id")
+                # Process results to collect model IDs
+                all_model_ids = set()
+                if isinstance(all_models, dict) and 'results' in all_models:
+                    for model in all_models['results']:
+                        metadata = model.get('metadata', {})
+                        model_id = metadata.get('model_id')
 
-                        # Skip if already seen or missing
-                        if not model_id or model_id in seen_model_ids:
+                        # Skip if no model_id or not accessible to user
+                        if not model_id:
                             continue
 
-                        file_info = json.loads(metadata.get("file", "{}"))
+                        # Check access control
+                        if self.check_access({'metadata': metadata}, user_id, "view"):
+                            all_model_ids.add(model_id)
 
-                        if self.check_access(model, user_id, "view"):
+                # Step 2: Fetch complete metadata for accessible models
+                accessible_models = []
+                seen_model_ids = set()
+
+                for model_id in all_model_ids:
+                    try:
+                        # Skip if already processed
+                        if model_id in seen_model_ids:
+                            continue
+
+                        # Initialize consolidated metadata
+                        consolidated_metadata = {'model_id': model_id}
+
+                        # Fetch metadata from each table for this model
+                        for table_name in metadata_tables:
+                            try:
+                                # Check if db_client.get is an async method
+                                if hasattr(self.db_client, 'get') and asyncio.iscoroutinefunction(self.db_client.get):
+                                    try:
+                                        try:
+                                            loop = asyncio.get_event_loop()
+                                        except RuntimeError:
+                                            loop = asyncio.new_event_loop()
+                                            asyncio.set_event_loop(loop)
+
+                                        coro = self.db_client.get(
+                                            collection_name=table_name,
+                                            where={"model_id": {"$eq": model_id}},
+                                            include=["metadatas"]
+                                        )
+                                        table_results = loop.run_until_complete(coro)
+                                    except Exception as e:
+                                        print(
+                                            f"Error running async get for model {model_id} in table {table_name}: {e}")
+                                        continue
+                                else:
+                                    # Synchronous call
+                                    table_results = self.db_client.get(
+                                        collection_name=table_name,
+                                        where={"model_id": {"$eq": model_id}},
+                                        include=["metadatas"]
+                                    )
+
+                                # Extract and add metadata
+                                if table_results and 'results' in table_results and table_results['results']:
+                                    metadata = table_results['results'][0].get('metadata', {})
+
+                                    # Add metadata to consolidated record (exclude description field if present)
+                                    if 'description' in metadata:
+                                        # Create a copy without the description
+                                        metadata_without_desc = {k: v for k, v in metadata.items() if
+                                                                 k != 'description'}
+                                        consolidated_metadata.update(metadata_without_desc)
+                                    else:
+                                        consolidated_metadata.update(metadata)
+                            except Exception as table_e:
+                                print(f"Error processing table {table_name} for model {model_id}: {table_e}")
+
+                        # Process file info if available
+                        if 'file' in consolidated_metadata and 'images_folder' in consolidated_metadata:
+                            try:
+                                file_info = json.loads(consolidated_metadata.get('file', '{}'))
+                                images_folder_info = json.loads(consolidated_metadata.get('images_folder', '{}'))
+                                model_info = {
+                                    'model_id': model_id,
+                                    'creation_date': file_info.get('creation_date'),
+                                    'last_modified_date': file_info.get('last_modified_date'),
+                                    'total_chunks': consolidated_metadata.get('total_chunks'),
+                                    'absolute_path': file_info.get('absolute_path'),
+                                    'images_folder': images_folder_info.get('name'),
+                                }
+
+                                # Add other metadata
+                                if 'framework' in consolidated_metadata:
+                                    model_info['framework'] = consolidated_metadata['framework']
+                                if 'version' in consolidated_metadata:
+                                    model_info['version'] = consolidated_metadata['version']
+
+                                accessible_models.append(model_info)
+                                seen_model_ids.add(model_id)
+                            except Exception as inner_e:
+                                print(f"Error processing model file info for {model_id}: {inner_e}")
+                        else:
+                            # If no file info, create a basic model info entry
                             model_info = {
-                                "model_id": model_id,
-                                "creation_date": file_info.get("creation_date"),
-                                "last_modified_date": file_info.get("last_modified_date"),
-                                "total_chunks": metadata.get("total_chunks"),
-                                "absolute_path": file_info.get("absolute_path")
+                                'model_id': model_id
                             }
-
-                            # Add other metadata
-                            if "framework" in metadata:
-                                model_info["framework"] = metadata["framework"]
-                            if "version" in metadata:
-                                model_info["version"] = metadata["version"]
+                            # Add all consolidated metadata except large fields
+                            for key, value in consolidated_metadata.items():
+                                if key not in ['file', 'description', 'access_control']:
+                                    model_info[key] = value
 
                             accessible_models.append(model_info)
                             seen_model_ids.add(model_id)
 
-                    except Exception as inner_e:
-                        print(f"Error processing model entry: {inner_e}")
-                        continue
+                    except Exception as e:
+                        print(f"Error processing model {model_id}: {e}")
 
-            return accessible_models
+                return accessible_models
+
+            except Exception as e:
+                print(f"Error retrieving models from model_date table: {e}")
+                return []
 
         except Exception as e:
             print(f"Error retrieving accessible models: {e}")
