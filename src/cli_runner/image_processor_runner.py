@@ -65,8 +65,8 @@ class ImageProcessorRunner:
 
         # Try to extract model_id from directory name if not provided
         if model_id is None:
-            dir_path = Path(directory_path)
-            model_id = dir_path.name
+            file_path_obj = Path(file_path).resolve()
+            model_id = str(file_path_obj.parent)
 
         # Process files in parallel using a thread pool
         with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
@@ -174,10 +174,8 @@ class ImageProcessorRunner:
 
         # 1. Generate model_id if not provided
         if model_id is None:
-            file_path_obj = Path(file_path)
-            folder_name = file_path_obj.parent.name
-            file_stem = file_path_obj.stem
-            model_id = f"{folder_name}_{file_stem}"
+            file_path_obj = Path(file_path).resolve()
+            model_id = str(file_path_obj.parent)
 
         # Check if model_id already contains epoch information to avoid duplication
         epoch_in_model_id = None
@@ -272,6 +270,7 @@ class ImageProcessorRunner:
             logger.error(f"Image file path does not exist: {file_path}")
             return (document_id, False)
 
+        import numpy as np
         try:
             from PIL import Image
             # Load the image explicitly to ensure it's valid
@@ -293,13 +292,11 @@ class ImageProcessorRunner:
             if embedding is None:
                 logger.error(f"Failed to generate embedding: result is None")
                 # Use a random embedding as fallback
-                import numpy as np
                 embedding = np.random.rand(384).astype(np.float32)  # Default embedding size
                 logger.info(f"Using random fallback embedding")
             elif isinstance(embedding, (list, np.ndarray)) and len(embedding) == 0:
                 logger.error(f"Failed to generate embedding: empty array")
                 # Use a random embedding as fallback
-                import numpy as np
                 embedding = np.random.rand(384).astype(np.float32)  # Default embedding size
                 logger.info(f"Using random fallback embedding")
             else:
@@ -308,7 +305,6 @@ class ImageProcessorRunner:
         except Exception as e:
             logger.error(f"Error generating embedding for {file_path}: {str(e)}")
             # Create a random embedding as fallback
-            import numpy as np
             embedding = np.random.rand(384).astype(np.float32)  # Default embedding size
             logger.info(f"Using random fallback embedding due to error")
 

@@ -369,8 +369,8 @@ class ScriptProcessorRunner:
         # Ensure all fields are the correct type
         if isinstance(llm_fields["framework"], str):
             llm_fields["framework"] = {"name": llm_fields["framework"], "version": "unknown"}
-        if isinstance(llm_fields["architecture"], str):
-            llm_fields["architecture"] = {"type": llm_fields["architecture"]}
+        if not isinstance(llm_fields["architecture"], dict):
+            llm_fields["architecture"] = {}
         if isinstance(llm_fields["dataset"], str):
             llm_fields["dataset"] = {"name": llm_fields["dataset"]}
         if not isinstance(llm_fields["training_config"], dict):
@@ -531,6 +531,7 @@ class ScriptProcessorRunner:
                 "title": f"Architecture information for {model_id}",
                 "description": f"""
                     Architecture type: {architecture.get('type', 'N/A')}.
+                    Architecture reason: {architecture.get('reason', 'N/A')}.
                 """
             }
 

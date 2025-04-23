@@ -115,15 +115,6 @@ class ChromaManager:
                         "clip_score": "float"
                     }
                 },
-                "relationships": {
-                    "description": "Collection for relationship documents",
-                    "embedding_function": self.text_embedding_function,
-                    "metadata_schema": {
-                        "source_id": "string",
-                        "target_id": "string",
-                        "relation_type": "string"
-                    }
-                },
 
                 # New collections for separated metadata
                 "model_file": {

@@ -105,9 +105,7 @@ class LLMBasedCodeParser:
 
         # Safely parse framework
         framework = self.llm_metadata_cache.get("framework", {})
-        if isinstance(framework, str):
-            model_info["framework"] = {"name": framework, "version": None}
-        elif isinstance(framework, dict):
+        if isinstance(framework, dict):
             model_info["framework"] = {
                 "name": framework.get("name") if isinstance(framework.get("name"), str) else None,
                 "version": framework.get("version") if isinstance(framework.get("version"), str) else None
@@ -116,14 +114,10 @@ class LLMBasedCodeParser:
             model_info["framework"] = {"name": None, "version": None}
 
         arch = self.llm_metadata_cache.get("architecture", {})
-        if isinstance(arch, str):
-            model_info["architecture"] = {"type": arch}
-        elif isinstance(arch, dict):
-            model_info["architecture"] = {
-                "type": arch.get("type") if isinstance(arch.get("type"), str) else None
-            }
+        if isinstance(arch, dict):
+            model_info["architecture"] = arch
         else:
-            model_info["architecture"] = {"type": None}
+            model_info["architecture"] = {"type": None, "reason": None}
 
         dataset = self.llm_metadata_cache.get("dataset", {})
         if isinstance(dataset, dict):
@@ -428,13 +422,17 @@ class LLMBasedCodeParser:
             chunk_text = self.filter_ast_summary_for_metadata(chunk_text)
 
         system_prompt = (
-            "You are a senior ML engineer documenting Python training scripts. "
+            "You are a senior machine-learning architect documenting Python training scripts. "
+            "Your audience is **junior ML engineers** who will read your report to understand, reproduce, "
+            "and extend the model. Therefore your language must be clear, define all technical terms, "
+            "and leave no gaps in explanation.\n\n"
             "Given an AST summary of a script, **carefully examine every detail** to produce a complete, human-readable English report.\n\n"
 
             "**CRITICAL REQUIREMENTS**:\n"
-            "• Thoroughly analyze the AST summary before writing - do not skip or overlook any nodes or attributes.\n"
+            "• Thoroughly analyze the AST summary before writing – do not skip or overlook any nodes or attributes.\n"
             "• Ensure all model components, configurations, and operations in the AST are reflected in your summary.\n"
-            "• Pay special attention to hyperparameters, layer dimensions, conditional logic, and data transformations.\n\n"
+            "• Pay special attention to hyperparameters, layer dimensions, conditional logic, and data transformations.\n"
+            "• **Do not invent or hallucinate any information**; only describe what is actually present in the AST summary.\n\n"
 
             "Produce a report with these sections:\n\n"
             "1. Purpose:\n"
@@ -447,14 +445,14 @@ class LLMBasedCodeParser:
 
             "3. Model Architecture:\n"
             "   • Describe **every layer** or block found in the AST using fluent prose. For example:\n"
-            "     \"The first convolutional layer applies 32 filters of size 3×3 to the 1‑channel 28×28 input, producing 32 feature maps of size 26×26. Next, a ReLU activation introduces non‑linearity, followed by a 2×2 max‑pool that halves the spatial dimensions to 13×13.\"\n"
+            "     \"The first convolutional layer applies 32 filters of size 3×3 to the 1-channel 28×28 input, producing 32 feature maps of size 26×26. Next, a ReLU activation introduces non-linearity, followed by a 2×2 max-pool that halves the spatial dimensions to 13×13.\"\n"
             "   • For each component, explain:\n"
             "     - What it does and its role in the architecture\n"
             "     - Its exact parameters (e.g., kernel sizes, strides, padding)\n"
             "     - How it transforms the data shape through the network\n"
             "     - Any regularization (dropout, batch norm) or special operations\n"
             "   • Do NOT omit auxiliary modules, custom layers, or architectural details.\n\n"
-    
+
             "4. Training Configuration:\n"
             "   • **Document every training parameter** from the AST:\n"
             "     - Optimizer (type and all hyperparameters like lr, momentum, weight_decay)\n"
@@ -463,29 +461,29 @@ class LLMBasedCodeParser:
             "     - Exact number of epochs, early stopping criteria\n"
             "     - Hardware settings (CPU/GPU/MPS), device allocations\n"
             "     - Gradient clipping, mixed precision, or other training modifications\n\n"
-    
+
             "5. Evaluation & Testing:\n"
             "   • Detail **all evaluation procedures** found in the AST:\n"
             "     - Validation frequency and process\n"
             "     - Test protocols and checkpointing strategies\n"
             "     - **Every metric** computed (accuracy, F1, confusion matrix, etc.)\n"
             "     - Any custom evaluation logic or callbacks\n\n"
-    
+
             "6. Visualization & Artifacts:\n"
             "   • **List all visualization components**:\n"
             "     - Plot types (loss curves, confusion matrices, embeddings, etc.)\n"
             "     - Saving directories and file formats\n"
             "     - Logging systems (TensorBoard, Wandb, etc.)\n"
             "     - Model checkpoints and saved artifacts\n\n"
-    
+
             "**WRITING GUIDELINES**:\n"
             "• Use clear headings and bullet lists.\n"
-            "• Write in natural, fluent prose - no code snippets or raw AST output.\n"
-            "• Be comprehensive - if it's in the AST, it must be in your summary.\n"
+            "• Write in natural, fluent prose – no code snippets or raw AST output.\n"
+            "• Be comprehensive – if it's in the AST, it must be in your summary.\n"
             "• Double-check that your summary includes ALL components mentioned in the AST.\n"
             "• Ensure an ML engineer could reproduce the exact workflow from your description.\n\n"
-    
-            "Remember: Missing important details means failing the task. Be meticulous and thorough."
+
+            "Remember: Missing important details or adding information not present in the AST means failing the task. Be meticulous and thorough."
         )
 
         for attempt in range(max_retries):
@@ -583,7 +581,8 @@ class LLMBasedCodeParser:
             print(f"len(extracted_summary): {len(summary)}, file_path: {file_path}")
 
         system_prompt = (
-            "You are a metadata extractor for machine learning code. "
+            "You are a senior machine-learning architect. Your job is to extract high-quality, expert-level metadata from ML code. "
+            "This JSON will feed into our model registry, auto-generate training dashboards, and ensure full reproducibility of experiments. "
             "Based on the following model AST digest summary, create a structured representation of the model metadata.\n\n"
             "The output **must strictly follow this exact JSON structure**:\n"
             "{\n"
@@ -598,13 +597,14 @@ class LLMBasedCodeParser:
             '  }\n'
             "}\n\n"
             "Extraction hints:\n"
-            "• **architecture**: scan the *entire* AST summary for high-level paradigm cues (e.g. Generator, Discriminator, reparameterize, kl_divergence, q_sample, p_sample, Conv2d, Linear, MultiHeadAttention, TransformerEncoder, UNetAttentionBlock, etc.). Then infer the canonical paradigm name—even if it’s not literally in the code—or list other detected components as a comma-separated string. **Format this field as a JSON object**: `{ \"type\": \"<ArchitectureType>\", \"reason\": \"<concise reason citing the exact AST cues>\" }`.\n"
+            "• **architecture**: Do NOT simply copy a layer or class name from the AST. Instead, review *all* detected components (e.g., Conv2d, Linear, MultiHeadAttention, reparameterize, UNetAttentionBlock, etc.) and infer the overarching model paradigm (e.g. “Variational Autoencoder”, “Transformer”, “UNet”, “GAN”). Format as: { \"type\": \"<InferredArchitecture>\", \"reason\": \"<concise justification citing multiple AST cues>\" }\n"
             "• **dataset**: scan the *entire* AST summary for dataset definitions or loader calls (e.g. `datasets.MNIST`, custom Dataset subclasses, DataLoader instantiations, file paths). Extract the dataset identifier and **format this field as a JSON object**: `{ \"name\": \"<DatasetName>\", \"reason\": \"<concise reason citing the exact AST cues>\" }`.\n"
             "• **batch_size**: look for `batch_size=` in DataLoader; else null.\n"
             "• **learning_rate**: look for `lr=` or “learning rate”; else null.\n"
             "• **optimizer**: look for optimizer names (Adam, SGD); else “missing”.\n"
             "• **epochs**: look for `epochs =`; else null.\n"
             "• **hardware_used**: look for device settings (`cuda`, `mps`, `cpu`); map to “GPU”, “CePU” or “Both”; else “missing”.\n\n"
+            "• **Do not invent or hallucinate** any values—only extract information actually present in the AST summary; if a field cannot be found, use null or “missing” as specified.\n\n"
             "🚨 **Output ONLY** the JSON object—no commentary, no markdown."
         )
 
@@ -668,8 +668,10 @@ class LLMBasedCodeParser:
             return False, "Missing required fields"
 
         # Check that architecture has type
-        if not isinstance(metadata["architecture"], dict) or "type" not in metadata["architecture"] or metadata["architecture"].get("type") == "missing" or \
-                metadata["architecture"].get("type") == "unknown" or metadata["architecture"].get("type") == "N/A" or metadata["architecture"].get("type") is None:
+        if not isinstance(metadata["architecture"], dict) or "type" not in metadata["architecture"] or metadata["architecture"].get("type") is None or \
+                metadata["architecture"].get("type").lower() == "missing" or metadata["architecture"].get("type").lower() == "unknown" or metadata["architecture"].get("type").lower() == "hybrid" or metadata["architecture"].get("type").lower() == "mixed" or metadata["architecture"].get("type").lower() == "both" or \
+                metadata["architecture"].get("type").lower() == "n/a" or "reason" not in metadata["architecture"] or metadata["architecture"].get("reason") is None or \
+                metadata["architecture"].get("reason").lower() == "missing" or metadata["architecture"].get("type").lower() == "pytorch" or metadata["architecture"].get("type").lower() == "gpu" or metadata["architecture"].get("type").lower() == "cpu":
             return False, "Invalid architecture structure"
 
         # Check that dataset has name

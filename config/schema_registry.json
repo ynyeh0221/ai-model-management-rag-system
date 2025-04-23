@@ -225,9 +225,10 @@
               "architecture": {
                 "type": "object",
                 "properties": {
-                  "type": {"type": ["string", "null"]}
+                  "type": {"type": ["string", "null"]},
+                  "reason": {"type": ["string", "null"]}
                 },
-                "required": ["type"]
+                "required": ["type", "reason"]
               },
               "access_control": {"type": "object"}
             },

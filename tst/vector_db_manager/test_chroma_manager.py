@@ -136,8 +136,7 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
         expected_collections = {
             "model_scripts_metadata",
             "model_scripts_chunks",
-            "generated_images",
-            "relationships"
+            "generated_images"
         }
         actual_collections = set(self.manager.collections.keys())
 
