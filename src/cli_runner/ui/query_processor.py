@@ -3,6 +3,24 @@ import json
 from cli_runner.ui.image_display_manager import ImageDisplayManager
 from cli_runner.ui.llm_response_processor import LLMResponseProcessor
 from cli_runner.ui.model_display_manager import ModelDisplayManager
+from response_generator.llm_interface import LLMInterface
+
+
+def remove_thinking_sections(text: str) -> str:
+    """
+    Remove all <thinking>...</thinking> sections from the input text.
+
+    Args:
+        text: The input string containing zero or more <thinking> sections.
+
+    Returns:
+        A new string with all <thinking> sections and their content removed.
+    """
+    import re
+    # Regex to match <thinking>...</thinking> including multiline content (non-greedy)
+    pattern = re.compile(r'<thinking>.*?</thinking>', re.DOTALL)
+    # Replace matched sections with an empty string
+    return pattern.sub('', text)
 
 
 class QueryProcessor:
@@ -56,7 +74,7 @@ class QueryProcessor:
         else:
             # Process and rerank search results
             reranked_results = self._process_search_results(
-                search_results, reranker, parsed_query, query_text, max_to_return=5
+                search_results, reranker, parsed_query, query_text, max_to_return=3
             )
 
             # Remove content field since it's not needed for display
@@ -66,7 +84,7 @@ class QueryProcessor:
             self._generate_query_response(query_text, reranked_results, llm_interface)
 
     def _process_search_results(self, search_results, reranker, parsed_query, query_text,
-                                max_to_return=10, rerank_threshold=0.1):
+                                max_to_return=10, rerank_threshold=0.108):
         """
         Process and rerank search results.
 
@@ -110,7 +128,7 @@ class QueryProcessor:
         """Remove a field from all dictionaries in a list."""
         return [{k: v for k, v in item.items() if k != field_to_remove} for item in dict_list]
 
-    def _generate_query_response(self, query_text, reranked_results, llm_interface):
+    def _generate_query_response(self, query_text, reranked_results, llm_interface: LLMInterface):
         """
         Generate a response by using an LLM to construct an answer based on
         the user's query and the search results.
@@ -134,13 +152,16 @@ class QueryProcessor:
         print("\n--- Constructed Prompt for Answer LLM ---")
         print(constructed_prompt)
 
-        # 5. Append user query and search results
-        constructed_prompt += f"\nUser query: {query_text}\n"
-        constructed_prompt += f"Search results:\n{results_text}"
+        system_prompt =  constructed_prompt + f"You are provided user query and its searched results with {len(reranked_results)} records.\nIMPORTANT: Before doing anything else, wrap every step of your internal reasoning in `<thinking></thinking>` tags.\n"
+
+        # 5. Create user prompt
+        user_prompt = f"\nUser query: {query_text}\n"
+        user_prompt += f"Search results:\n{results_text}"
 
         # 6. Query the answer LLM with the constructed prompt
-        final_response = llm_interface.generate_response(
-            prompt=constructed_prompt,
+        final_response = llm_interface.generate_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
             temperature=0.5,
             max_tokens=4000
         )
@@ -195,36 +216,43 @@ class QueryProcessor:
 
         return results_text
 
-    def _build_meta_prompt(self, query_text, reranked_results, llm_interface):
+    def _build_meta_prompt(self, query_text, reranked_results, llm_interface: LLMInterface):
         """Build the meta-prompt for the LLM using the prompt builder."""
         result_count = len(reranked_results)
         result_schema = "Model ID, File Size, Created On, Last Modified, Framework, Architecture, Dataset, Training Configuration, Description"
 
         # Construct the prompt builder logic
-        prompt_builder = (
+        system_prompt = (
             "You are a senior machine-learning architect. "
             "Your task is to craft a concise meta-prompt to generate clear, comprehensive reports for ML engineers to learn and understand the system. "
             "Define all technical terms and leave no gaps in explanation. "
+            "  * Enclose your internal reasoning in `<thinking></thinking>` tags before constructing the meta-prompt."
             "Now, construct a single, high-level meta-prompt that will:\n"
             "  1. Restate the user's original request so the LLM knows what to address.\n"
             "  2. Instruct the LLM to use **only** the provided `search results` and actual runtime data—no hallucinations or invented details.\n"
-            "  3. Instruct the LLM that, when token limits permit, it should include its analysis or insights derived solely from the provided data—do not fabricate any information.\n"
-            f"  4. Inform the LLM that there are {result_count} results available and to never request more items than this count.\n"
-            "  5. Provide this background: the LLM assumes the role of a senior machine-learning architect writing for junior ML engineers who will read the report to understand, reproduce, and extend the model; language must be clear, define all technical terms, and leave no gaps.\n"
+            "  3. Instruct the LLM that it should explain how the searched results can answer user query, derived solely from the provided data—do not fabricate any information.\n"
+            f"  4. Inform the LLM that there are {result_count} searched results available, sorted by similarity in decreasing order.\n"
+            "  5. Provide this background: the LLM assumes the role of a senior machine-learning architect writing for ML engineers who will read the report to understand, reproduce, and extend the model; language must be clear, define all technical terms, and leave no gaps.\n"
+            "  6. Require the LLM to generate a meaningful, substantive response rather than merely restating the question or remaining silent; if no relevant data is found in the provided results, it must explicitly state 'No data found.'\n"
             "The meta-prompt should not mention any other LLM identifiers; it should be concise and focused on the user's intent. Do **not** answer the query yourself or include any data; return only the meta-prompt text.\n\n"
             "EXAMPLE:\n"
             "  User query: \"Describe the model with ID XYZ.\"\n"
             "  Result schema: { 'model_id': 'string', 'framework': 'string', 'created_date': 'string' }\n"
             "  => Meta-prompt:\n"
-            "     \"You are a senior machine-learning architect. Define all technical terms and ensure clarity for ML engineers. "
-            "Describe the model with ID XYZ using only the provided fields `model_id`, `framework`, and `created_date`. "
-            "Do not add any details beyond those fields. Instruct that, when token limits permit, analysis or insights based solely on that data should be included.\"\n\n"
+            "     <thinking>\n"
+            "     I need to restate the user's request, constrain to fields, ensure no hallucinations, note result count, define terms, require substantive response, and instruct on reasoning tags.\n"
+            "     </thinking>\n"
+            "     \"You are a senior machine-learning architect writing for ML engineers. Please describe the model with ID XYZ using only the provided fields `model_id`, `framework`, and `created_date`, defining all technical terms and leaving no gaps. Please analysis or insights derived solely from those fields. There are 3 results available. Provide a meaningful, substantive response, and if no relevant data is found, explicitly state 'No data found.'\"\n\n"
+        )
+
+        prompt_builder = (
             f"User query: {query_text}\n"
             f"Result schema: {result_schema}\n"
         )
 
-        builder_response = llm_interface.generate_response(
-            prompt=prompt_builder,
+        builder_response = llm_interface.generate_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=prompt_builder,
             temperature=0.5,
             max_tokens=4000
         )
@@ -235,9 +263,15 @@ class QueryProcessor:
                     builder_response.get('content')
                     or builder_response.get('text')
                     or (builder_response.get('message') or {}).get('content')
-                    or str(builder_response)
-            )
+                    or str(builder_response))
         else:
             constructed_prompt = str(builder_response)
 
-        return constructed_prompt.strip()
+        print(f"Constructed prompt with thinking: {constructed_prompt}")
+
+        constructed_prompt = remove_thinking_sections(constructed_prompt.strip()).strip()
+
+        if constructed_prompt[0] == '"' and constructed_prompt[-1] == '"':
+            constructed_prompt = constructed_prompt[1:-1]
+
+        return constructed_prompt
