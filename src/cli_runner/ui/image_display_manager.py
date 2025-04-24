@@ -1,3 +1,5 @@
+import json
+
 from cli_runner.ui.display_utils import DisplayUtils
 from cli_runner.ui.thumbnail_table import ThumbnailTable
 
@@ -46,8 +48,6 @@ class ImageDisplayManager:
         else:
             image_list = images if isinstance(images, list) else []
 
-        print(f"image_list: {image_list}")
-
         for i, image in enumerate(image_list, 1):
             row_data = self._prepare_image_row_data(image, i, is_search_result)
 
@@ -65,16 +65,18 @@ class ImageDisplayManager:
             # Handle search result format
             metadata = image.get('metadata', {})
             image_id = image.get('id', 'Unknown')
-            model_id = metadata.get('source_model_id', metadata.get('model_id', 'Unknown'))
-            prompt = metadata.get('prompt', 'No prompt')
+            model_id = metadata.get('model_id', 'Unknown')
+            dates = json.loads(metadata.get('dates', {}))
+            creation_date = dates.get('creation_date', 'Unknown')
+            last_modified_date = dates.get('last_modified_date', 'Unknown')
+            epoch = metadata.get('epoch', 'Unknown')
             image_path = image.get('image_path', metadata.get('image_path', 'Not available'))
-            row_data = [index, image_id, model_id, prompt, image_path]
+            row_data = [index, image_id, model_id, creation_date, last_modified_date, epoch, image_path]
         else:
             # Handle list format
             image_id = image.get('id', 'Unknown')
-            prompt = image.get('prompt', 'No prompt')
             image_path = image.get('filepath', image.get('image_path', 'No path'))
-            row_data = [image_id, prompt, image_path]
+            row_data = [image_id, image_path]
 
         # Truncate long values
         return [DisplayUtils.truncate_string(item) for item in row_data]

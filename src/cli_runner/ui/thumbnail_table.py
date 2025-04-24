@@ -5,15 +5,15 @@ class ThumbnailTable:
         self.rows = []
         # Different headers based on the context
         if is_search_result:
-            self.headers = ["#", "ID", "Source Model", "Prompt", "Thumbnail", "Image Path"]
+            self.headers = ["#", "ID", "Model ID", "Creation Date", "Last Modified Date", "Epoch", "Thumbnail", "Image Path"]
         else:
-            self.headers = ["Image ID", "Prompt", "Thumbnail", "File Path"]
+            self.headers = ["ID", "Thumbnail", "Image Path"]
 
     def add_row(self, row_data, ascii_img=None):
         """Add a row to the table with thumbnail data."""
         if ascii_img:
             row_data_with_thumbnail = row_data.copy()
-            # Insert thumbnail before the last column (file path)
+            # Insert thumbnail before the last column (image path)
             row_data_with_thumbnail.insert(len(row_data_with_thumbnail) - 1, ascii_img)
             self.rows.append(row_data_with_thumbnail)
         else:
