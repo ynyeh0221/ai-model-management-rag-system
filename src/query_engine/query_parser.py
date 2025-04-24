@@ -39,7 +39,32 @@ class QueryIntent(Enum):
 class QueryParser:
     """
     Parser for natural language queries related to AI models.
-    Responsible for intent classification and parameter extraction.
+
+    This class is responsible for parsing natural language queries into structured
+    representations, including intent classification and parameter extraction.
+    It combines both rule-based pattern matching and LLM-based intent classification
+    to effectively handle a wide range of query formats.
+
+    Attributes:
+        logger: A logging instance for tracking operations and errors.
+        nlp: A spaCy language model for NLP processing.
+        lemmatizer: A WordNet lemmatizer for word normalization.
+        stop_words: A set of common stopwords to filter out.
+        use_langchain: Boolean indicating whether to use LangChain for intent classification.
+        intent_chain: LangChain chain for intent classification (when use_langchain is True).
+        model_id_pattern: Regex pattern for extracting model IDs.
+        metric_pattern: Regex pattern for extracting metrics.
+        filter_patterns: Dictionary of regex patterns for different filter types.
+        limit_pattern: Regex pattern for extracting result limits.
+        sort_pattern: Regex pattern for extracting sort parameters.
+        model_families: List of common model family names for NLP processing.
+        created_year_patterns: List of regex patterns for extracting creation years.
+
+    Example:
+        >>> parser = QueryParser(nlp_model="en_core_web_sm", use_langchain=True)
+        >>> result = parser.parse_query("Find models with architecture transformer limit 5")
+        >>> print(result["intent"])  # 'retrieval'
+        >>> print(result["parameters"]["limit"])  # 5
     """
 
     def __init__(self, nlp_model: str = "en_core_web_sm", use_langchain: bool = True, llm_model_name: str = "deepseek-llm:7b"):
@@ -136,72 +161,6 @@ class QueryParser:
                 self.langchain_llm = OllamaLLM(model=llm_model_name, temperature=0)
 
                 self.intent_chain = self.intent_prompt | self.langchain_llm
-
-                # Define a prompt template for parameter extraction with improved handling of None values
-                param_template = """
-                Extract structured parameters from this query about AI models.
-
-                Return a JSON object with these keys:
-                - filters: Filtering criteria (only include model_id, created_month, created_year, or last_modified_date)
-                - limit: Number of results to return (if specified)
-                - sort_by: Sorting criteria (if specified)
-                - timeframe: Any human-readable time constraint (e.g., "created in March 2025")
-
-                RULES:
-                1. Use 'created_month' and 'created_year' to reflect natural date expressions like "March 2025".
-                2. Only include those fields if they are mentioned. Do not invent or assume any date.
-                3. Never include null, [None], or placeholder values.
-                4. Do NOT include filters like architecture, performance, framework, etc.
-
-                EXAMPLES:
-
-                Query: "Find models created in April"  
-                →  
-                {{  
-                  "filters": {{  
-                    "created_month": "April"  
-                  }},  
-                  "limit": null,  
-                  "sort_by": null,  
-                  "timeframe": "created in April"  
-                }}
-                
-                Query: "List models created in March 2025"  
-                →  
-                {{  
-                  "filters": {{  
-                    "created_month": "March",  
-                    "created_year": "2025"  
-                  }},  
-                  "limit": null,  
-                  "sort_by": null,  
-                  "timeframe": "created in March 2025"  
-                }}
-                
-                Query: {query}
-                
-                Respond only in this JSON format:
-                {{  
-                  "filters": {{ ... }},  
-                  "limit": ...,  
-                  "sort_by": "...",  
-                  "timeframe": "..."  
-                }}
-                """
-
-                self.param_prompt = PromptTemplate(
-                    input_variables=["query"],
-                    template=param_template
-                )
-
-                self.param_chain = self.param_prompt | self.langchain_llm
-
-                self.param_prompt = PromptTemplate(
-                    input_variables=["query"],
-                    template=param_template
-                )
-
-                self.param_chain = self.param_prompt | self.langchain_llm
 
                 self.logger.info("LangChain components initialized successfully")
             except Exception as e:
@@ -363,53 +322,6 @@ class QueryParser:
         # Fallback default to retrieval
         return QueryIntent.RETRIEVAL, "Defaulting to retrieval intent."
 
-    def _clean_llm_parameters(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Clean up parameters generated by the LLM to ensure they are safe for ChromaDB.
-
-        Args:
-            params: Dictionary of parameters from LLM
-
-        Returns:
-            Cleaned parameters
-        """
-        # Create a deep copy to avoid modifying the original
-        cleaned = {k: v for k, v in params.items() if v is not None}
-
-        # Process filters if present
-        if "filters" in cleaned and isinstance(cleaned["filters"], dict):
-            # Remove None values and "all" model IDs
-            cleaned_filters = {}
-            for key, value in cleaned["filters"].items():
-                # Skip None values
-                if value is None:
-                    continue
-
-                # Chroma's filter does exact-match. Not including model_id, architecture and framework to filter to prevent finding no result
-                if key == "model_id" or key == "architecture" or key == "framework" or key == "dataset":
-                    continue
-
-                # Handle dictionary values
-                if isinstance(value, dict):
-                    valid_dict = {k: v for k, v in value.items() if v is not None}
-                    if valid_dict:
-                        cleaned_filters[key] = valid_dict
-                # Handle list values
-                elif isinstance(value, list):
-                    if value and not (key == "model_id" and value == ["all"]):
-                        cleaned_filters[key] = value
-                # Handle scalar values
-                else:
-                    cleaned_filters[key] = value
-
-            # Replace with cleaned filters or remove if empty
-            if cleaned_filters:
-                cleaned["filters"] = cleaned_filters
-            else:
-                del cleaned["filters"]
-
-        return cleaned
-
     def extract_parameters(self, query_text: str, intent: Optional[QueryIntent] = None) -> Dict[str, Any]:
         """
         Extract parameters from a query based on its intent.
@@ -447,52 +359,7 @@ class QueryParser:
                 filters["created_year"] = year_match.group(1)
                 break
 
-        # Try LangChain extraction if available
-        if self.use_langchain:
-            try:
-                import json
-                raw_result = self.param_chain.invoke({"query": query_text})
-                json_start = raw_result.find('{')
-                if json_start != -1:
-                    json_str = raw_result[json_start:].strip()
-                    decoder = json.JSONDecoder()
-                    params, idx = decoder.raw_decode(json_str)
-                    cleaned_params = self._clean_llm_parameters(params)
-
-                    if "filters" in cleaned_params:
-                        filters.update(cleaned_params["filters"])
-                        cleaned_params.pop("filters")
-
-                    parameters.update(cleaned_params)
-            except Exception as e:
-                self.logger.warning(f"LangChain parameter extraction failed: {e}")
-
-        # Rule-based filters (architecture, framework, etc.)
-        for filter_name, pattern in self.filter_patterns.items():
-            for match in re.finditer(pattern, query_lower):
-                if filter_name == "params":
-                    filters["params"] = {
-                        "operator": match.group(2),
-                        "value": match.group(3)
-                    }
-                elif filter_name == "date":
-                    filters["date"] = {
-                        "field": match.group(1),
-                        "operator": match.group(2),
-                        "value": match.group(3)
-                    }
-
-        generic_terms = {
-            "cnn", "convolutional", "neural network", "deep learning",
-            "rnn", "recurrent", "lstm", "transformer", "attention",
-            "diffusion", "gan", "generative adversarial", "vae",
-            "variational", "autoencoder", "bert", "gpt", "mlp",
-            "cifar", "cifar-10", "stl", "stl-10", "oxford", "dqn"
-        }
-
-        model_ids = self._extract_model_id_mentions(query_text)
-        valid_model_ids = [mid for mid in model_ids if mid.lower() not in generic_terms]
-
+        valid_model_ids = self._extract_model_id_mentions(query_text)
         if valid_model_ids:
             filters["model_id"] = valid_model_ids[0] if len(valid_model_ids) == 1 else valid_model_ids
 
@@ -513,11 +380,7 @@ class QueryParser:
             }
 
         # Intent-specific
-        if intent == QueryIntent.COMPARISON:
-            parameters.update(self._extract_comparison_parameters(query_text))
-        elif intent == QueryIntent.NOTEBOOK:
-            parameters.update(self._extract_notebook_parameters(query_text))
-        elif intent == QueryIntent.IMAGE_SEARCH:
+        if intent == QueryIntent.IMAGE_SEARCH:
             parameters.update(self._extract_image_parameters(query_text, valid_model_ids))
 
         return parameters
@@ -532,16 +395,19 @@ class QueryParser:
         model_ids = []
 
         # Common datasets to exclude from model_id
-        COMMON_DATASETS = {
+        common_datasets = {
             "cifar", "cifar10", "cifar-10", "cifar100", "imagenet", "mnist",
             "fashion-mnist", "coco", "cityscapes", "voc", "svhn", "celeba",
-            "librispeech", "wikitext", "squad", "glue", "webtext", "laion", "ms coco"
+            "librispeech", "wikitext", "squad", "glue", "webtext", "laion", "ms coco",
+            "stl", "stl-10", "oxford", "oxford 102"
         }
 
         # Generic architectures to exclude
-        GENERIC_ARCH = {
+        generic_arch = {
             "cnn", "rnn", "lstm", "transformer", "gan", "vae", "mlp",
-            "diffusion", "autoencoder", "bert", "gpt"
+            "diffusion", "autoencoder", "bert", "gpt", "variational",
+            "convolutional", "neural network", "deep learning", "dqn"
+            "recurrent", "attention", "generative adversarial"
         }
 
         model_id_pattern = re.compile(
@@ -551,81 +417,12 @@ class QueryParser:
         # Try to extract explicit model_id mentions
         for match in model_id_pattern.finditer(query_text):
             model_id = match.group(1)  # e.g. "Multiplication_scriptRNN_ReversedInputString"
-            if model_id.lower() not in GENERIC_ARCH and model_id.lower() not in COMMON_DATASETS:
+            if model_id.lower() not in generic_arch and model_id.lower() not in common_datasets:
                 model_ids.append(model_id)
         print(f"Extracted model id(s) {model_ids} from query {query_text}")
 
         # Deduplicate
         return list(set(model_ids))
-
-    def _extract_comparison_parameters(self, query_text: str) -> Dict[str, Any]:
-        """
-        Extract comparison-specific parameters.
-
-        Args:
-            query_text: The query text to extract from
-
-        Returns:
-            Dictionary of comparison parameters
-        """
-        params = {}
-
-        # Extract comparison dimensions
-        dimensions = []
-        dimension_pattern = r"(compare|comparing|comparison) (on|by|in terms of|regarding) ([\w\s,]+)"
-        match = re.search(dimension_pattern, query_text.lower())
-        if match:
-            # Split by commas or 'and' and clean up
-            dims = re.split(r',|\sand\s', match.group(3))
-            dimensions = [dim.strip() for dim in dims if dim.strip()]
-
-        if dimensions:
-            params["comparison_dimensions"] = dimensions
-
-        # Extract visualization preference
-        visualization_pattern = r'(show|display|visualize|plot|graph|chart)'
-        if re.search(visualization_pattern, query_text.lower()):
-            params["visualize"] = True
-
-        return params
-
-    def _extract_notebook_parameters(self, query_text: str) -> Dict[str, Any]:
-        """
-        Extract notebook generation specific parameters.
-
-        Args:
-            query_text: The query text to extract from
-
-        Returns:
-            Dictionary of notebook parameters
-        """
-        params = {}
-
-        # Extract analysis type
-        analysis_types = []
-        analysis_pattern = r"(analyze|analysis|examine|study|investigate) ([\w\s,]+)"
-        match = re.search(analysis_pattern, query_text.lower())
-        if match:
-            # Split by commas or 'and' and clean up
-            types = re.split(r',|\sand\s', match.group(2))
-            analysis_types = [t.strip() for t in types if t.strip()]
-
-        if analysis_types:
-            params["analysis_types"] = analysis_types
-
-        # Check for dataset mention
-        dataset_pattern = r"(dataset|data)[:\s]+([\w\s-]+)"
-        match = re.search(dataset_pattern, query_text.lower())
-        if match:
-            params["dataset"] = match.group(2).strip()
-
-        # Check for resource constraints
-        resource_pattern = r"(using|with) ([\w\s]+) (resources|gpu|memory|cpu)"
-        match = re.search(resource_pattern, query_text.lower())
-        if match:
-            params["resources"] = match.group(2).strip()
-
-        return params
 
     def _extract_image_parameters(self, query_text: str, valid_model_ids: list) -> Dict[str, Any]:
         """
@@ -754,51 +551,83 @@ class QueryParser:
 
     def preprocess_query(self, query_text: str) -> str:
         """
-        Preprocess a query for searching.
+        Preprocess a natural language query to optimize for AI model search and analysis.
+
+        This function performs intelligent multi-stage text processing:
+        1. Preserves named entities (PRODUCT, ORG, GPE, PERSON, WORK_OF_ART)
+        2. Preserves noun phrases containing model family names (e.g., "transformer model")
+        3. Standardizes remaining words through lemmatization and filters out noise
+
+        The processing pipeline prioritizes technical accuracy while improving search consistency.
 
         Args:
-            query_text: The raw query text
+            query_text: The raw query text from the user
 
         Returns:
-            Preprocessed query text
+            str: Preprocessed query text optimized for model search and parameter extraction
+
+        Examples:
+            >>> parser.preprocess_query("Show me GPT-4 models trained by OpenAI using transformers")
+            'GPT-4 OpenAI transformer model train'
+
+            >>> parser.preprocess_query("Find the best performing BERT models from 2023")
+            'BERT model best perform from 2023'
         """
-        # Basic cleaning
-        query_text = query_text.strip()
+        # Basic text cleaning
+        clean_text = query_text.strip()
 
-        # Use spaCy for tokenization and lemmatization
-        doc = self.nlp(query_text)
+        # Parse with spaCy
+        doc = self.nlp(clean_text)
 
-        # Enhanced token handling
+        # Initialize processing variables
         processed_tokens = []
         skip_indices = set()
 
-        # First pass: identify entities to preserve as-is
-        for ent in doc.ents:
-            if ent.label_ in ["PRODUCT", "ORG", "GPE", "PERSON", "WORK_OF_ART"]:
-                for i in range(ent.start, ent.end):
+        # STAGE 1: Preserve important named entities
+        for entity in doc.ents:
+            if entity.label_ in ["PRODUCT", "ORG", "GPE", "PERSON", "WORK_OF_ART"]:
+                # Mark all tokens in this entity as processed
+                for i in range(entity.start, entity.end):
                     skip_indices.add(i)
-                processed_tokens.append(ent.text)
+                # Keep the entity text as-is
+                processed_tokens.append(entity.text)
 
-        # Second pass: handle noun phrases (potential model names)
-        for chunk in doc.noun_chunks:
-            # Check if any of the model families appear in this noun chunk
-            contains_model = any(family in chunk.text.lower() for family in self.model_families)
-            if contains_model:
-                # Check if all tokens in this chunk are already skipped
-                all_skipped = all(i in skip_indices for i in range(chunk.start, chunk.end))
-                if not all_skipped:
-                    # Add all tokens in this chunk to skip indices
-                    for i in range(chunk.start, chunk.end):
+        # STAGE 2: Preserve model-related noun phrases
+        for noun_phrase in doc.noun_chunks:
+            # Check if this phrase contains any model family name
+            has_model_term = any(
+                family in noun_phrase.text.lower()
+                for family in self.model_families
+            )
+
+            if has_model_term:
+                # Check if we've already processed all tokens in this phrase
+                tokens_already_processed = all(
+                    i in skip_indices
+                    for i in range(noun_phrase.start, noun_phrase.end)
+                )
+
+                if not tokens_already_processed:
+                    # Mark all tokens in this phrase as processed
+                    for i in range(noun_phrase.start, noun_phrase.end):
                         skip_indices.add(i)
-                    processed_tokens.append(chunk.text)
+                    # Keep the phrase text as-is
+                    processed_tokens.append(noun_phrase.text)
 
-        # Third pass: process remaining tokens
+        # STAGE 3: Process remaining tokens
         for i, token in enumerate(doc):
             if i not in skip_indices:
-                # Skip stopwords, punctuation, and spaces
-                if not token.is_stop and not token.is_punct and not token.is_space and len(token.text.strip()) > 1:
-                    # Use lemma for standardization
+                # Filter out noise tokens
+                is_meaningful = (
+                        not token.is_stop and  # Not a stopword
+                        not token.is_punct and  # Not punctuation
+                        not token.is_space and  # Not whitespace
+                        len(token.text.strip()) > 1  # Not a single character
+                )
+
+                if is_meaningful:
+                    # Add the lemmatized, lowercase form
                     processed_tokens.append(token.lemma_.lower())
 
-        # Join all processed tokens
+        # Combine all processed tokens into a single string
         return " ".join(processed_tokens)

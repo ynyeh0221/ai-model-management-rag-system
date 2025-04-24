@@ -182,7 +182,7 @@ class SearchDispatcher:
             )
 
             # Special handling for model descriptions using chunks - process one model at a time
-            all_results = await self._process_model_descriptions_text_search(query, all_results, 6)
+            all_results = await self._process_model_descriptions_text_search(query, all_results, 5)
 
             # STEP 4: Calculate weighted distance sum for all models using all gathered metadata
             all_results = self._calculate_model_distances(all_results, table_weights, collection_stats)
@@ -864,7 +864,7 @@ class SearchDispatcher:
             )
 
             # Special handling for model descriptions using chunks - process one model at a time
-            all_results = await self._process_model_descriptions_text_search(query, all_results, 6)
+            all_results = await self._process_model_descriptions_text_search(query, all_results, 5)
 
             # STEP 3: Calculate weighted distance sum for all models using all gathered metadata
             all_results = self._calculate_model_distances(all_results, table_weights, collection_stats)
@@ -975,7 +975,7 @@ class SearchDispatcher:
             table_weights=table_weights, user_id=user_id
         )
         all_results = await self._process_model_descriptions_text_search(
-            query="", all_results=all_results, search_limit=6
+            query="", all_results=all_results, search_limit=5
         )
 
         # Prepare items list
