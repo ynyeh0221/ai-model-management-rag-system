@@ -41,6 +41,25 @@ Parses `.py` or `.ipynb` files by:
 
 All metadata is normalized and can be extended or validated against versioned schemas.
 
+你可以将下面这段内容添加到 `README.md` 中，作为一个新的部分（建议放在 “### Core Components” 之后）：
+
+---
+
+### Image Embedding & Similarity Search
+
+The system supports multimodal retrieval by embedding and indexing model-generated or related images. This enables advanced search workflows such as:
+
+- **Text-to-Image Search**: Find model outputs or visuals that best match a natural language query.
+- **Image-to-Image Search**: Discover visually similar outputs using image embeddings.
+
+#### Embedding Pipeline
+
+The `ImageEmbedder` module utilizes [OpenCLIP](https://github.com/mlfoundations/open_clip) to compute embeddings for images found in configured directories or generated during model execution. These embeddings are stored in the `model_images_folder` Chroma collection.
+
+- Extracts `.png`, `.jpg`, `.jpeg` files
+- Generates embeddings using CLIP’s vision encoder
+- Associates metadata like `source_model`, `filepath`, `generation_params`
+
 ---
 
 ### Data Model
