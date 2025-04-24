@@ -2,10 +2,9 @@ import copy
 import unittest
 from unittest.mock import patch, MagicMock
 import logging
-import sys
 
 # Import the module being tested
-from src.query_engine.result_reranker import CrossEncoderReranker, DenseReranker, RerankerFactory
+from response_generator.result_reranker import CrossEncoderReranker, DenseReranker, RerankerFactory
 
 
 class TestCrossEncoderReranker(unittest.TestCase):

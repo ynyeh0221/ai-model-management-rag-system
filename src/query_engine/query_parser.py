@@ -1,12 +1,13 @@
 import logging
 import re
-from enum import Enum
 from typing import Dict, List, Any, Optional, Union
 
 import nltk
 import spacy
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
+
+from query_engine.query_intent import QueryIntent
 
 # Try to import sentence-transformers if installed
 try:
@@ -24,17 +25,6 @@ try:
     TRANSFORMERS_AVAILABLE = True
 except ImportError:
     TRANSFORMERS_AVAILABLE = False
-
-
-# Define intent types as an Enum for type safety
-class QueryIntent(Enum):
-    RETRIEVAL = "retrieval"  # Basic information retrieval
-    COMPARISON = "comparison"  # Model comparison
-    NOTEBOOK = "notebook"  # Notebook generation
-    IMAGE_SEARCH = "image_search"  # Image search/retrieval
-    METADATA = "metadata"  # Metadata-specific queries
-    UNKNOWN = "unknown"  # Unknown/ambiguous intent
-
 
 class QueryParser:
     """

@@ -1,8 +1,8 @@
 import json
 
-from cli_runner.ui.image_display_manager import ImageDisplayManager
-from cli_runner.ui.llm_response_processor import LLMResponseProcessor
-from cli_runner.ui.model_display_manager import ModelDisplayManager
+from cli_runner.ui.components.image_display_manager import ImageDisplayManager
+from cli_runner.ui.components.llm_response_processor import LLMResponseProcessor
+from cli_runner.ui.components.model_display_manager import ModelDisplayManager
 from response_generator.llm_interface import LLMInterface
 
 

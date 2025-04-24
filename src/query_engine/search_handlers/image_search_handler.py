@@ -2,7 +2,7 @@ import logging
 from typing import Dict, List, Any, Optional
 
 
-class ImageSearchManager:
+class ImageSearchHandler:
     """
     A class to handle image search and query functionality.
     This separates the search logic from the image processing logic.

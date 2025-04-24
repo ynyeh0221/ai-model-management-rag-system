@@ -1,11 +1,11 @@
 import logging
 
-from cli_runner.ui.command_hander import CommandHandler
-from cli_runner.ui.image_display_manager import ImageDisplayManager
-from cli_runner.ui.llm_response_processor import LLMResponseProcessor
-from cli_runner.ui.model_display_manager import ModelDisplayManager
-from cli_runner.ui.notebook_generator import NotebookGenerator
-from cli_runner.ui.query_processor import QueryProcessor
+from cli_runner.ui.components.command_hander import CommandHandler
+from cli_runner.ui.components.image_display_manager import ImageDisplayManager
+from cli_runner.ui.components.llm_response_processor import LLMResponseProcessor
+from cli_runner.ui.components.model_display_manager import ModelDisplayManager
+from cli_runner.ui.components.notebook_generator import NotebookGenerator
+from cli_runner.ui.components.query_processor import QueryProcessor
 
 
 class UIRunner:

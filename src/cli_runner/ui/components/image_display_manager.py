@@ -1,7 +1,7 @@
 import json
 
-from cli_runner.ui.display_utils import DisplayUtils
-from cli_runner.ui.thumbnail_table import ThumbnailTable
+from cli_runner.ui.components.display_utils import DisplayUtils
+from cli_runner.ui.components.thumbnail_table import ThumbnailTable
 
 
 class ImageDisplayManager:

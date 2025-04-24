@@ -4,6 +4,7 @@ import os
 from cli_runner.images.image_processor_runner import ImageProcessorRunner
 from cli_runner.model_scripts.script_processor_runner import ScriptProcessorRunner
 from cli_runner.ui.ui_runner import UIRunner
+from query_engine.search_handler_factory import SearchHandlersFactory
 from src.colab_generator.code_generator import CodeGenerator
 from src.colab_generator.colab_api_client import ColabAPIClient
 from src.colab_generator.reproducibility_manager import ReproducibilityManager
@@ -14,7 +15,7 @@ from src.document_processor.metadata_extractor import MetadataExtractor
 from src.document_processor.schema_validator import SchemaValidator
 from src.query_engine.query_analytics import QueryAnalytics
 from src.query_engine.query_parser import QueryParser
-from src.query_engine.result_reranker import CrossEncoderReranker
+from response_generator.result_reranker import CrossEncoderReranker
 from src.query_engine.search_dispatcher import SearchDispatcher
 from src.response_generator.llm_interface import LLMInterface
 from src.vector_db_manager.access_control import AccessControlManager
@@ -42,8 +43,21 @@ def initialize_components(config_path="./config"):
     
     # Initialize query engine components
     query_parser = QueryParser(llm_model_name="deepseek-llm:7b")
-    search_dispatcher = SearchDispatcher(chroma_manager, text_embedder, image_embedder)
     query_analytics = QueryAnalytics()
+    handlers_factory = SearchHandlersFactory(
+        chroma_manager=chroma_manager,
+        text_embedder=text_embedder,
+        image_embedder=image_embedder,
+        access_control_manager=access_control,
+        analytics=query_analytics
+    )
+
+    # Then pass the factory to the dispatcher
+    search_dispatcher = SearchDispatcher(
+        handlers_factory=handlers_factory,
+        access_control_manager=access_control,
+        analytics=query_analytics
+    )
     result_reranker = CrossEncoderReranker(device="mps")
     
     # Initialize Colab notebook generator components
