@@ -46,6 +46,8 @@ class ImageDisplayManager:
         else:
             image_list = images if isinstance(images, list) else []
 
+        print(f"image_list: {image_list}")
+
         for i, image in enumerate(image_list, 1):
             row_data = self._prepare_image_row_data(image, i, is_search_result)
 
@@ -137,4 +139,4 @@ class ImageDisplayManager:
             return
 
         print(f"\nFound {len(items)} images:")
-        self.display_images_with_thumbnails(search_results, is_search_result=True)
+        self.display_images_with_thumbnails(items, is_search_result=True)

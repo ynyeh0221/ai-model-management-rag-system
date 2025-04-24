@@ -13,7 +13,7 @@ class DisplayUtils:
     ASCII_CHARS = '@%#*+=-:. '
 
     @staticmethod
-    def truncate_string(text, max_length=40):
+    def truncate_string(text, max_length=120):
         """Truncate a string if it exceeds the maximum length."""
         if isinstance(text, str) and len(text) > max_length:
             return text[:max_length - 3] + "..."

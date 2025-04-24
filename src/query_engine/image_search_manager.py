@@ -49,12 +49,24 @@ class ImageSearchManager:
                 }
 
         # Query the vector database
-        query_results = await self.chroma_manager.query_by_metadata(
+        search_results = await self.chroma_manager.search(
             collection_name="generated_images",
-            metadata_filter=metadata_filter
+            query="",
+            where=metadata_filter if metadata_filter else None,
+            include=["metadatas", "documents", "distances"]
         )
 
-        return query_results
+        # Process results
+        results = []
+        for idx, item in enumerate(search_results.get("results", [])):
+            results.append({
+                "id": item.get("id"),
+                "metadata": item.get("metadata", {}),
+                "similarity": 1.0 - (item.get("distance", 0) / 2.0),  # Convert distance to similarity score
+                "rank": idx + 1
+            })
+
+        return results
 
     async def find_images_by_epoch(self, model_id: str, epoch: Optional[int] = None, user_id: Optional[str] = None):
         """Find images by model ID and optionally filter by epoch.
@@ -375,11 +387,9 @@ class ImageSearchManager:
         limit = parameters.get("limit", 10)
 
         try:
-            results = []
-
             if search_type == "model_id":
                 # Search for images by model ID
-                model_id = parameters.get("model_id")
+                model_id = parameters.get("filters").get("model_id")
                 if not model_id:
                     raise ValueError("model_id is required for model_id search")
 
@@ -387,7 +397,7 @@ class ImageSearchManager:
 
             elif search_type == "epoch":
                 # Search for images by model ID and epoch
-                model_id = parameters.get("model_id")
+                model_id = parameters.get("filters").get("model_id")
                 epoch = parameters.get("epoch")
                 if not model_id:
                     raise ValueError("model_id is required for epoch search")
@@ -396,7 +406,7 @@ class ImageSearchManager:
 
             elif search_type == "highest_epoch":
                 # Search for images from the highest epoch
-                model_id = parameters.get("model_id")
+                model_id = parameters.get("filters").get("model_id")
                 if not model_id:
                     raise ValueError("model_id is required for highest_epoch search")
 
