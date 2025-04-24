@@ -95,13 +95,14 @@ class ImageSearchManager:
                     ]
                 }
 
-        # Query the vector database
-        query_results = await self.chroma_manager.query_by_metadata(
+        # Query the vector database - using get() instead of query_by_metadata()
+        query_results = await self.chroma_manager.get(
             collection_name="generated_images",
-            metadata_filter=metadata_filter
+            where=metadata_filter,
+            include=["metadatas", "documents"]
         )
 
-        return query_results
+        return query_results.get("results", [])
 
     async def find_highest_epoch_images(self, model_id: str, user_id: Optional[str] = None):
         """Find images from the highest epoch for a specific model.
@@ -170,13 +171,14 @@ class ImageSearchManager:
                     ]
                 }
 
-        # Query the vector database
-        query_results = await self.chroma_manager.query_by_metadata(
+        # Query the vector database - using get() instead of query_by_metadata()
+        query_results = await self.chroma_manager.get(
             collection_name="generated_images",
-            metadata_filter=metadata_filter
+            where=metadata_filter,
+            include=["metadatas", "documents"]
         )
 
-        return query_results
+        return query_results.get("results", [])
 
     async def find_images_by_tag(self, tags: List[str], require_all: bool = False, user_id: Optional[str] = None):
         """Find images that have specific tags.
@@ -189,11 +191,14 @@ class ImageSearchManager:
         Returns:
             list: A list of document IDs for images matching the criteria
         """
-        # Query all images (we'll filter them manually since tag is an array)
-        all_images = await self.chroma_manager.query_all(
+        # Query all images - using get() instead of query_all()
+        all_images_result = await self.chroma_manager.get(
             collection_name="generated_images",
-            user_id=user_id
+            user_id=user_id,
+            include=["metadatas", "documents"]
         )
+
+        all_images = all_images_result.get("results", [])
 
         # Filter images based on tags
         matching_images = []
@@ -262,13 +267,14 @@ class ImageSearchManager:
                     ]
                 }
 
-        # Query the vector database
-        query_results = await self.chroma_manager.query_by_metadata(
+        # Query the vector database - using get() instead of query_by_metadata()
+        query_results = await self.chroma_manager.get(
             collection_name="generated_images",
-            metadata_filter=metadata_filter
+            where=metadata_filter,
+            include=["metadatas", "documents"]
         )
 
-        return query_results
+        return query_results.get("results", [])
 
     async def find_images_by_color(self, colors: List[str], user_id: Optional[str] = None):
         """Find images that contain specific colors.
@@ -280,11 +286,14 @@ class ImageSearchManager:
         Returns:
             list: A list of document IDs for images with the specified colors
         """
-        # Query all images
-        all_images = await self.chroma_manager.query_all(
+        # Query all images - using get() instead of query_all()
+        all_images_result = await self.chroma_manager.get(
             collection_name="generated_images",
-            user_id=user_id
+            user_id=user_id,
+            include=["metadatas", "documents"]
         )
+
+        all_images = all_images_result.get("results", [])
 
         # Filter images based on colors
         matching_images = []
