@@ -297,7 +297,7 @@ class QueryProcessor:
                         md[key] = {}
 
             # Extract fields with fallbacks
-            model_id = model.get('model_id') or model.get('id') or 'Unknown'
+            model_id = model.get('model_id') or model.get('id') or 'missing'
             file_md = md.get('file', {})
             fw = md.get('framework', {})
             arch = md.get('architecture', {})
@@ -307,16 +307,16 @@ class QueryProcessor:
             # Compose block
             results_text += f"Model #{idx}:\n"
             results_text += f"- Model ID: {model_id}\n"
-            results_text += f"- File Size: {file_md.get('size_bytes', 'Unknown')}\n"
-            results_text += f"- Created On: {file_md.get('creation_date', 'Unknown')}\n"
-            results_text += f"- Last Modified: {file_md.get('last_modified_date', 'Unknown')}\n"
-            results_text += f"- Framework: {fw.get('name', 'Unknown')} {fw.get('version', '')}\n"
-            results_text += f"- Architecture: {arch.get('type', 'Unknown')}\n"
-            results_text += f"- Dataset: {ds.get('name', 'Unknown')}\n"
+            results_text += f"- File Size: {file_md.get('size_bytes', 'missing')}\n"
+            results_text += f"- Created On: {file_md.get('creation_date', 'missing')}\n"
+            results_text += f"- Last Modified: {file_md.get('last_modified_date', 'missing')}\n"
+            results_text += f"- Framework: {fw.get('name', 'missing')} {fw.get('version', '')}\n"
+            results_text += f"- Architecture: {arch.get('type', 'missing')}\n{arch.get('reason', 'missing')}\n"
+            results_text += f"- Dataset: {ds.get('name', 'missing')}\n"
             if training:
                 results_text += "- Training Configuration:\n"
                 for field in ['batch_size', 'learning_rate', 'optimizer', 'epochs', 'hardware_used']:
-                    results_text += f"  - {field.replace('_', ' ').title()}: {training.get(field, 'Unknown')}\n"
+                    results_text += f"  - {field.replace('_', ' ').title()}: {training.get(field, 'missing')}\n"
             results_text += f"- Description: {description}\n\n"
 
         return results_text

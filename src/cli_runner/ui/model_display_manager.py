@@ -127,12 +127,12 @@ class ModelDisplayManager:
         # Extract and format other fields
         file_data = ModelDisplayManager._extract_file_data(parsed_metadata)
         framework = ModelDisplayManager._extract_framework_data(parsed_metadata)
-        architecture = parsed_metadata.get('architecture', {}).get('type', 'Unknown')
-        dataset = parsed_metadata.get('dataset', {}).get('name', 'Unknown')
+        architecture = parsed_metadata.get('architecture', {}).get('type', 'missing') + "\n" + parsed_metadata.get('reason', {}).get('type', 'missing')
+        dataset = parsed_metadata.get('dataset', {}).get('name', 'missing')
         training_data = ModelDisplayManager._extract_training_data(parsed_metadata)
-        description = result.get('merged_description', 'Unknown')
+        description = result.get('merged_description', 'missing')
         if description == "N/A":
-            description = "Unknown"
+            description = "missing"
 
         # Add row to table
         table.add_row([
@@ -166,7 +166,7 @@ class ModelDisplayManager:
         file_metadata = metadata.get('file', {})
 
         # Process file size
-        size_bytes = file_metadata.get('size_bytes', 'Unknown')
+        size_bytes = file_metadata.get('size_bytes', 'missing')
         if isinstance(size_bytes, (int, float)):
             size_mb = size_bytes / 1048576  # 1024 * 1024
             if size_mb >= 1:
@@ -180,19 +180,19 @@ class ModelDisplayManager:
                     # For very small files, show in bytes
                     file_size = f"{size_bytes}B"
         else:
-            file_size = size_bytes  # Keep as "Unknown" or whatever non-numeric value
+            file_size = size_bytes  # Keep as "missing" or whatever non-numeric value
 
         # Process dates
-        creation_date = file_metadata.get('creation_date', 'Unknown')
+        creation_date = file_metadata.get('creation_date', 'missing')
         if isinstance(creation_date, str) and len(creation_date) > 10:
             creation_date = creation_date[:10]  # Just YYYY-MM-DD
 
-        last_modified = file_metadata.get('last_modified_date', 'Unknown')
+        last_modified = file_metadata.get('last_modified_date', 'missing')
         if isinstance(last_modified, str) and len(last_modified) > 10:
             last_modified = last_modified[:10]  # Just YYYY-MM-DD
 
         # Extract absolute path
-        absolute_path = file_metadata.get('absolute_path', 'Unknown')
+        absolute_path = file_metadata.get('absolute_path', 'missing')
 
         return {
             'size': file_size,
@@ -205,10 +205,10 @@ class ModelDisplayManager:
     def _extract_framework_data(metadata):
         """Extract framework data from metadata."""
         framework_metadata = metadata.get('framework', {})
-        framework_name = framework_metadata.get('name', 'Unknown')
+        framework_name = framework_metadata.get('name', 'missing')
         framework_version = framework_metadata.get('version', '')
 
-        if framework_version and framework_version.lower() not in ['unknown', 'unspecified']:
+        if framework_version and framework_version.lower() not in ['missing', 'unknown', 'unspecified']:
             # Just add major version number
             if '.' in framework_version:
                 framework_version = framework_version.split('.')[0]
