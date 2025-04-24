@@ -4,6 +4,8 @@
 
 This system enables structured understanding, indexing, and retrieval of machine learning model code and metadata. It combines static analysis, LLM-based summarization, vector embeddings, and Google Colab automation to support advanced retrieval-augmented workflows.
 
+DEMO: [link](https://github.com/ynyeh0221/ai-model-management-rag-system/blob/main/DEMO.md)
+
 ### Features
 
 - Script processing and code chunking via AST
