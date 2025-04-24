@@ -127,7 +127,7 @@ class ModelDisplayManager:
         # Extract and format other fields
         file_data = ModelDisplayManager._extract_file_data(parsed_metadata)
         framework = ModelDisplayManager._extract_framework_data(parsed_metadata)
-        architecture = parsed_metadata.get('architecture', {}).get('type', 'missing') + "\n" + parsed_metadata.get('reason', {}).get('type', 'missing')
+        architecture = parsed_metadata.get('architecture', {}).get('type', 'missing') + "\n\n" + parsed_metadata.get('architecture', {}).get('reason', 'missing')
         dataset = parsed_metadata.get('dataset', {}).get('name', 'missing')
         training_data = ModelDisplayManager._extract_training_data(parsed_metadata)
         description = result.get('merged_description', 'missing')

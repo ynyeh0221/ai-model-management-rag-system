@@ -311,7 +311,7 @@ class QueryProcessor:
             results_text += f"- Created On: {file_md.get('creation_date', 'missing')}\n"
             results_text += f"- Last Modified: {file_md.get('last_modified_date', 'missing')}\n"
             results_text += f"- Framework: {fw.get('name', 'missing')} {fw.get('version', '')}\n"
-            results_text += f"- Architecture: {arch.get('type', 'missing')}\n{arch.get('reason', 'missing')}\n"
+            results_text += f"- Architecture: {arch.get('type', 'missing')}\n\n{arch.get('reason', 'missing')}\n"
             results_text += f"- Dataset: {ds.get('name', 'missing')}\n"
             if training:
                 results_text += "- Training Configuration:\n"
@@ -408,11 +408,4 @@ class QueryProcessor:
         else:
             constructed_prompt = str(builder_response)
 
-        print(f"Constructed prompt with thinking: {constructed_prompt}")
-
-        constructed_prompt = remove_thinking_sections(constructed_prompt.strip()).strip()
-
-        if constructed_prompt[0] == '"' and constructed_prompt[-1] == '"':
-            constructed_prompt = constructed_prompt[1:-1]
-
-        return constructed_prompt
+        return remove_thinking_sections(constructed_prompt.strip()).strip()
