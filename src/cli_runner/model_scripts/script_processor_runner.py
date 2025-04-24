@@ -124,7 +124,7 @@ class ScriptProcessorRunner:
             return None
 
         # Split into chunks for processing
-        chunks = code_parser.split_ast_and_subsplit_chunks(
+        chunks = code_parser.split_code_chunks_via_ast(
             file_content=parse_result["content"],
             file_path=file_path,
             chunk_size=20000,
