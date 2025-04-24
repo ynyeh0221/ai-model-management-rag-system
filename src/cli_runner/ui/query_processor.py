@@ -22,6 +22,110 @@ def remove_thinking_sections(text: str) -> str:
     # Replace matched sections with an empty string
     return pattern.sub('', text)
 
+def generate_report_prompt_extensions():
+    thinking_process_requirements = (
+        "### THINKING PROCESS REQUIREMENTS\n\n"
+        "Before constructing each report, engage in thorough analytical reasoning enclosed in <thinking></thinking> tags that demonstrates:\n"
+        "- Carefully analyzes the user's query to identify core information needs and technical context\n"
+        "- Systematically evaluates all provided search results from most to least relevant\n"
+        "- Identifies connections, patterns, and relationships between different data points\n"
+        "- Considers multiple possible interpretations of the technical data\n"
+        "- Distinguishes between explicit facts and implied conclusions\n"
+        "- Recognizes information gaps and acknowledges limitations in the available data\n"
+        "- Prioritizes information based on relevance to the specific ML engineering context\n"
+        "- Builds a coherent mental model of the ML system being described\n"
+        "- Formulates insights that would be valuable for implementation or reproduction\n\n"
+        "Your thinking should progress from initial observations to deeper technical understanding, "
+        "questioning assumptions and validating conclusions as you proceed. Document this process "
+        "transparently, showing how your understanding evolves based on the evidence provided."
+    )
+
+    report_structure_requirements = (
+        "### REPORT STRUCTURE REQUIREMENTS\n\n"
+        "Structure your technical ML report with the following components in a logical flow:\n\n"
+        "1. **Executive Summary**\n"
+        "   - Brief overview of the ML system or component being described\n"
+        "   - Key technical characteristics and distinguishing features\n"
+        "   - Primary findings derived from the search results\n\n"
+
+        "2. **Technical Specifications**\n"
+        "   - Detailed breakdown of architecture, components, and configurations\n"
+        "   - Clear presentation of relevant parameters, hyperparameters, or settings\n"
+        "   - Explicit citation of data sources for each technical specification\n\n"
+
+        "3. **Implementation Details**\n"
+        "   - Critical procedures, methodologies, or algorithms employed\n"
+        "   - Technical workflows with step-by-step breakdowns where appropriate\n"
+        "   - Environment or infrastructure requirements if specified\n\n"
+
+        "4. **Performance Analysis**\n"
+        "   - Quantitative metrics and evaluation results\n"
+        "   - Comparative analysis or benchmarking if available\n"
+        "   - Critical assessment of strengths and limitations\n\n"
+
+        "5. **Technical Insights**\n"
+        "   - Synthesis of key technical findings across search results\n"
+        "   - Identification of design principles or patterns in the implementation\n"
+        "   - Analysis of trade-offs or engineering decisions\n\n"
+
+        "6. **Reproduction Guidance**\n"
+        "   - Essential information for ML engineers to reproduce the system\n"
+        "   - Potential challenges or considerations for implementation\n"
+        "   - Extension or optimization opportunities if apparent\n\n"
+
+        "7. **Information Gaps**\n"
+        "   - Explicit acknowledgment of missing critical information\n"
+        "   - Identification of areas that would benefit from additional data\n\n"
+
+        "Adapt this structure as appropriate to the specific query and available information, "
+        "expanding sections with substantial data and condensing or omitting those without sufficient support."
+    )
+
+    style_and_format_guidance = (
+        "### STYLE AND FORMAT GUIDANCE\n\n"
+        "Format your ML technical report according to these principles:\n\n"
+
+        "**Technical Precision**\n"
+        "- Define ALL technical terms upon first use\n"
+        "- Use precise, unambiguous technical language\n"
+        "- Maintain mathematical and statistical accuracy\n"
+        "- Present numerical data with appropriate units and precision\n"
+        "- Use consistent technical terminology throughout\n\n"
+
+        "**Clarity and Accessibility**\n"
+        "- Structure information with clear headers and subheaders\n"
+        "- Use concise paragraphs with single main ideas\n"
+        "- Employ bullet points for lists of features, parameters, or specifications\n"
+        "- Use tables for structured parameter comparisons when appropriate\n"
+        "- Include visual representations or pseudocode when it enhances understanding\n\n"
+
+        "**Citation and Evidence**\n"
+        "- Cite specific search results for all technical claims\n"
+        "- Differentiate between direct citations and derived insights\n"
+        "- Maintain transparent reasoning chains from evidence to conclusions\n"
+        "- Clearly indicate when information spans multiple sources\n"
+        "- Note explicitly when making comparisons or connections not stated in original sources\n\n"
+
+        "**Objectivity and Completeness**\n"
+        "- Present balanced analysis of strengths and limitations\n"
+        "- Avoid excessive technical jargon without explanation\n"
+        "- Acknowledge uncertainty where appropriate\n"
+        "- Ensure no critical conceptual gaps in explanations\n"
+        "- Bridge between theoretical concepts and practical implementation\n\n"
+
+        "The report should read as if written by a senior ML architect with deep technical knowledge "
+        "and practical implementation experience, balancing theoretical understanding with "
+        "pragmatic engineering considerations."
+    )
+
+    combined_meta_prompt_extensions = (
+        f"{thinking_process_requirements}\n\n"
+        f"{report_structure_requirements}\n\n"
+        f"{style_and_format_guidance}\n\n"
+    )
+
+    return combined_meta_prompt_extensions
+
 
 class QueryProcessor:
     """Handles query processing and results."""
@@ -152,7 +256,8 @@ class QueryProcessor:
         print("\n--- Constructed Prompt for Answer LLM ---")
         print(constructed_prompt)
 
-        system_prompt =  constructed_prompt + f"You are provided user query and its searched results with {len(reranked_results)} records.\nIMPORTANT: Before doing anything else, wrap every step of your internal reasoning in `<thinking></thinking>` tags.\n"
+        system_prompt =  constructed_prompt + "\n\n" + generate_report_prompt_extensions() + \
+                         f"You are provided user query and its searched results.\n"
 
         # 5. Create user prompt
         user_prompt = f"\nUser query: {query_text}\n"
@@ -218,36 +323,72 @@ class QueryProcessor:
 
     def _build_meta_prompt(self, query_text, reranked_results, llm_interface: LLMInterface):
         """Build the meta-prompt for the LLM using the prompt builder."""
-        result_count = len(reranked_results)
         result_schema = "Model ID, File Size, Created On, Last Modified, Framework, Architecture, Dataset, Training Configuration, Description"
 
         # Construct the prompt builder logic
         system_prompt = (
-            "You are a senior machine-learning architect. "
-            "Your task is to craft a concise meta-prompt to generate clear, comprehensive reports for ML engineers to learn and understand the system. "
-            "Define all technical terms and leave no gaps in explanation. "
-            "  * Enclose your internal reasoning in `<thinking></thinking>` tags before constructing the meta-prompt."
-            "Now, construct a single, high-level meta-prompt that will:\n"
-            "  1. Restate the user's original request so the LLM knows what to address.\n"
-            "  2. Instruct the LLM to use **only** the provided `search results` and actual runtime data—no hallucinations or invented details.\n"
-            "  3. Instruct the LLM that it should explain how the searched results can answer user query, derived solely from the provided data—do not fabricate any information.\n"
-            f"  4. Inform the LLM that there are {result_count} searched results available, sorted by similarity in decreasing order.\n"
-            "  5. Provide this background: the LLM assumes the role of a senior machine-learning architect writing for ML engineers who will read the report to understand, reproduce, and extend the model; language must be clear, define all technical terms, and leave no gaps.\n"
-            "  6. Require the LLM to generate a meaningful, substantive response rather than merely restating the question or remaining silent; if no relevant data is found in the provided results, it must explicitly state 'No data found.'\n"
-            "The meta-prompt should not mention any other LLM identifiers; it should be concise and focused on the user's intent. Do **not** answer the query yourself or include any data; return only the meta-prompt text.\n\n"
-            "EXAMPLE:\n"
-            "  User query: \"Describe the model with ID XYZ.\"\n"
-            "  Result schema: { 'model_id': 'string', 'framework': 'string', 'created_date': 'string' }\n"
-            "  => Meta-prompt:\n"
-            "     <thinking>\n"
-            "     I need to restate the user's request, constrain to fields, ensure no hallucinations, note result count, define terms, require substantive response, and instruct on reasoning tags.\n"
-            "     </thinking>\n"
-            "     \"You are a senior machine-learning architect writing for ML engineers. Please describe the model with ID XYZ using only the provided fields `model_id`, `framework`, and `created_date`, defining all technical terms and leaving no gaps. Please analysis or insights derived solely from those fields. There are 3 results available. Provide a meaningful, substantive response, and if no relevant data is found, explicitly state 'No data found.'\"\n\n"
+            "### META-PROMPT GENERATOR ROLE AND PURPOSE\n\n"
+            "You are a senior machine-learning architect with expertise in creating clear technical documentation. Your task is to craft concise yet comprehensive meta-prompts that will generate high-quality ML system reports for engineers to learn, understand, reproduce, and extend machine learning systems.\n\n"
+
+            "### THINKING PROCESS REQUIREMENTS\n\n"
+            "Before constructing each meta-prompt, engage in thorough analytical reasoning enclosed in <thinking></thinking> tags that demonstrates:\n"
+            "- Analysis of the user's specific request and technical context\n"
+            "- Identification of key information requirements for the target ML engineers\n"
+            "- Consideration of potential knowledge gaps that need addressing\n"
+            "- Assessment of required technical depth and breadth\n"
+            "- Strategy for ensuring factual accuracy while providing meaningful insights\n\n"
+
+            "### META-PROMPT STRUCTURE REQUIREMENTS\n\n"
+            "Construct a single, high-level meta-prompt that includes the following elements in a logical flow:\n\n"
+
+            "1. **Request Contextualization**\n"
+            "   - Clearly restate the user's original request to establish focus\n"
+            "   - Frame the specific ML engineering context the response should address\n\n"
+
+            "2. **Data Source Guidelines**\n"
+            "   - Explicitly instruct to use ONLY the provided search results and runtime data\n"
+            "   - Prohibit any form of hallucination, fabrication, or invented details\n"
+            "   - Require transparency when information is incomplete or unavailable\n\n"
+
+            "3. **Analytical Framework**\n"
+            "   - Direct the LLM to explain how the search results specifically answer the user query\n"
+            "   - Require analysis to be derived solely from the provided data\n"
+            "   - Instruct to synthesize insights across multiple results when applicable\n\n"
+
+            "4. **Information Awareness**\n"
+            "   - Inform that there are {result_count} search results available\n"
+            "   - Note that results are sorted by similarity in decreasing order\n"
+            "   - Instruct to prioritize higher-ranked results while considering all relevant information\n\n"
+
+            "5. **Technical Communication Standards**\n"
+            "   - Establish the role as a senior ML architect writing for technical ML engineers\n"
+            "   - Require clear definitions for all technical terms without exception\n"
+            "   - Mandate systematic explanation that leaves no conceptual gaps\n"
+            "   - Instruct to use appropriate technical precision while remaining accessible\n\n"
+
+            "6. **Response Quality Requirements**\n"
+            "   - Require meaningful, substantive responses rather than restatements or generalities\n"
+            "   - Mandate explicit \"No data found\" statements when search results lack relevant information\n"
+            "   - Instruct to highlight limitations in the available data when present\n\n"
+
+            "### STYLE AND FORMAT GUIDANCE\n\n"
+            "- The meta-prompt should be concise yet complete (typically 150-250 words)\n"
+            "- Avoid any references to other LLM identifiers or systems\n"
+            "- Focus entirely on the user's intent and technical requirements\n"
+            "- Use precise technical language appropriate for ML engineering contexts\n"
+            "- Structure instructions in a natural, logical progression\n\n"
+
+            "### REMINDERS\n\n"
+            "- DO NOT answer the user's query yourself - return only the meta-prompt text\n"
+            "- Include NO actual data in your response - the meta-prompt is a template for future use\n"
+            "- Ensure your thinking process demonstrates genuine technical reasoning rather than mechanical steps\n"
+            "- The ideal meta-prompt balances technical precision with clarity and completeness"
         )
 
         prompt_builder = (
             f"User query: {query_text}\n"
             f"Result schema: {result_schema}\n"
+            f"Number of results: {len(reranked_results)}\n"
         )
 
         builder_response = llm_interface.generate_structured_response(
