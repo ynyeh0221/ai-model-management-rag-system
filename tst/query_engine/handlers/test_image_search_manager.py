@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 import asyncio
 
-from src.query_engine.image_search_manager import ImageSearchManager
+from src.query_engine.handlers.image_search_manager import ImageSearchManager
 
 
 class AsyncMockWithReturnValue(MagicMock):

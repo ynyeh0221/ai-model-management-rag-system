@@ -10,7 +10,7 @@ from src.query_engine.handlers.filter_translator import FilterTranslator
 from src.query_engine.handlers.metadata_table_manager import MetadataTableManager
 from src.query_engine.handlers.model_data_fetcher import ModelDataFetcher
 from src.query_engine.handlers.performance_metrics_calculator import PerformanceMetricsCalculator
-from src.query_engine.image_search_manager import ImageSearchManager
+from src.query_engine.handlers.image_search_manager import ImageSearchManager
 from src.query_engine.query_intent import QueryIntent
 
 
