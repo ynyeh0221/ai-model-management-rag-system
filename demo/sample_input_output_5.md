@@ -1,3 +1,5 @@
+### Sample 5
+
 Input:
 ```
 please compare architecture and training config of model id Generative-Fashion-MNIST_latent_new_model and model id Gnerative-CIFAR-10-GAN_v1
