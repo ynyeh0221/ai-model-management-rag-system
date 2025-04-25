@@ -187,7 +187,7 @@ When a user submits a query through the CLI interface (`UIRunner`), the system f
 | Frontend          | React, Tailwind CSS, Zustand |
 | Vector Search     | ChromaDB, FAISS, SQLite |
 | Embeddings        | SentenceTransformers, BGE-M3, OpenCLIP |
-| LLM Integration   | LangChain, LLaMA, Deepseek-llm |
+| LLM Integration   | LangChain, LLaMA, Deepseek-r1 |
 | Image Processing  | Pillow, OpenCLIP |
 | Notebooks         | nbformat, Papermill, Google Colab API |
 | Visualization     | Matplotlib, Plotly |
