@@ -133,3 +133,5 @@ Sample 3: [Can you please compare differences in architecture between my diffusi
 Sample 4: [What DQN (Deep Q-Learning) agent did I try for the game called 2048?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/sample_input_output_4.md)
 
 Sample 5: [please compare architecture and training config of model id Generative-Fashion-MNIST_latent_new_model and model id Gnerative-CIFAR-10-GAN_v1](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/sample_input_output_5.md)
+
+Sample 6: [Please find models created in April 2025 and using CelebA.](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/sample_input_output_6.md)
