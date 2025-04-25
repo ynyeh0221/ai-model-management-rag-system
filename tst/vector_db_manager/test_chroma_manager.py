@@ -3,7 +3,6 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-# Import the ChromaManager from the module
 from src.vector_db_manager.chroma_manager import ChromaManager
 
 
@@ -161,16 +160,16 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.manager.collections[new_name], collection)
 
     async def test_add_document(self):
-        # Test adding a single document to the "model_scripts" collection.
+        # Test adding a single document to the "model_script_processing" collection.
         document = {
             "id": "doc1",
             "content": "print('Hello World')",
             "metadata": {"model_id": "123", "version": "1.0"}
         }
-        doc_id = await self.manager.add_document(document, collection_name="model_scripts")
+        doc_id = await self.manager.add_document(document, collection_name="model_script_processing")
         self.assertEqual(doc_id, "doc1")
         # Check that the document exists in the dummy collection.
-        collection = self.manager.get_collection("model_scripts")
+        collection = self.manager.get_collection("model_script_processing")
         self.assertTrue(
             document["metadata"].items() <= collection.docs["doc1"]["metadata"].items()
         )
@@ -181,9 +180,9 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
             {"id": "doc1", "content": "Content 1", "metadata": {"info": "A"}},
             {"id": "doc2", "content": "Content 2", "metadata": {"info": "B"}}
         ]
-        ids = await self.manager.add_documents(documents, collection_name="model_scripts")
+        ids = await self.manager.add_documents(documents, collection_name="model_script_processing")
         self.assertCountEqual(ids, ["doc1", "doc2"])
-        collection = self.manager.get_collection("model_scripts")
+        collection = self.manager.get_collection("model_script_processing")
         for doc_id in ids:
             self.assertIn(doc_id, collection.docs)
 
@@ -194,9 +193,9 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
             "content": "Find me",
             "metadata": {"model_id": "456"}
         }
-        await self.manager.add_document(document, collection_name="model_scripts")
+        await self.manager.add_document(document, collection_name="model_script_processing")
         # Search using a text query.
-        results = await self.manager.search("Find me", collection_name="model_scripts")
+        results = await self.manager.search("Find me", collection_name="model_script_processing")
         # Processed search results returns a dictionary with key "results".
         self.assertIn("results", results)
         # At least one result should be returned.
@@ -210,9 +209,9 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
             {"id": "doc_get1", "content": "Content 1", "metadata": {"a": 1}},
             {"id": "doc_get2", "content": "Content 2", "metadata": {"a": 2}}
         ]
-        await self.manager.add_documents(documents, collection_name="model_scripts")
+        await self.manager.add_documents(documents, collection_name="model_script_processing")
         # Retrieve documents by ids.
-        results = await self.manager.get(collection_name="model_scripts", ids=["doc_get1", "doc_get2"])
+        results = await self.manager.get(collection_name="model_script_processing", ids=["doc_get1", "doc_get2"])
         self.assertIn("results", results)
         returned_ids = [doc["id"] for doc in results["results"]]
         self.assertCountEqual(returned_ids, ["doc_get1", "doc_get2"])
@@ -224,8 +223,8 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
             "content": "Unique Content",
             "metadata": {"info": "unique"}
         }
-        await self.manager.add_document(document, collection_name="model_scripts")
-        doc = await self.manager.get_document("single_doc", collection_name="model_scripts")
+        await self.manager.add_document(document, collection_name="model_script_processing")
+        doc = await self.manager.get_document("single_doc", collection_name="model_script_processing")
         self.assertIsNotNone(doc)
         self.assertEqual(doc["id"], "single_doc")
         self.assertEqual(doc["document"], "Unique Content")
@@ -237,15 +236,15 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
             "content": "Old Content",
             "metadata": {"version": "1.0"}
         }
-        await self.manager.add_document(document, collection_name="model_scripts")
+        await self.manager.add_document(document, collection_name="model_script_processing")
         update_data = {
             "content": "New Content",
             "metadata": {"version": "2.0"}
         }
-        success = await self.manager.update_document("doc_update", update_data, collection_name="model_scripts")
+        success = await self.manager.update_document("doc_update", update_data, collection_name="model_script_processing")
         self.assertTrue(success)
         # Verify update.
-        doc = await self.manager.get_document("doc_update", collection_name="model_scripts")
+        doc = await self.manager.get_document("doc_update", collection_name="model_script_processing")
         self.assertEqual(doc["document"], "New Content")
         self.assertEqual(doc["metadata"], {"version": "2.0"})
 
@@ -256,11 +255,11 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
             "content": "To be deleted",
             "metadata": {}
         }
-        await self.manager.add_document(document, collection_name="model_scripts")
-        success = await self.manager.delete_document("doc_delete", collection_name="model_scripts")
+        await self.manager.add_document(document, collection_name="model_script_processing")
+        success = await self.manager.delete_document("doc_delete", collection_name="model_script_processing")
         self.assertTrue(success)
         # Verify deletion.
-        doc = await self.manager.get_document("doc_delete", collection_name="model_scripts")
+        doc = await self.manager.get_document("doc_delete", collection_name="model_script_processing")
         self.assertIsNone(doc)
 
     async def test_delete_documents(self):
@@ -269,15 +268,15 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
             {"id": "doc_d1", "content": "A", "metadata": {"test": "value1"}},
             {"id": "doc_d2", "content": "B", "metadata": {"test": "value2"}}
         ]
-        await self.manager.add_documents(documents, collection_name="model_scripts")
+        await self.manager.add_documents(documents, collection_name="model_script_processing")
         # Delete documents matching a filter.
         # Note: In our dummy implementation, the where filter doesn't actually filter,
         # but we're testing the API calls correctly flow through.
-        deleted_count = await self.manager.delete_documents(where={"test": {"$eq": "value1"}}, collection_name="model_scripts")
+        deleted_count = await self.manager.delete_documents(where={"test": {"$eq": "value1"}}, collection_name="model_script_processing")
         # Verify the count is as expected
         self.assertEqual(deleted_count, 2)  # Our dummy implementation returns all docs
         # Verify that the collection is now empty.
-        count = await self.manager.count_documents(collection_name="model_scripts")
+        count = await self.manager.count_documents(collection_name="model_script_processing")
         self.assertEqual(count, 0)
 
     async def test_count_documents(self):
@@ -286,8 +285,8 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
             {"id": "doc_c1", "content": "Content", "metadata": {}},
             {"id": "doc_c2", "content": "Content", "metadata": {}}
         ]
-        await self.manager.add_documents(documents, collection_name="model_scripts")
-        count = await self.manager.count_documents(collection_name="model_scripts")
+        await self.manager.add_documents(documents, collection_name="model_script_processing")
+        count = await self.manager.count_documents(collection_name="model_script_processing")
         self.assertEqual(count, 2)
 
     async def test_apply_access_control(self):

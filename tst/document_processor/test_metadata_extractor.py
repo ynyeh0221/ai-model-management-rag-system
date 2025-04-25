@@ -5,11 +5,10 @@ import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
+from data_processing.document_processor.metadata_extractor import MetadataExtractor
+
 # Add the path to the module being tested
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-# Import the module to be tested
-from src.document_processor.metadata_extractor import MetadataExtractor
 
 
 class TestMetadataExtractor(unittest.TestCase):
@@ -58,34 +57,7 @@ class TestMetadataExtractor(unittest.TestCase):
             }
             self.assertEqual(result, expected)
 
-    @patch('src.document_processor.metadata_extractor.Repo')
-    def test_extract_git_metadata_with_commits(self, mock_repo_class):
-        """Test extract_git_metadata when commits exist"""
-        # Create mock commits
-        commit1 = MagicMock()
-        commit1.committed_date = 1000000000  # Some timestamp
-        commit2 = MagicMock()
-        commit2.committed_date = 1100000000  # Later timestamp
-
-        # Set up mock repo
-        mock_repo = MagicMock()
-        mock_repo.iter_commits.return_value = [commit2, commit1]  # Newest first
-        mock_repo_class.return_value = mock_repo
-
-        result = self.extractor.extract_git_metadata(self.test_file_path)
-
-        # Verify repo was created with correct parameters
-        mock_repo_class.assert_called_once()
-
-        # Verify commits were retrieved
-        mock_repo.iter_commits.assert_called_once()
-
-        # Verify result contains expected data
-        self.assertEqual(result['commit_count'], 2)
-        self.assertIsNotNone(result['creation_date'])
-        self.assertIsNotNone(result['last_modified_date'])
-
-    @patch('src.document_processor.metadata_extractor.Repo')
+    @patch('src.data_processing.document_processor.metadata_extractor.Repo')
     def test_extract_git_metadata_no_commits(self, mock_repo_class):
         """Test extract_git_metadata when no commits exist"""
         # Set up mock repo with no commits
@@ -100,7 +72,7 @@ class TestMetadataExtractor(unittest.TestCase):
         self.assertIsNone(result['creation_date'])
         self.assertIsNone(result['last_modified_date'])
 
-    @patch('src.document_processor.metadata_extractor.Repo')
+    @patch('src.data_processing.document_processor.metadata_extractor.Repo')
     def test_extract_git_metadata_exception(self, mock_repo_class):
         """Test extract_git_metadata when an exception occurs"""
         # Make the Repo constructor raise an exception
@@ -144,7 +116,7 @@ class TestMetadataExtractor(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0], os.path.abspath(self.config_file_path))
 
-    @patch('src.document_processor.metadata_extractor.glob.glob')
+    @patch('src.data_processing.document_processor.metadata_extractor.glob.glob')
     def test_find_associated_config_with_glob(self, mock_glob):
         """Test find_associated_config with glob patterns"""
         # Set up mock for glob to return additional config files

@@ -7,7 +7,7 @@ from typing import List, Tuple
 
 from git import Repo
 
-from src.document_processor.ast_summary_generator import ASTSummaryGenerator
+from data_processing.document_processor.ast_summary_generator import ASTSummaryGenerator
 
 def filter_ast_summary_for_metadata(summary: str) -> str:
     """
@@ -429,7 +429,7 @@ class LLMBasedCodeParser:
         # STEP 5: Add framework
         final['framework'] = {'name': parse_framework(ast_digest), 'version': '2.7'}
 
-        # STEP 6: Add images folder. Tried to use LLM for parsing, but finally moved back to manual parse way since this field needs exact value
+        # STEP 6: Add image_processing folder. Tried to use LLM for parsing, but finally moved back to manual parse way since this field needs exact value
         final['images_folder'] = {'name': get_images_folder(ast_digest)}
 
         # STEP 7: Remove unneeded fields

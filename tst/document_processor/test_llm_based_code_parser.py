@@ -7,14 +7,10 @@ import textwrap
 import unittest
 from unittest.mock import Mock, patch
 
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.document_processor.llm_based_code_parser import (
-    LLMBasedCodeParser,
-    get_creation_date,
-    get_last_modified_date,
-    split_code_chunks_via_ast  # Use the function that exists in the module
-)
+from data_processing.document_processor.llm_based_code_parser import LLMBasedCodeParser, split_code_chunks_via_ast, \
+    get_creation_date, get_last_modified_date
 
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 class TestCodeParser(unittest.TestCase):
 

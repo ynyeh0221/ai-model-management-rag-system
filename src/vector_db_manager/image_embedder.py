@@ -12,7 +12,7 @@ from torchvision import transforms
 
 class ImageEmbedder:
     """
-    Generates vector embeddings for images using Open-CLIP models directly.
+    Generates vector embeddings for image_processing using Open-CLIP models directly.
     Supports both global image embeddings and tiled embeddings for region-based search.
     Also provides text embedding functionality to enable text-to-image search.
     """
@@ -207,7 +207,7 @@ class ImageEmbedder:
 
     def embed_batch(self, image_paths: List[str]) -> np.ndarray:
         """
-        Generate embeddings for a batch of images.
+        Generate embeddings for a batch of image_processing.
 
         Args:
             image_paths (List[str]): List of paths to image files
@@ -218,7 +218,7 @@ class ImageEmbedder:
         if not image_paths:
             return np.array([])
 
-        # Preprocess all images
+        # Preprocess all image_processing
         batch = []
         valid_paths = []
 
@@ -233,7 +233,7 @@ class ImageEmbedder:
         if not batch:
             return np.array([])
 
-        # Concatenate all preprocessed images
+        # Concatenate all preprocessed image_processing
         batch_tensor = torch.cat(batch, dim=0)
 
         # Generate embeddings for the batch

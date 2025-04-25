@@ -106,7 +106,7 @@ class ChromaManager:
                     }
                 },
                 "generated_images": {
-                    "description": "Collection for generated images",
+                    "description": "Collection for generated image_processing",
                     "embedding_function": self.image_embedding_function,
                     "metadata_schema": {
                         "source_model_id": "string",
@@ -287,7 +287,7 @@ class ChromaManager:
     async def add_document(self,
                            document: Dict[str, Any],
                            document_id: Optional[str] = None,
-                           collection_name: str = "model_scripts",
+                           collection_name: str = "model_script_processing",
                            embed_content: bool = True) -> str:
         """
         Add a document to the specified collection.
@@ -465,7 +465,7 @@ class ChromaManager:
 
     def _prepare_image_upsert_args(self, doc_id: str, flat_metadata: Dict[str, Any],
                                    embeddings, document: Dict[str, Any]) -> Dict[str, Any]:
-        """Prepare arguments for upserting images."""
+        """Prepare arguments for upserting image_processing."""
         metadata = document.get("metadata", {})
         image_path = metadata.get("image_path")
 
@@ -482,13 +482,13 @@ class ChromaManager:
 
         return {
             "ids": [doc_id],
-            "images": [image_np],
+            "image_processing": [image_np],
             "embeddings": embeddings,
             "metadatas": [flat_metadata] if flat_metadata else None
         }
 
     async def add_documents(self, documents: List[Dict[str, Any]],
-                            collection_name: str = "model_scripts") -> List[str]:
+                            collection_name: str = "model_script_processing") -> List[str]:
         """
         Add multiple documents to the specified collection in batch.
 
@@ -586,7 +586,7 @@ class ChromaManager:
             )
 
     async def search(self, query: str,
-                     collection_name: str = "model_scripts",
+                     collection_name: str = "model_script_processing",
                      where: Optional[Dict[str, Any]] = None,
                      limit: int = 100,
                      offset: int = 0,
@@ -676,7 +676,7 @@ class ChromaManager:
             self.logger.error(f"Error searching in {collection_name}: {e}", exc_info=True)
             raise
 
-    async def get(self, collection_name: str = "model_scripts",
+    async def get(self, collection_name: str = "model_script_processing",
                   ids: Optional[List[str]] = None,
                   where: Optional[Dict[str, Any]] = None,
                   limit: Optional[int] = None,
@@ -754,7 +754,7 @@ class ChromaManager:
             raise
 
     async def get_document(self, doc_id: str,
-                         collection_name: str = "model_scripts",
+                         collection_name: str = "model_script_processing",
                          include: Optional[List[str]] = None,
                          user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
@@ -791,7 +791,7 @@ class ChromaManager:
     
     async def update_document(self, doc_id: str, 
                             document: Dict[str, Any],
-                            collection_name: str = "model_scripts",
+                            collection_name: str = "model_script_processing",
                             embed_content: bool = True,
                             user_id: Optional[str] = None) -> bool:
         """
@@ -872,7 +872,7 @@ class ChromaManager:
             raise
     
     async def delete_document(self, doc_id: str, 
-                            collection_name: str = "model_scripts",
+                            collection_name: str = "model_script_processing",
                             user_id: Optional[str] = None) -> bool:
         """
         Delete a document by ID.
@@ -916,7 +916,7 @@ class ChromaManager:
             raise
     
     async def delete_documents(self, where: Dict[str, Any], 
-                             collection_name: str = "model_scripts",
+                             collection_name: str = "model_script_processing",
                              user_id: Optional[str] = None) -> int:
         """
         Delete documents matching the filter criteria.
@@ -1057,7 +1057,7 @@ class ChromaManager:
             ]
         }
 
-    async def count_documents(self, collection_name: str = "model_scripts",
+    async def count_documents(self, collection_name: str = "model_script_processing",
                               where: Optional[Dict[str, Any]] = None,
                               user_id: Optional[str] = None) -> int:
         """
@@ -1093,7 +1093,7 @@ class ChromaManager:
             self.logger.error(f"Error counting documents in {collection_name}: {e}", exc_info=True)
             raise
 
-    async def get_collection_stats(self, collection_name: str = "model_scripts") -> Dict[str, Any]:
+    async def get_collection_stats(self, collection_name: str = "model_script_processing") -> Dict[str, Any]:
         """
         Get statistics for a collection.
 

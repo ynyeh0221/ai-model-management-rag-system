@@ -1,12 +1,13 @@
-import json
+"""
+RAG System Core Module - Encapsulating CLI functionality into callable functions
 
-from setuptools.package_index import user_agent
+This module provides the core functionality of the RAG system, separating business logic from the UI layer.
+All core functionality is exposed through the RAGSystem class, which can be called by any interface (CLI, API, etc.).
+"""
 
-from cli_runner.ui.image_display_manager import ImageDisplayManager
-from cli_runner.ui.llm_response_processor import LLMResponseProcessor
-from cli_runner.ui.model_display_manager import ModelDisplayManager
-from response_generator.llm_interface import LLMInterface
-
+import asyncio
+import logging
+from typing import Dict, Any, Callable
 
 def remove_thinking_sections(text: str) -> str:
     """
@@ -128,90 +129,257 @@ def generate_report_prompt_extensions():
 
     return combined_meta_prompt_extensions
 
+class RAGSystem:
+    """
+    RAG System Core Class - Encapsulating all core functionality into callable functions
 
-class QueryProcessor:
-    """Handles query processing and results."""
+    This class provides all core functionality of the RAG system, including:
+    - Initializing system components
+    - Processing user queries
+    - Generating responses
+    - Handling model and image display
 
-    def __init__(self, components, user_id):
-        self.components = components
-        self.user_id = user_id
-        self.model_display = ModelDisplayManager()
-        self.image_display = ImageDisplayManager()
-        self.llm_processor = LLMResponseProcessor()
+    By encapsulating these functionalities in a single class, we can easily reuse them in different cli_interface (CLI, Web, etc.).
+    """
 
-    async def process_query(self, query_text):
+    def __init__(self):
+        """Initialize RAG system core components"""
+        self.components = None
+        self.user_id = "anonymous"
+        self.callbacks = {
+            "on_log": lambda msg: None,  # Default log callback
+            "on_result": lambda result: None,  # Default result callback
+            "on_error": lambda error: None,  # Default error callback
+            "on_status": lambda status: None,  # Default status callback
+        }
+
+    def initialize(self, components: Dict[str, Any], user_id: str = "anonymous") -> bool:
         """
-        Process and execute a query.
+        Initialize RAG system components
 
         Args:
-            query_text (str): The query text to process.
+            components: Dictionary containing initialized system components
+            user_id: User ID, default is "anonymous"
+
+        Returns:
+            bool: Whether initialization was successful
         """
-        # Extract required components
-        query_parser = self.components["query_engine"]["query_parser"]
-        search_dispatcher = self.components["query_engine"]["search_dispatcher"]
-        query_analytics = self.components["query_engine"]["query_analytics"]
-        reranker = self.components["query_engine"]["reranker"]
-        llm_interface = self.components["response_generator"]["llm_interface"]
+        try:
+            self.components = components
+            self.user_id = user_id
 
-        # Parse the query
-        parsed_query = query_parser.parse_query(query_text)
-        print(f"Parsed query: {parsed_query}")
+            # Record initialization status
+            self._log(f"RAG system core initialized, user ID: {user_id}")
+            self._update_status("ready")
 
-        # Log the query for analytics
-        query_analytics.log_query(self.user_id, query_text, parsed_query)
+            return True
+        except Exception as e:
+            self._log(f"Initialization failed: {str(e)}", level="error")
+            self._handle_error(e)
+            return False
 
-        print("Searching...")
+    def register_callback(self, event_type: str, callback: Callable) -> None:
+        """
+        Register callback function
 
-        # Special handling for image searches if needed
-        if parsed_query["intent"] == "image_search":
-            print("Note: Image uploads for image-to-image similarity search are not supported in CLI mode.")
-
-        # Dispatch the query
-        search_results = await search_dispatcher.dispatch(
-            query=parsed_query.get("processed_query", query_text),
-            intent=parsed_query["intent"],
-            parameters=parsed_query["parameters"],
-            user_id=self.user_id
-        )
-
-        # Different handling based on query type
-        if parsed_query["intent"] == "image_search":
-            self.image_display.display_image_search_results(search_results)
+        Args:
+            event_type: Event type ('on_log', 'on_result', 'on_error', 'on_status')
+            callback: Callback function
+        """
+        if event_type in self.callbacks:
+            self.callbacks[event_type] = callback
         else:
-            # Process and rerank search results
-            reranked_results = self._process_search_results(
-                search_results, reranker, parsed_query, query_text, max_to_return=3
+            self._log(f"Unknown event type: {event_type}", level="warning")
+
+    async def process_query(self, query_text: str) -> Dict[str, Any]:
+        """
+        Process user query and return results
+
+        This method encapsulates the process_query functionality from the original CLI,
+        but returns results as a callable function instead of printing directly to the console.
+
+        Args:
+            query_text: User query text
+
+        Returns:
+            Dict: Dictionary containing query results
+        """
+        try:
+            self._log(f"Processing query: {query_text}")
+            self._update_status("processing")
+
+            # Ensure components are initialized
+            if not self.components:
+                raise ValueError("System components not initialized")
+
+            # Extract required components
+            query_parser = self.components["query_engine"]["query_parser"]
+            search_dispatcher = self.components["query_engine"]["search_dispatcher"]
+            query_analytics = self.components["query_engine"]["query_analytics"]
+            reranker = self.components["query_engine"]["reranker"]
+            llm_interface = self.components["response_generator"]["llm_interface"]
+
+            # Parse query
+            parsed_query = query_parser.parse_query(query_text)
+            self._log(f"Parse result: {parsed_query}")
+
+            # Log query
+            query_analytics.log_query(self.user_id, query_text, parsed_query)
+
+            self._update_status("searching")
+
+            # Dispatch query
+            search_results = await search_dispatcher.dispatch(
+                query=parsed_query.get("processed_query", query_text),
+                intent=parsed_query["intent"],
+                parameters=parsed_query["parameters"],
+                user_id=self.user_id
             )
 
-            # Remove content field since it's not needed for display
-            reranked_results = self._remove_field(reranked_results, "content")
+            # Process search results
+            self._update_status("processing_results")
 
-            # Generate response using appropriate template
-            self._generate_query_response(query_text, reranked_results, llm_interface)
+            if parsed_query["intent"] == "image_search":
+                # Image search processing
+                result = {
+                    "type": "image_search",
+                    "results": search_results
+                }
+            else:
+                # Regular search processing
+                reranked_results = self._process_search_results(
+                    search_results, reranker, parsed_query, query_text, max_to_return=3
+                )
+
+                # Remove content field as it's not needed for display
+                reranked_results = self._remove_field(reranked_results, "content")
+
+                # Build results text
+                results_text = self._build_results_text(reranked_results)
+
+                # Build meta prompt
+                meta_prompt = self._build_meta_prompt(query_text, reranked_results, llm_interface)
+                print(f"Meta prompt: {meta_prompt}\n")
+
+                # Build system prompt
+                system_prompt = meta_prompt + "\n\n" + generate_report_prompt_extensions() + \
+                                f"You are provided user query and its searched results.\n"
+
+                # Build user prompt
+                user_prompt = f"\nUser query:\n{query_text}\n"
+                user_prompt += f"Search results:\n{results_text}"
+
+                # Generate final response
+                self._update_status("generating_response")
+                final_response = llm_interface.generate_structured_response(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0.5,
+                    max_tokens=4100
+                )
+
+                # Process result
+                if isinstance(final_response, dict) and 'content' in final_response:
+                    content = final_response['content']
+                    content = remove_thinking_sections(content)
+                else:
+                    content = str(final_response)
+                    content = remove_thinking_sections(content)
+
+                result = {
+                    "type": "text_search",
+                    "query": query_text,
+                    "parsed_query": parsed_query,
+                    "search_results": reranked_results,
+                    "meta_prompt": meta_prompt,
+                    "final_response": content
+                }
+
+            self._update_status("completed")
+            self._handle_result(result)
+            return result
+
+        except Exception as e:
+            self._log(f"Query processing failed: {str(e)}", level="error")
+            self._update_status("error")
+            self._handle_error(e)
+
+            return {
+                "type": "error",
+                "query": query_text,
+                "error": str(e)
+            }
+
+    def execute_command(self, command: str) -> Dict[str, Any]:
+        """
+        Execute command and return results
+
+        This method encapsulates the command handling functionality from the original CLI,
+        but returns results as a callable function.
+
+        Args:
+            command: Command to execute
+
+        Returns:
+            Dict: Dictionary containing command execution results
+        """
+        # Implementation needs to be based on actual command handling logic
+        # Currently this is a simple framework
+        try:
+            self._log(f"Executing command: {command}")
+
+            # Simple command processing
+            if command.lower() == "exit" or command.lower() == "quit":
+                return {"type": "command", "command": command, "result": "exit"}
+
+            if command.lower() == "help":
+                return {
+                    "type": "command",
+                    "command": command,
+                    "result": {
+                        "available_commands": [
+                            "help - Display help information",
+                            "exit/quit - Exit system",
+                            # Other commands
+                        ]
+                    }
+                }
+
+            # If it's a query, call query processing
+            if not command.startswith("/"):
+                # Async query needs special handling
+                loop = asyncio.get_event_loop()
+                return loop.run_until_complete(self.process_query(command))
+
+            # Other command handling
+            return {
+                "type": "command",
+                "command": command,
+                "result": f"Unknown command: {command}"
+            }
+
+        except Exception as e:
+            self._log(f"Command execution failed: {str(e)}", level="error")
+            self._handle_error(e)
+
+            return {
+                "type": "error",
+                "command": command,
+                "error": str(e)
+            }
+
+    # The following are private methods migrated from the QueryProcessor class
 
     def _process_search_results(self, search_results, reranker, parsed_query, query_text,
                                 max_to_return=10, rerank_threshold=0.108):
-        """
-        Process and rerank search results.
-
-        Args:
-            search_results (dict): The raw search results from the dispatcher.
-            reranker (object): Reranker component for ordering results by relevance.
-            parsed_query (dict): The parsed query information.
-            query_text (str): The original query text.
-            max_to_return (int, optional): Maximum number of results to return.
-            rerank_threshold (float, optional): Similarity threshold for reranking.
-
-        Returns:
-            list: Reranked search results.
-        """
+        """Process and rerank search results"""
         if not isinstance(search_results, dict) or 'items' not in search_results:
             return []
 
-        # Extract the items from the search results
+        # Extract items from search results
         items_to_rerank = search_results['items']
 
-        # Loop through each item and add the content field
+        # Loop through each item and add content field
         for item in items_to_rerank:
             item['content'] = ("Model description: " + item.get('merged_description', '') +
                                ", created year: " + item.get('created_year', '') +
@@ -220,7 +388,7 @@ class QueryProcessor:
                                ", last modified month: " + item.get('last_modified_month', ''))
 
         if reranker and items_to_rerank:
-            print(f"Sending {len(items_to_rerank)} items to reranker")
+            self._log(f"Sending {len(items_to_rerank)} items to reranker")
             return reranker.rerank(
                 query=parsed_query.get("processed_query", query_text),
                 results=items_to_rerank,
@@ -231,52 +399,15 @@ class QueryProcessor:
             return items_to_rerank
 
     def _remove_field(self, dict_list, field_to_remove):
-        """Remove a field from all dictionaries in a list."""
+        """Remove a field from all dictionaries in a list"""
+        if not dict_list:
+            return []
         return [{k: v for k, v in item.items() if k != field_to_remove} for item in dict_list]
 
-    def _generate_query_response(self, query_text, reranked_results, llm_interface: LLMInterface):
-        """
-        Generate a response by using an LLM to construct an answer based on
-        the user's query and the search results.
-
-        Args:
-            query_text (str): The original query text.
-            reranked_results (list): The reranked search results.
-            llm_interface (object): Component for generating LLM responses.
-        """
-        # 1. Display reranked results for user visibility
-        print("\nRetrieving and displaying reranked search results:\n")
-        self.model_display.display_reranked_results_pretty(reranked_results)
-
-        # 2. Build structured text of search results
-        results_text = self._build_results_text(reranked_results)
-
-        # 3. Get meta-prompt using the prompt builder
-        constructed_prompt = self._build_meta_prompt(query_text, reranked_results, llm_interface)
-
-        # 4. Output the complete prompt stub
-        print("\n--- Constructed Prompt for Answer LLM ---")
-        print(constructed_prompt)
-
-        system_prompt =  constructed_prompt + "\n\n" + generate_report_prompt_extensions() + \
-                         f"You are provided user query and its searched results.\n"
-
-        # 5. Create user prompt
-        user_prompt = f"\nUser query:\n{query_text}\n"
-        user_prompt += f"Search results:\n{results_text}"
-
-        # 6. Query the answer LLM with the constructed prompt
-        final_response = llm_interface.generate_structured_response(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=0.5,
-            max_tokens=4000
-        )
-        print("\nLLM Final Response:")
-        self.llm_processor.print_llm_content(final_response)
-
     def _build_results_text(self, reranked_results):
-        """Build structured text of search results."""
+        """Build structured text of search results"""
+        import json
+
         results_text = ""
         for idx, model in enumerate(reranked_results, 1):
             # Ensure model dict and safely parse nested metadata
@@ -323,11 +454,11 @@ class QueryProcessor:
 
         return results_text
 
-    def _build_meta_prompt(self, query_text, reranked_results, llm_interface: LLMInterface):
-        """Build the meta-prompt for the LLM using the prompt builder."""
+    def _build_meta_prompt(self, query_text, reranked_results, llm_interface):
+        """Build meta prompt for the LLM"""
         result_schema = "Model ID, File Size, Created On, Last Modified, Framework, Architecture, Dataset, Training Configuration, Description"
 
-        # Construct the prompt builder logic
+        # Construct prompt builder logic
         system_prompt = (
             "### META-PROMPT GENERATOR ROLE AND PURPOSE\n\n"
             "You are a senior machine-learning architect with expertise in creating clear technical documentation. Your task is to craft concise yet comprehensive meta-prompts that will generate high-quality ML system reports for engineers to learn, understand, reproduce, and extend machine learning systems.\n\n"
@@ -398,7 +529,7 @@ class QueryProcessor:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.5,
-            max_tokens=4000
+            max_tokens=4100
         )
 
         # Safely extract constructed prompt text
@@ -412,3 +543,29 @@ class QueryProcessor:
             constructed_prompt = str(builder_response)
 
         return remove_thinking_sections(constructed_prompt.strip()).strip()
+
+    # Internal helper methods
+
+    def _log(self, message: str, level: str = "info") -> None:
+        """Internal logging method"""
+        if level == "error":
+            logging.error(message)
+        elif level == "warning":
+            logging.warning(message)
+        else:
+            logging.info(message)
+
+        # Call log callback
+        self.callbacks["on_log"]({"level": level, "message": message})
+
+    def _update_status(self, status: str) -> None:
+        """Update system status"""
+        self.callbacks["on_status"](status)
+
+    def _handle_result(self, result: Dict[str, Any]) -> None:
+        """Handle result"""
+        self.callbacks["on_result"](result)
+
+    def _handle_error(self, error: Exception) -> None:
+        """Handle error"""
+        self.callbacks["on_error"](error)

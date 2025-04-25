@@ -125,7 +125,7 @@ class ValidChromaManagerTest(unittest.TestCase):
         with patch.object(self.image_search_manager, 'find_images_by_model_id', mock_find_images):
             results = self.run_async(self.image_search_manager.find_highest_epoch_images("model1"))
 
-            # Should only return images with the highest epoch (10)
+            # Should only return image_processing with the highest epoch (10)
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0]["id"], "image2")
             self.assertEqual(results[0]["metadata"]["epoch"], 10)

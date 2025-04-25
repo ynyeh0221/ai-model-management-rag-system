@@ -1,7 +1,7 @@
 import json
 
-from cli_runner.ui.display_utils import DisplayUtils
-from cli_runner.ui.thumbnail_table import ThumbnailTable
+from user_interface.cli_interface.components.display_utils import DisplayUtils
+from user_interface.cli_interface.components.thumbnail_table import ThumbnailTable
 
 
 class ImageDisplayManager:
@@ -19,14 +19,14 @@ class ImageDisplayManager:
 
     def display_images_with_thumbnails(self, images, is_search_result=False):
         """
-        Display images in a formatted table with ASCII thumbnails.
+        Display image_processing in a formatted table with ASCII thumbnails.
 
         Args:
             images (list): List of image dictionaries to display.
-            is_search_result (bool): Whether the images are from search results.
+            is_search_result (bool): Whether the image_processing are from search results.
         """
         if not images:
-            print("  No images available")
+            print("  No image_processing available")
             return
 
         # Create and populate the table
@@ -39,10 +39,10 @@ class ImageDisplayManager:
         self._print_performance_metrics(images)
 
     def _create_thumbnail_table(self, images, is_search_result):
-        """Create a table for displaying images with thumbnails."""
+        """Create a table for displaying image_processing with thumbnails."""
         table = ThumbnailTable(is_search_result)
 
-        # Ensure images is always treated as a list
+        # Ensure image_processing is always treated as a list
         if isinstance(images, dict) and 'items' in images:
             image_list = images.get('items', [])
         else:
@@ -137,8 +137,8 @@ class ImageDisplayManager:
 
         items = search_results.get('items', [])
         if not items:
-            print("No images found matching your search criteria.")
+            print("No image_processing found matching your search criteria.")
             return
 
-        print(f"\nFound {len(items)} images:")
+        print(f"\nFound {len(items)} image_processing:")
         self.display_images_with_thumbnails(items, is_search_result=True)

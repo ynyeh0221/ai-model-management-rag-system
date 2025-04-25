@@ -89,7 +89,7 @@ accessible_documents = db_client.query(filter=filter_dict)
 # Get all models accessible to a user
 accessible_models = acm.get_accessible_models(user_id="user123")
 
-# Get all images accessible to a user
+# Get all image_processing accessible to a user
 accessible_images = acm.get_accessible_images(user_id="user123")
 ```
 
@@ -674,13 +674,13 @@ class AccessControlManager:
 
     def get_accessible_images(self, user_id):
         """
-        Get a list of images that the user has access to.
+        Get a list of image_processing that the user has access to.
 
         Args:
             user_id: The ID of the user
 
         Returns:
-            list: List of images the user can access
+            list: List of image_processing the user can access
         """
         if not self.db_client:
             return []
@@ -737,5 +737,5 @@ class AccessControlManager:
 
             return accessible_images
         except Exception as e:
-            print(f"Error retrieving accessible images: {e}")
+            print(f"Error retrieving accessible image_processing: {e}")
             return []

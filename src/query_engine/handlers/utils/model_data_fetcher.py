@@ -83,7 +83,7 @@ class ModelDataFetcher:
 
         # Fetch model data from Chroma
         model_data = await self.chroma_manager.get(
-            collection_name="model_scripts",
+            collection_name="model_script_processing",
             where=filters,
             include=["metadata"]
         )

@@ -1,9 +1,9 @@
 import argparse
 import asyncio
 
-from src.vector_db_manager.chroma_manager import ChromaManager
-from src.vector_db_manager.image_embedder import ImageEmbedder
-from src.vector_db_manager.text_embedder import TextEmbedder
+from vector_db_manager.chroma_manager import ChromaManager
+from vector_db_manager.image_embedder import ImageEmbedder
+from vector_db_manager.text_embedder import TextEmbedder
 
 """
 # Chroma CLI Inspector

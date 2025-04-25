@@ -4,12 +4,13 @@ import sqlite3
 import sys
 import unittest
 
+from src.colab_generator.resource_quota_manager import ResourceQuotaManager
+
 # Configure logging for debugging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 sys.path.append(os.path.abspath("../src"))
-from src.colab_generator.resource_quota_manager import ResourceQuotaManager
 
 
 class TestResourceQuotaManager(unittest.TestCase):

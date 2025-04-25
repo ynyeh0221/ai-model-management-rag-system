@@ -2,18 +2,18 @@ import logging
 import time
 from typing import Dict, Any, Optional, Union
 
-from src.query_engine.handlers.comparison_handler import ComparisonHandler
-from src.query_engine.handlers.fallback_search_handler import FallbackSearchHandler
-from src.query_engine.handlers.image_search_handler import ImageSearchHandler
-from src.query_engine.handlers.metadata_search_handler import MetadataSearchHandler
-from src.query_engine.handlers.notebook_request_handler import NotebookRequestHandler
-from src.query_engine.handlers.utils.comparison_generator import ComparisonGenerator
-from src.query_engine.handlers.utils.distance_normalizer import DistanceNormalizer
-from src.query_engine.handlers.utils.filter_translator import FilterTranslator
-from src.query_engine.handlers.utils.metadata_table_manager import MetadataTableManager
-from src.query_engine.handlers.utils.model_data_fetcher import ModelDataFetcher
-from src.query_engine.handlers.utils.performance_metrics_calculator import PerformanceMetricsCalculator
-from src.query_engine.query_intent import QueryIntent
+from query_engine.handlers.comparison_handler import ComparisonHandler
+from query_engine.handlers.fallback_search_handler import FallbackSearchHandler
+from query_engine.handlers.image_search_handler import ImageSearchHandler
+from query_engine.handlers.metadata_search_handler import MetadataSearchHandler
+from query_engine.handlers.notebook_request_handler import NotebookRequestHandler
+from query_engine.handlers.utils.comparison_generator import ComparisonGenerator
+from query_engine.handlers.utils.distance_normalizer import DistanceNormalizer
+from query_engine.handlers.utils.filter_translator import FilterTranslator
+from query_engine.handlers.utils.metadata_table_manager import MetadataTableManager
+from query_engine.handlers.utils.model_data_fetcher import ModelDataFetcher
+from query_engine.handlers.utils.performance_metrics_calculator import PerformanceMetricsCalculator
+from query_engine.query_intent import QueryIntent
 
 
 class SearchDispatcher:

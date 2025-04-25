@@ -280,7 +280,7 @@ class TestImageEmbedder(unittest.TestCase):
 
         # Mock the model's encode_image method
         embedder.model.encode_image = MagicMock()
-        # Create a mock tensor with the original dimension for a batch of 3 images
+        # Create a mock tensor with the original dimension for a batch of 3 image_processing
         mock_image_features = torch.ones((3, TEST_EMBEDDING_DIM), device=TEST_DEVICE)
         # Mock the norm method to return the same tensor
         mock_image_features.norm = MagicMock(return_value=torch.ones((3, 1), device=TEST_DEVICE))
@@ -311,7 +311,7 @@ class TestImageEmbedder(unittest.TestCase):
         self.assertIsInstance(result, np.ndarray)
         self.assertEqual(result.shape, (0,))
 
-        # Test error handling for invalid images
+        # Test error handling for invalid image_processing
         embedder._load_and_preprocess_image.side_effect = Exception("Test error")
         result = embedder.embed_batch(["invalid1.jpg", "invalid2.jpg"])
         self.assertIsInstance(result, np.ndarray)

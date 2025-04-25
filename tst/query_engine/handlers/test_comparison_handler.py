@@ -1,9 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Import the class we're testing
 from src.query_engine.handlers.comparison_handler import ComparisonHandler
-# Import dependencies
 from src.query_engine.handlers.metadata_search_handler import MetadataSearchHandler
 from src.query_engine.handlers.utils.distance_normalizer import DistanceNormalizer
 from src.query_engine.handlers.utils.filter_translator import FilterTranslator

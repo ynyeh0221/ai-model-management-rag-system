@@ -1,26 +1,27 @@
 import argparse
 import os
 
-from src.cli_runner.images.image_processor_runner import ImageProcessorRunner
-from src.cli_runner.model_scripts.script_processor_runner import ScriptProcessorRunner
-from src.cli_runner.ui.ui_runner import UIRunner
-from src.colab_generator.code_generator import CodeGenerator
-from src.colab_generator.colab_api_client import ColabAPIClient
-from src.colab_generator.reproducibility_manager import ReproducibilityManager
-from src.colab_generator.resource_quota_manager import ResourceQuotaManager
-from src.document_processor.image_processor import ImageProcessor
-from src.document_processor.llm_based_code_parser import LLMBasedCodeParser
-from src.document_processor.metadata_extractor import MetadataExtractor
-from src.document_processor.schema_validator import SchemaValidator
-from src.query_engine.query_analytics import QueryAnalytics
-from src.query_engine.query_parser import QueryParser
-from src.query_engine.search_dispatcher import SearchDispatcher
-from src.response_generator.llm_interface import LLMInterface
-from src.response_generator.result_reranker import CrossEncoderReranker
-from src.vector_db_manager.access_control import AccessControlManager
-from src.vector_db_manager.chroma_manager import ChromaManager
-from src.vector_db_manager.image_embedder import ImageEmbedder
-from src.vector_db_manager.text_embedder import TextEmbedder
+from colab_generator.code_generator import CodeGenerator
+from colab_generator.colab_api_client import ColabAPIClient
+from colab_generator.reproducibility_manager import ReproducibilityManager
+from colab_generator.resource_quota_manager import ResourceQuotaManager
+from data_processing.cli_interface.image_processor_runner import ImageProcessorRunner
+from data_processing.cli_interface.script_processor_runner import ScriptProcessorRunner
+from data_processing.document_processor.image_processor import ImageProcessor
+from data_processing.document_processor.llm_based_code_parser import LLMBasedCodeParser
+from data_processing.document_processor.metadata_extractor import MetadataExtractor
+from data_processing.document_processor.schema_validator import SchemaValidator
+from query_engine.query_analytics import QueryAnalytics
+from query_engine.query_parser import QueryParser
+from query_engine.search_dispatcher import SearchDispatcher
+
+from response_generator.llm_interface import LLMInterface
+from response_generator.result_reranker import CrossEncoderReranker
+from user_interface.cli_interface.cli_interface import CLIInterface
+from vector_db_manager.access_control import AccessControlManager
+from vector_db_manager.chroma_manager import ChromaManager
+from vector_db_manager.image_embedder import ImageEmbedder
+from vector_db_manager.text_embedder import TextEmbedder
 
 
 def initialize_components(config_path="./config"):
@@ -85,7 +86,7 @@ def initialize_components(config_path="./config"):
 def main():
     script_processor_runner = ScriptProcessorRunner()
     image_processor_runner = ImageProcessorRunner()
-    ui_runner = UIRunner()
+    cli_interface = CLIInterface()
 
     parser = argparse.ArgumentParser(description="AI Model Management RAG System")
     subparsers = parser.add_subparsers(dest="command", help="Command to execute")
@@ -98,16 +99,16 @@ def main():
     process_single_script_parser = subparsers.add_parser("process-single-script", help="Process a single model script")
     process_single_script_parser.add_argument("file_path", help="Absolute path to target model script file")
 
-    # Process images command
-    process_images_parser = subparsers.add_parser("process-images", help="Process images")
-    process_images_parser.add_argument("directory", help="Directory containing images")
+    # Process image_processing command
+    process_images_parser = subparsers.add_parser("process-image_processing", help="Process image_processing")
+    process_images_parser.add_argument("directory", help="Directory containing image_processing")
 
     # Process single image command
     process_single_image_parser = subparsers.add_parser("process-single-image", help="Process a single image")
     process_single_image_parser.add_argument("file_path", help="Absolute path to target image")
 
     # Start UI command
-    ui_parser = subparsers.add_parser("start-ui", help="Start the user interface")
+    ui_parser = subparsers.add_parser("start-user_interface", help="Start the user interface")
     ui_parser.add_argument("--host", default="localhost", help="Host to bind the UI to")
     ui_parser.add_argument("--port", type=int, default=8000, help="Port to bind the UI to")
 
@@ -121,12 +122,12 @@ def main():
         script_processor_runner.process_model_scripts(components, args.directory)
     elif args.command == "process-single-script":
         script_processor_runner.process_single_script(components, args.file_path)
-    elif args.command == "process-images":
+    elif args.command == "process-image_processing":
         image_processor_runner.process_images(components, args.directory)
     elif args.command == "process-single-image":
         image_processor_runner.process_single_image(components, args.file_path)
-    elif args.command == "start-ui":
-        ui_runner.start_ui(components, args.host, args.port)
+    elif args.command == "start-user_interface":
+        cli_interface.start_cli(components, args.host, args.port)
     else:
         parser.print_help()
 

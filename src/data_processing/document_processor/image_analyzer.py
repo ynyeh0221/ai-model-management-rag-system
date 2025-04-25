@@ -231,7 +231,7 @@ class ImageAnalyzer:
 
     def analyze_images_batch(self, images):
         """
-        Analyze multiple images in batch mode.
+        Analyze multiple image_processing in batch mode.
 
         Args:
             images: List of PIL Image objects or paths to image files

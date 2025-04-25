@@ -5,8 +5,7 @@ from unittest.mock import patch, MagicMock
 
 from PIL import Image
 
-# Import the class to test
-from src.document_processor.image_processor import ImageProcessor
+from data_processing.document_processor.image_processor import ImageProcessor
 
 
 class TestImageProcessor(unittest.TestCase):

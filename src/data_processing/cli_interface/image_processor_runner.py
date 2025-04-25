@@ -9,7 +9,7 @@ from pathlib import Path
 
 class ImageProcessorRunner:
     """
-    A class that focuses solely on processing images and storing them in the vector database.
+    A class that focuses solely on processing image_processing and storing them in the vector database.
     All search/query functionality has been moved to the ImageSearchManager class.
     """
 
@@ -17,7 +17,7 @@ class ImageProcessorRunner:
         self.logger = logging.getLogger("image_processor_runner")
 
     def process_images(self, components, directory_path, model_id=None, extract_epoch=True):
-        """Process images in a directory.
+        """Process image_processing in a directory.
 
         This function walks through the directory to find image files,
         processes them using the image processor component, generates
@@ -25,11 +25,11 @@ class ImageProcessorRunner:
 
         Args:
             components: Dictionary containing initialized system components
-            directory_path: Path to directory containing images
-            model_id: Optional model ID to associate with all images in this directory
+            directory_path: Path to directory containing image_processing
+            model_id: Optional model ID to associate with all image_processing in this directory
             extract_epoch: Whether to attempt to extract epoch information from filenames or paths
         """
-        print(f"Processing images in {directory_path}...")
+        print(f"Processing image_processing in {directory_path}...")
 
         # Set up logging
         logging.basicConfig(level=logging.INFO)
@@ -48,7 +48,7 @@ class ImageProcessorRunner:
         for ext in supported_extensions:
             image_files.extend(glob.glob(os.path.join(directory_path, f"**/*{ext}"), recursive=True))
 
-        # Filter out thumbnail images (files that start with "thumb_")
+        # Filter out thumbnail image_processing (files that start with "thumb_")
         filtered_image_files = []
         thumbnail_count = 0
         for file_path in image_files:
@@ -60,8 +60,8 @@ class ImageProcessorRunner:
                 filtered_image_files.append(file_path)
 
         logger.info(f"Found {len(image_files)} total image files")
-        logger.info(f"Skipped {thumbnail_count} thumbnail images")
-        logger.info(f"Processing {len(filtered_image_files)} non-thumbnail images")
+        logger.info(f"Skipped {thumbnail_count} thumbnail image_processing")
+        logger.info(f"Processing {len(filtered_image_files)} non-thumbnail image_processing")
 
         # Try to extract model_id from directory name if not provided
         if model_id is None:
@@ -351,21 +351,21 @@ class ImageProcessorRunner:
         return (document_id, True)
 
     def reprocess_images(self, components, directory_path, model_id=None, force_update=False):
-        """Reprocess images that have already been processed.
+        """Reprocess image_processing that have already been processed.
 
         This is useful for updating metadata when the schema or processing logic changes.
 
         Args:
             components: Dictionary containing initialized system components
-            directory_path: Path to directory containing images
-            model_id: Optional model ID to associate with all images in this directory
-            force_update: Whether to update all images or only those with missing required fields
+            directory_path: Path to directory containing image_processing
+            model_id: Optional model ID to associate with all image_processing in this directory
+            force_update: Whether to update all image_processing or only those with missing required fields
 
         Returns:
             tuple: (success_count, failure_count, skipped_count)
         """
         logger = logging.getLogger("image_processor")
-        logger.info(f"Reprocessing images in {directory_path}...")
+        logger.info(f"Reprocessing image_processing in {directory_path}...")
 
         # Set up tracking counters
         success_count = 0
@@ -386,9 +386,9 @@ class ImageProcessorRunner:
             include=["metadatas", "documents", "embeddings"]
         ))
 
-        # If no existing images found
+        # If no existing image_processing found
         if not existing_images or not existing_images.get("metadatas"):
-            logger.info("No existing images found for reprocessing")
+            logger.info("No existing image_processing found for reprocessing")
             return (0, 0, 0)
 
         # Process each existing image
@@ -490,7 +490,7 @@ class ImageProcessorRunner:
         return True
 
     def batch_process_images(self, components, batch_config):
-        """Process multiple directories of images in batch.
+        """Process multiple directories of image_processing in batch.
 
         Args:
             components: Dictionary containing initialized system components
@@ -509,7 +509,7 @@ class ImageProcessorRunner:
                         }
                     ],
                     "max_workers": 3,  # Number of parallel directory processors
-                    "reprocess": false  # Whether to reprocess existing images
+                    "reprocess": false  # Whether to reprocess existing image_processing
                 }
 
         Returns:

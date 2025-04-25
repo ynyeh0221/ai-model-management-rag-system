@@ -1,7 +1,6 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Import the class we're testing
 from src.query_engine.handlers.notebook_request_handler import NotebookRequestHandler
 
 

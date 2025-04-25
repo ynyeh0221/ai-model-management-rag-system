@@ -1,19 +1,32 @@
+"""
+CommandHandler Module - Processes user commands for the CLI interface
+
+This module adapts the original CommandHandler to work with the new RAGSystem
+and CLIInterface architecture while maintaining the same functionality.
+"""
+
 import asyncio
 
 
 class CommandHandler:
     """Handles command processing and delegation to appropriate components."""
 
-    def __init__(self, ui_runner):
-        self.ui_runner = ui_runner
-        self.components = ui_runner.components
-        self.user_id = ui_runner.user_id
+    def __init__(self, cli_interface):
+        """
+        Initialize CommandHandler with a reference to the CLIInterface.
 
-        # These will be set by UIRunner after initialization
-        self.model_display = None
-        self.image_display = None
-        self.notebook_generator = None
-        self.query_processor = None
+        Args:
+            cli_interface: Instance of CLIInterface that this handler will work with
+        """
+        self.cli_interface = cli_interface
+        self.rag_system = cli_interface.rag_system
+        self.components = self.rag_system.components
+        self.user_id = cli_interface.user_id
+
+        # These will be accessed from the CLIInterface
+        self.model_display = cli_interface.model_display_manager
+        self.image_display = cli_interface.image_display_manager
+        self.notebook_generator = cli_interface.notebook_generator
 
     def handle_command(self, cmd):
         """
@@ -27,6 +40,7 @@ class CommandHandler:
         """
         cmd = cmd.strip()
 
+        # Basic command handling - will be processed by RAGSystem
         if cmd.lower() == "exit":
             print("Exiting. Goodbye!")
             return False
@@ -34,24 +48,27 @@ class CommandHandler:
             self._handle_help_command()
         elif cmd.lower() == "list-models":
             self._handle_list_models_command()
-        elif cmd.lower() == "list-images":
+        elif cmd.lower() == "list-image_processing":
             self._handle_list_images_command()
         elif cmd.lower().startswith("query"):
             self._handle_query_command(cmd)
         elif cmd.lower().startswith("generate-notebook"):
             self._handle_generate_notebook_command(cmd)
         else:
-            print(f"Unknown command: {cmd}")
-            print("Type 'help' to see available commands.")
+            # For unknown commands, let the RAGSystem try to process it
+            result = self.rag_system.execute_command(cmd)
+            if result.get("type") == "error":
+                print(f"Unknown command: {cmd}")
+                print("Type 'help' to see available commands.")
 
         return True
 
     def _handle_help_command(self):
         """Display available commands and their descriptions."""
         commands = {
-            "query": "Search for model scripts or images",
+            "query": "Search for model scripts or image_processing",
             "list-models": "List available models",
-            "list-images": "List available images",
+            "list-image_processing": "List available image_processing",
             "generate-notebook": "Generate a Colab notebook for a model",
             "help": "Show available commands",
             "exit": "Exit the program"
@@ -74,29 +91,29 @@ class CommandHandler:
             print(f"Error listing models: {str(e)}")
 
     def _handle_list_images_command(self):
-        """List all images accessible to the current user."""
+        """List all image_processing accessible to the current user."""
         try:
             access_control = self.components["vector_db_manager"]["access_control"]
 
-            # Get images the user has access to
+            # Get image_processing the user has access to
             try:
                 available_images = access_control.get_accessible_images(self.user_id)
             except AttributeError:
-                # Fallback: Get all images if access control is not properly implemented
-                print("Warning: Access control not fully implemented. Showing all available images.")
+                # Fallback: Get all image_processing if access control is not properly implemented
+                print("Warning: Access control not fully implemented. Showing all available image_processing.")
                 chroma_manager = self.components["vector_db_manager"]["chroma_manager"]
-                # Use a safer method to get images
+                # Use a safer method to get image_processing
                 available_images = asyncio.run(self._get_all_images(chroma_manager))
 
-            print("\nAvailable images:")
+            print("\nAvailable image_processing:")
             self.image_display.display_images_with_thumbnails(available_images, is_search_result=False)
         except Exception as e:
-            print(f"Error listing images: {str(e)}")
+            print(f"Error listing image_processing: {str(e)}")
             print("Please ensure the vector database and access control are properly configured.")
 
     async def _get_all_images(self, chroma_manager):
         """
-        Fallback method to get all images when access control fails.
+        Fallback method to get all image_processing when access control fails.
 
         Args:
             chroma_manager: The Chroma database manager
@@ -105,7 +122,7 @@ class CommandHandler:
             List of image dictionaries
         """
         try:
-            # Query for all images in the generated_images collection
+            # Query for all image_processing in the generated_images collection
             results = await chroma_manager.get(
                 collection_name="generated_images",
                 include=["metadatas"],
@@ -126,7 +143,7 @@ class CommandHandler:
                 return images
             return []
         except Exception as e:
-            print(f"Error retrieving images: {str(e)}")
+            print(f"Error retrieving image_processing: {str(e)}")
             return []
 
     def _handle_query_command(self, cmd):
@@ -137,8 +154,8 @@ class CommandHandler:
         else:
             query_text = cmd[6:].strip()
 
-        # Process the query
-        asyncio.run(self.query_processor.process_query(query_text))
+        # Process the query using RAGSystem
+        asyncio.run(self.rag_system.process_query(query_text))
 
     def _handle_generate_notebook_command(self, cmd):
         """Handle the generate-notebook command."""

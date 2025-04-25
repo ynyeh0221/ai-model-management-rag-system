@@ -1,9 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# Import the class we're testing
 from src.query_engine.handlers.fallback_search_handler import FallbackSearchHandler
-# Import dependencies
 from src.query_engine.handlers.metadata_search_handler import MetadataSearchHandler
 
 

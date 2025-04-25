@@ -202,65 +202,65 @@ class TestQueryParser(unittest.TestCase):
         valid_model_ids = []
 
         # Test highest_epoch search type
-        query = "Show images from highest epoch"
+        query = "Show image_processing from highest epoch"
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["search_type"], "highest_epoch")
 
         # Test epoch search type with specific epoch number
-        query = "Show images from epoch 10"
+        query = "Show image_processing from epoch 10"
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["search_type"], "epoch")
         self.assertEqual(params["epoch"], 10)
 
         # Test epoch search type with different format
-        query = "Show images with epoch = 15"
+        query = "Show image_processing with epoch = 15"
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["search_type"], "epoch")
         self.assertEqual(params["epoch"], 15)
 
         # Test color search type - using proper format that the implementation expects
-        query = "Find images with colors = 'blue,red'"
+        query = "Find image_processing with colors = 'blue,red'"
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["search_type"], "color")
         self.assertIn("colors", params)
         self.assertTrue(len(params["colors"]) >= 1)
 
         # Test date search type
-        query = "Find images created in 2023"  # Using a format the implementation recognizes
+        query = "Find image_processing created in 2023"  # Using a format the implementation recognizes
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["search_type"], "date")
         self.assertIn("date_filter", params)
 
         # Test content search type - using the exact format the implementation expects
-        query = "Find images with content = 'landscape'"  # Using content instead of subject
+        query = "Find image_processing with content = 'landscape'"  # Using content instead of subject
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["search_type"], "content")
 
         # Test similarity search type (default) with prompt terms
-        query = "Find images with prompt 'mountain landscape'"
+        query = "Find image_processing with prompt 'mountain landscape'"
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["search_type"], "similarity")
         self.assertIn("prompt_terms", params)
 
         # Test tag search
-        query = "Find images with tags = 'sunset,beach'"
+        query = "Find image_processing with tags = 'sunset,beach'"
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["search_type"], "tag")
         self.assertIn("tags", params)
 
         # Test model_id search
         valid_model_ids = ["ABC123"]
-        query = "Find images from model ABC123"
+        query = "Find image_processing from model ABC123"
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["search_type"], "model_id")
 
         # Test default limit
-        query = "Find any images"
+        query = "Find any image_processing"
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["limit"], 10)
 
         # Test custom limit
-        query = "Find top 25 images"
+        query = "Find top 25 image_processing"
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["limit"], 25)
 

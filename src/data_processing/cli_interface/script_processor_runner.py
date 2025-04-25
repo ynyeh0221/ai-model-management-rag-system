@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from datetime import datetime
 
-from document_processor.llm_based_code_parser import split_code_chunks_via_ast
+from data_processing.document_processor.llm_based_code_parser import split_code_chunks_via_ast
 
 
 class ScriptProcessorRunner:
@@ -319,7 +319,7 @@ class ScriptProcessorRunner:
                 }
             },
 
-            # 10. Model images path information
+            # 10. Model image_processing path information
             "model_images_folder": {
                 "id": f"model_images_folder_{model_id}",
                 "$schema_version": "1.0.0",
