@@ -58,7 +58,12 @@ class ValidChromaManagerTest(unittest.TestCase):
 
     def run_async(self, coroutine):
         """Helper method to run async methods in tests"""
-        loop = asyncio.get_event_loop()
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # Create a new event loop if one is not available
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
         return loop.run_until_complete(coroutine)
 
     def test_find_images_by_model_id(self):
@@ -144,8 +149,9 @@ class ValidChromaManagerTest(unittest.TestCase):
                 }
 
             # Apply the second patch to handle_image_search itself
-            with patch.object(self.image_search_manager, 'handle_image_search', mock_handle_search):
-                result = self.run_async(self.image_search_manager.handle_image_search())
+            with patch.object(self.image_search_manager, '_handle_image_search', mock_handle_search):
+                # Provide both required arguments: query and parameters
+                result = self.run_async(self.image_search_manager.handle_image_search("", {}))
 
                 # Should use default search type "text"
                 self.assertEqual(result["type"], "image_text_search")
@@ -167,9 +173,10 @@ class ValidChromaManagerTest(unittest.TestCase):
                 "total_found": 1
             }
 
-        with patch.object(self.image_search_manager, 'handle_image_search', mock_handle_search):
+        with patch.object(self.image_search_manager, '_handle_image_search', mock_handle_search):
             parameters = {"search_type": "model_id", "filters": {"model_id": "model1"}}
-            result = self.run_async(self.image_search_manager.handle_image_search(parameters=parameters))
+            # Provide the required query argument along with parameters
+            result = self.run_async(self.image_search_manager.handle_image_search("model search", parameters))
             self.assertTrue(result["success"])
 
 
@@ -205,7 +212,12 @@ class FaultInjectionTest(unittest.TestCase):
 
     def run_async(self, coroutine):
         """Helper method to run async methods in tests"""
-        loop = asyncio.get_event_loop()
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # Create a new event loop if one is not available
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
         return loop.run_until_complete(coroutine)
 
     def test_will_fail_if_query_by_metadata_is_used(self):
@@ -243,7 +255,12 @@ class EdgeCasesTest(unittest.TestCase):
         )
 
     def run_async(self, coroutine):
-        loop = asyncio.get_event_loop()
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            # Create a new event loop if one is not available
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
         return loop.run_until_complete(coroutine)
 
     def test_nested_access_control_filter_combining(self):
