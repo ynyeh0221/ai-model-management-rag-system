@@ -44,10 +44,24 @@ What DQN (Deep Q-Learning) agent did I try for the game called 2048?
 
 ### 3. Model Details Comparison
 
-**Example query:**
+The system allows users to compare detailed metadata between two or more models, enabling a clear understanding of architectural differences, training configurations, and performance metrics. This feature is essential for both researchers and engineers who need to evaluate model evolution, performance trade-offs, or dataset shifts.
+
+**Capabilities:**
+- Compare **architectures** (type, layers, hidden sizes, attention heads, parameters).
+- Contrast **performance metrics** such as accuracy, loss, and perplexity.
+- Analyze **training setups**, including batch size, optimizer, learning rate, hardware usage, and epochs.
+- Examine **dataset usage** and framework details.
+- Identify **relative improvements** across models (e.g., accuracy gains per parameter).
+- Automatically generates structured comparisons such as best/worst rankings and pairwise performance gaps.
+
+**Supported Comparison Types:**
+- **Direct model ID comparison**: Compares multiple models by specifying their model IDs.
+- **Cohort-based comparison**: Allows free-text cohort comparison, where each cohort is defined by a natural language query.
+
+**Example queries:**
 ```
-Can you please compare differences in architecture between my diffusion models on CIFAR-10 and MNIST?
-Please compare differences in architecture and dataset between model id A and model id B.
+Please compare differences in architecture and dataset between model id model_123 and model id model_456.
+Compare the diffusion models trained on CIFAR-10 and MNIST.
 ```
 
 ### 4. Generated Image Retrieval
