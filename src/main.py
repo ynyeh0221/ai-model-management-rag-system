@@ -1,9 +1,9 @@
 import argparse
 import os
 
-from cli_runner.images.image_processor_runner import ImageProcessorRunner
-from cli_runner.model_scripts.script_processor_runner import ScriptProcessorRunner
-from cli_runner.ui.ui_runner import UIRunner
+from src.cli_runner.images.image_processor_runner import ImageProcessorRunner
+from src.cli_runner.model_scripts.script_processor_runner import ScriptProcessorRunner
+from src.cli_runner.ui.ui_runner import UIRunner
 from src.colab_generator.code_generator import CodeGenerator
 from src.colab_generator.colab_api_client import ColabAPIClient
 from src.colab_generator.reproducibility_manager import ReproducibilityManager
@@ -14,9 +14,9 @@ from src.document_processor.metadata_extractor import MetadataExtractor
 from src.document_processor.schema_validator import SchemaValidator
 from src.query_engine.query_analytics import QueryAnalytics
 from src.query_engine.query_parser import QueryParser
-from src.query_engine.result_reranker import CrossEncoderReranker
 from src.query_engine.search_dispatcher import SearchDispatcher
 from src.response_generator.llm_interface import LLMInterface
+from src.response_generator.result_reranker import CrossEncoderReranker
 from src.vector_db_manager.access_control import AccessControlManager
 from src.vector_db_manager.chroma_manager import ChromaManager
 from src.vector_db_manager.image_embedder import ImageEmbedder

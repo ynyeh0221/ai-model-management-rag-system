@@ -1,11 +1,9 @@
 import copy
+import logging
 import unittest
 from unittest.mock import patch, MagicMock
-import logging
-import sys
 
-# Import the module being tested
-from src.query_engine.result_reranker import CrossEncoderReranker, DenseReranker, RerankerFactory
+from src.response_generator.result_reranker import CrossEncoderReranker, DenseReranker, RerankerFactory
 
 
 class TestCrossEncoderReranker(unittest.TestCase):
@@ -154,7 +152,7 @@ class TestCrossEncoderReranker(unittest.TestCase):
             ]
 
             # Create a logger that will be used by the reranker
-            logger = logging.getLogger('src.query_engine.result_reranker')
+            logger = logging.getLogger('src.response_generator.result_reranker')
 
             # Act
             with self.assertLogs(logger, level='ERROR') as log:
@@ -429,7 +427,7 @@ class TestDenseReranker(unittest.TestCase):
         ]
 
         # Create a logger that will be used by the reranker
-        logger = logging.getLogger('src.query_engine.result_reranker')
+        logger = logging.getLogger('src.response_generator.result_reranker')
 
         # Act
         with self.assertLogs(logger, level='ERROR') as log:
@@ -485,7 +483,7 @@ class TestDenseReranker(unittest.TestCase):
 class TestRerankerFactory(unittest.TestCase):
     """Test cases for the RerankerFactory class."""
 
-    @patch('src.query_engine.result_reranker.CrossEncoderReranker')
+    @patch('src.response_generator.result_reranker.CrossEncoderReranker')
     def test_create_cross_encoder(self, mock_cross_encoder):
         """Test creating a CrossEncoderReranker."""
         # Arrange
@@ -499,7 +497,7 @@ class TestRerankerFactory(unittest.TestCase):
         mock_cross_encoder.assert_called_once_with(**kwargs)
         self.assertIsNotNone(reranker)
 
-    @patch('src.query_engine.result_reranker.DenseReranker')
+    @patch('src.response_generator.result_reranker.DenseReranker')
     def test_create_dense(self, mock_dense_reranker):
         """Test creating a DenseReranker."""
         # Arrange
