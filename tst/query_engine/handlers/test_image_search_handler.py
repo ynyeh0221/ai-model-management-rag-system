@@ -2,7 +2,7 @@ import unittest
 from unittest.mock import MagicMock, patch
 import asyncio
 
-from src.query_engine.handlers.image_search_manager import ImageSearchManager
+from src.query_engine.handlers.image_search_handler import ImageSearchHandler
 
 
 class AsyncMockWithReturnValue(MagicMock):
@@ -50,7 +50,7 @@ class ValidChromaManagerTest(unittest.TestCase):
         self.access_control_manager.create_access_filter = MagicMock(return_value={"user": "user1"})
         self.access_control_manager.check_access = MagicMock(return_value=True)
 
-        self.image_search_manager = ImageSearchManager(
+        self.image_search_manager = ImageSearchHandler(
             chroma_manager=self.chroma_manager,
             image_embedder=self.image_embedder,
             access_control_manager=self.access_control_manager
@@ -197,7 +197,7 @@ class FaultInjectionTest(unittest.TestCase):
         type(self.chroma_manager).__getattr__ = MagicMock(side_effect=getattr_side_effect)
 
         # Create an instance of ImageSearchManager
-        self.image_search_manager = ImageSearchManager(
+        self.image_search_manager = ImageSearchHandler(
             chroma_manager=self.chroma_manager,
             image_embedder=MagicMock(),
             access_control_manager=MagicMock()
@@ -236,7 +236,7 @@ class EdgeCasesTest(unittest.TestCase):
         self.access_control_manager = MagicMock()
         self.access_control_manager.create_access_filter = MagicMock(return_value={"access_level": "public"})
 
-        self.image_search_manager = ImageSearchManager(
+        self.image_search_manager = ImageSearchHandler(
             chroma_manager=self.chroma_manager,
             image_embedder=self.image_embedder,
             access_control_manager=self.access_control_manager
