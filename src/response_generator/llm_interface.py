@@ -14,7 +14,7 @@ class LLMInterface:
 
     def __init__(self,
                  provider="ollama",
-                 model_name="deepseek-llm:7b",
+                 model_name="deepseek-r1:7b",
                  base_url="http://localhost:11434",
                  timeout=120,
                  max_retries=3,
@@ -360,7 +360,7 @@ if __name__ == "__main__":
     # Initialize the interface with Apple Silicon GPU support
     llm = LLMInterface(
         provider="ollama",
-        model_name="deepseek-llm:7b",
+        model_name="deepseek-r1:7b",
         use_gpu=True,
         gpu_layers=None  # Will default to 99 for max GPU offloading
     )

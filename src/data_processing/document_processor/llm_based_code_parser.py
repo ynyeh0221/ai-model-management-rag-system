@@ -591,7 +591,7 @@ class LLMBasedCodeParser:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0,
-                    max_tokens=4000
+                    max_tokens=4096
                 )
                 summary = response.get("content", "").strip()
 
@@ -739,7 +739,7 @@ class LLMBasedCodeParser:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0,
-                    max_tokens=4000
+                    max_tokens=4096
                 )
                 print(f"metadata generation response (attempt {attempt + 1}): {response}")
                 raw = response.get("content", "").strip()

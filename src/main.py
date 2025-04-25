@@ -24,10 +24,10 @@ from vector_db_manager.image_embedder import ImageEmbedder
 from vector_db_manager.text_embedder import TextEmbedder
 
 
-def initialize_components(config_path="./config"):
+def initialize_components(config_path="./config", llm_model_name: str = "llm"):
     """Initialize all components of the RAG system."""
 
-    llm_interface = LLMInterface(model_name="deepseek-llm:7b", timeout=60000)
+    llm_interface = LLMInterface(model_name=llm_model_name, timeout=60000)
 
     # Initialize document cli_runner components
     schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
@@ -42,7 +42,7 @@ def initialize_components(config_path="./config"):
     access_control = AccessControlManager(chroma_manager)
     
     # Initialize query engine components
-    query_parser = QueryParser(llm_model_name="deepseek-llm:7b")
+    query_parser = QueryParser()
     search_dispatcher = SearchDispatcher(chroma_manager, text_embedder, image_embedder)
     query_analytics = QueryAnalytics()
     result_reranker = CrossEncoderReranker(device="mps")
@@ -114,19 +114,26 @@ def main():
 
     args = parser.parse_args()
 
-    # Initialize components
-    components = initialize_components()
-
     # Execute command
     if args.command == "process-scripts":
+        # Use deepseek-llm for speed and token length consideration
+        components = initialize_components(llm_model_name="deepseek-llm:7b")
         script_processor_runner.process_model_scripts(components, args.directory)
     elif args.command == "process-single-script":
+        # Use deepseek-llm for speed and token length consideration
+        components = initialize_components(llm_model_name="deepseek-llm:7b")
         script_processor_runner.process_single_script(components, args.file_path)
     elif args.command == "process-image_processing":
+        # Use deepseek-llm for speed and token length consideration
+        components = initialize_components(llm_model_name="deepseek-llm:7b")
         image_processor_runner.process_images(components, args.directory)
     elif args.command == "process-single-image":
+        # Use deepseek-llm for speed and token length consideration
+        components = initialize_components(llm_model_name="deepseek-llm:7b")
         image_processor_runner.process_single_image(components, args.file_path)
     elif args.command == "start-user_interface":
+        # Use deepseek-r1 to better show thinking steps
+        components = initialize_components(llm_model_name="deepseek-r1:7b")
         cli_interface.start_cli(components, args.host, args.port)
     else:
         parser.print_help()
