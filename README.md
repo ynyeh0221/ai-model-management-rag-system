@@ -186,7 +186,7 @@ When a user submits a query through the CLI interface (`UIRunner`), the system f
 | Backend           | FastAPI / Flask |
 | Frontend          | React, Tailwind CSS, Zustand |
 | Vector Search     | ChromaDB, FAISS, SQLite |
-| Embeddings        | SentenceTransformers, OpenCLIP |
+| Embeddings        | SentenceTransformers, BGE-M3, OpenCLIP |
 | LLM Integration   | LangChain, LLaMA, Deepseek-llm |
 | Image Processing  | Pillow, OpenCLIP |
 | Notebooks         | nbformat, Papermill, Google Colab API |
