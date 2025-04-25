@@ -284,6 +284,6 @@ This will:
 
 ### License
 
-MIT License
+[MIT License](https://github.com/ynyeh0221/model-insight-rag/blob/main/LICENSE)
 
 ---
