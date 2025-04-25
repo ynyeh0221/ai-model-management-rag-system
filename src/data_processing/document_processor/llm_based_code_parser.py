@@ -7,7 +7,7 @@ from typing import List, Tuple
 
 from git import Repo
 
-from data_processing.document_processor.ast_summary_generator import ASTSummaryGenerator
+from src.data_processing.document_processor.ast_summary_generator import ASTSummaryGenerator
 
 def filter_ast_summary_for_metadata(summary: str) -> str:
     """
