@@ -1,5 +1,7 @@
 import json
 
+from setuptools.package_index import user_agent
+
 from cli_runner.ui.image_display_manager import ImageDisplayManager
 from cli_runner.ui.llm_response_processor import LLMResponseProcessor
 from cli_runner.ui.model_display_manager import ModelDisplayManager
@@ -385,15 +387,16 @@ class QueryProcessor:
             "- The ideal meta-prompt balances technical precision with clarity and completeness"
         )
 
-        prompt_builder = (
+        user_prompt = (
             f"User query: {query_text}\n"
             f"Result schema: {result_schema}\n"
             f"Number of results: {len(reranked_results)}\n"
+            "DO NOT answer the user's query yourself - return only the meta-prompt text\n"
         )
 
         builder_response = llm_interface.generate_structured_response(
             system_prompt=system_prompt,
-            user_prompt=prompt_builder,
+            user_prompt=user_prompt,
             temperature=0.5,
             max_tokens=4000
         )
