@@ -40,6 +40,7 @@ The system provides detailed information about specific models, including:
 **Example query:**
 ```
 What DQN (Deep Q-Learning) agent did I try for the game called 2048?
+Do I have models which were trained on animal images?
 ```
 
 ### 3. Model Details Comparison
