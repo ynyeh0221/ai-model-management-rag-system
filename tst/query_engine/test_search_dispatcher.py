@@ -494,9 +494,9 @@ class TestSearchDispatcher(unittest.IsolatedAsyncioTestCase):
             async def mock_fetch_metadata(model_id, user_id=None):
                 return {"model_id": model_id, "access_control": '{"view": ["public"], "edit": []}'}
 
-            # Apply the mock
-            original_fetch = self.dispatcher._fetch_model_metadata
-            self.dispatcher._fetch_model_metadata = mock_fetch_metadata
+            # Apply the mock to the refactored method
+            original_fetch = self.dispatcher.model_data_fetcher.fetch_model_metadata
+            self.dispatcher.model_data_fetcher.fetch_model_metadata = mock_fetch_metadata
 
             # Mock the check_access directly in place to avoid patching issues
             self.access_control_manager.check_access = lambda doc, user, perm: user == "admin" or "model1" in doc.get(
@@ -535,7 +535,7 @@ class TestSearchDispatcher(unittest.IsolatedAsyncioTestCase):
             if original_check_access:
                 self.access_control_manager.check_access = original_check_access
             if original_fetch:
-                self.dispatcher._fetch_model_metadata = original_fetch
+                self.dispatcher.model_data_fetcher.fetch_model_metadata = original_fetch
 
     async def test_metadata_search_with_access_control(self):
         """Test that metadata search respects access control"""

@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from datetime import datetime
 
+from document_processor.llm_based_code_parser import split_code_chunks_via_ast
+
 
 class ScriptProcessorRunner:
 
@@ -124,7 +126,7 @@ class ScriptProcessorRunner:
             return None
 
         # Split into chunks for processing
-        chunks = code_parser.split_code_chunks_via_ast(
+        chunks = split_code_chunks_via_ast(
             file_content=parse_result["content"],
             file_path=file_path,
             chunk_size=20000,

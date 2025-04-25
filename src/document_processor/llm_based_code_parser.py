@@ -460,7 +460,7 @@ class LLMBasedCodeParser:
             "- Training loop and optimization settings\n"
             "- Evaluation procedures and metrics\n"
             "- Output and logging mechanisms\n\n"
-            "The AST digest represents the script's structure and logic without including the full source code. Your task is to transform this technical summary into comprehensive, human-readable documentation.\n\n"
+            "The AST digest represents the script's structure and logic without including the full source code. Your task is to transform this technical summary into comprehensive, human-readable English documentation.\n\n"
 
             "### THINKING PROCESS REQUIREMENTS\n\n"
             "Before drafting your documentation, engage in thorough analytical reasoning that demonstrates:\n"

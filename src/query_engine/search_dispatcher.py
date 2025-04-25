@@ -1,9 +1,15 @@
+# src/query_engine/search_dispatcher.py
 import asyncio
 import logging
-import math
 import time
 from typing import Dict, List, Any, Optional, Union, Tuple
 
+from src.query_engine.handlers.comparison_generator import ComparisonGenerator
+from src.query_engine.handlers.distance_normalizer import DistanceNormalizer
+from src.query_engine.handlers.filter_translator import FilterTranslator
+from src.query_engine.handlers.metadata_table_manager import MetadataTableManager
+from src.query_engine.handlers.model_data_fetcher import ModelDataFetcher
+from src.query_engine.handlers.performance_metrics_calculator import PerformanceMetricsCalculator
 from src.query_engine.image_search_manager import ImageSearchManager
 from src.query_engine.query_intent import QueryIntent
 
@@ -33,6 +39,14 @@ class SearchDispatcher:
         self.access_control_manager = access_control_manager
         self.analytics = analytics
         self.logger = logging.getLogger(__name__)
+
+        # Initialize utility classes
+        self.distance_normalizer = DistanceNormalizer()
+        self.filter_translator = FilterTranslator()
+        self.model_data_fetcher = ModelDataFetcher(chroma_manager, access_control_manager)
+        self.performance_metrics = PerformanceMetricsCalculator(analytics)
+        self.comparison_generator = ComparisonGenerator()
+        self.metadata_table_manager = MetadataTableManager(chroma_manager, access_control_manager)
 
         # Initialize the image search manager if not provided
         self.image_search_manager = image_search_manager or ImageSearchManager(
@@ -113,7 +127,7 @@ class SearchDispatcher:
                 'intent': intent.value if isinstance(intent, QueryIntent) else intent,
                 'execution_time_ms': execution_time,
                 'result_count': len(results.get('items', [])),
-                'parameters': self._sanitize_parameters(parameters)
+                'parameters': self.performance_metrics.sanitize_parameters(parameters)
             }
 
             return results
@@ -156,7 +170,7 @@ class SearchDispatcher:
             user_id, requested_limit, chroma_filters = self._extract_text_search_parameters(parameters)
 
             # Define metadata tables to search with their weights
-            table_weights = self._get_metadata_table_weights()
+            table_weights = self.metadata_table_manager.get_metadata_table_weights()
 
             # STEP 0: Get global min/max distances for all collections
             collections = list(table_weights.keys()) + ["model_scripts_chunks"]
@@ -193,7 +207,7 @@ class SearchDispatcher:
 
             # Calculate performance metrics
             metadata_search_time = (time.time() - metadata_search_start) * 1000
-            performance_metrics = self._calculate_text_search_performance(
+            performance_metrics = self.performance_metrics.calculate_text_search_performance(
                 start_time, metadata_search_time, chunks_search_time, parameters
             )
 
@@ -209,19 +223,6 @@ class SearchDispatcher:
         except Exception as e:
             self.logger.error(f"Error in text search: {e}", exc_info=True)
             raise
-
-    def _get_metadata_table_weights(self) -> Dict[str, float]:
-        """Define metadata tables to search with their weights."""
-        return {
-            "model_descriptions": 0.3,
-            "model_architectures": 0.2,
-            "model_frameworks": 0.0,
-            "model_datasets": 0.2,
-            "model_training_configs": 0.15,
-            "model_date": 0.15,
-            "model_file": 0.0,
-            "model_git": 0.0
-        }
 
     def _extract_text_search_parameters(self, parameters: Dict[str, Any]) -> Tuple[Optional[str], int, Dict[str, Any]]:
         """Extract and validate search parameters."""
@@ -252,7 +253,7 @@ class SearchDispatcher:
                 filters = access_filter
 
         # Translate filters to Chroma format
-        chroma_filters = self._translate_filters_to_chroma(filters)
+        chroma_filters = self.filter_translator.translate_to_chroma(filters)
 
         return user_id, requested_limit, chroma_filters
 
@@ -368,31 +369,6 @@ class SearchDispatcher:
 
         return all_results, chunks_search_time
 
-    def _extract_search_distance(self, result: Dict[str, Any], idx: int, item: Dict[str, Any],
-                                 table_name: str = 'unknown') -> float:
-        """Extract distance from search results."""
-        distance = None
-        model_id = item.get('metadata', {}).get('model_id', 'unknown')
-
-        if 'distances' in result and isinstance(result['distances'], list):
-            if len(result['distances']) > idx:
-                if isinstance(result['distances'][idx], list) and len(result['distances'][idx]) > 0:
-                    distance = result['distances'][idx][0]  # ChromaDB sometimes returns nested lists
-                else:
-                    distance = result['distances'][idx]
-        else:
-            # Or try to get it directly from the item
-            distance = item.get('distance')
-
-        # Use a default if all else fails
-        if distance is None:
-            distance = 2.0
-
-        # Log the distance for debugging
-        self.logger.debug(f"Distance for model {model_id} in {table_name}: {distance}")
-
-        return distance
-
     async def _fetch_complete_model_metadata(
             self, query: str, all_results: Dict[str, Any], table_weights: Dict[str, float], user_id: Optional[str]
     ) -> Dict[str, Any]:
@@ -419,16 +395,15 @@ class SearchDispatcher:
                                     include=["metadatas", "documents", "distances"]  # Include distances
                                 )
 
-                                # Log the raw results structure for debugging
-                                self.logger.debug(f"Search result structure for {table_name}: {result.keys()}")
-
                                 # Process each result item
                                 for idx, item in enumerate(result.get('results', [])):
                                     metadata = item.get('metadata', {})
                                     model_id = metadata.get('model_id', 'unknown')
 
                                     # Get the distance from the results
-                                    distance = self._extract_search_distance(result, idx, item, table_name)
+                                    distance = self.distance_normalizer.extract_search_distance(
+                                        result, idx, item, table_name
+                                    )
 
                                     # Find the corresponding model in our results
                                     if model_id in all_results:
@@ -483,9 +458,6 @@ class SearchDispatcher:
                         limit=search_limit,
                         include=["metadatas", "distances"]  # Include distances
                     )
-
-                    # Log the raw search results to debug distance issues
-                    self.logger.debug(f"Description search results for model {model_id}: {model_chunks_search}")
 
                     # Process chunk results to collect descriptions and distances
                     chunk_distances = []
@@ -555,15 +527,6 @@ class SearchDispatcher:
                                                        user_id: Optional[str] = None) -> Dict[str, Dict[str, float]]:
         """
         Get min and max distances for each collection based on the actual user query.
-        This gets a much larger sample size than the actual search will use.
-
-        Args:
-            query: The user's query
-            collections: List of collection names to get stats for
-            user_id: Optional user ID for access control
-
-        Returns:
-            Dictionary with collection names as keys and min/max distance stats as values
         """
         self.logger.info(f"Getting min/max distances for all collections using query: {query}")
 
@@ -590,7 +553,9 @@ class SearchDispatcher:
                 # Extract all distances
                 distances = []
                 for idx, item in enumerate(result.get('results', [])):
-                    distance = self._extract_search_distance(result, idx, item, collection_name)
+                    distance = self.distance_normalizer.extract_search_distance(
+                        result, idx, item, collection_name
+                    )
                     if distance is not None:
                         distances.append(distance)
 
@@ -616,15 +581,6 @@ class SearchDispatcher:
                         'percentile_90': percentile_90,
                         'count': len(distances)
                     }
-
-                    """
-                    self.logger.info(
-                        f"Collection {collection_name} stats: "
-                        f"min={min_distance}, max={max_distance}, "
-                        f"10th={percentile_10}, median={median}, 90th={percentile_90}, "
-                        f"count={len(distances)}"
-                    )
-                    """
                 else:
                     # Default values if no distances found
                     collection_stats[collection_name] = {
@@ -650,39 +606,6 @@ class SearchDispatcher:
                 }
 
         return collection_stats
-
-    def _normalize_distance(self, distance: float, stats: Dict[str, float]) -> float:
-        """
-        Normalize a distance value using an inverted exponential kernel.
-
-        After linearly scaling into [0,1], we do:
-            normalized = 1 - exp(-α * d_norm)
-        so:
-          - d == min → d_norm=0 → normalized=0
-          - d == max → d_norm=1 → normalized=1-exp(-α)≈1
-          - small differences around zero get pulled even closer to zero
-        """
-        min_val = stats.get('min', 0.0)
-        max_val = stats.get('max', 2.0)
-
-        # avoid division by zero
-        if max_val == min_val:
-            return 0.0 if distance == min_val else 1.0
-
-        # linear [0,1]
-        d0 = (distance - min_val) / (max_val - min_val)
-        d0 = max(0.0, min(1.0, d0))
-
-        # invertible exponential kernel
-        α = 5.0  # higher α → sharper falloff
-        normalized = 1.0 - math.exp(-α * d0)
-
-        self.logger.debug(
-            f"Exp‑kernel normalize: raw={distance:.4f}, d0={d0:.4f}, "
-            f"α={α}, result={normalized:.4f} (range {min_val}-{max_val})"
-        )
-
-        return normalized
 
     def _calculate_model_distances(self, all_results: Dict[str, Any], table_weights: Dict[str, float],
                                    collection_stats: Dict[str, Dict[str, float]]) -> Dict[str, Any]:
@@ -714,7 +637,7 @@ class SearchDispatcher:
                     })
 
                     # Normalize the distance using the robust method
-                    normalized_distance = self._normalize_distance(raw_distance, table_stats)
+                    normalized_distance = self.distance_normalizer.normalize_distance(raw_distance, table_stats)
                 else:
                     # Missing table data should be treated as worst possible match
                     normalized_distance = 1.0
@@ -743,7 +666,7 @@ class SearchDispatcher:
                 })
 
                 raw_chunk_distance = model_data['chunk_initial_distance']
-                normalized_chunk_distance = self._normalize_distance(raw_chunk_distance, chunk_stats)
+                normalized_chunk_distance = self.distance_normalizer.normalize_distance(raw_chunk_distance, chunk_stats)
 
                 model_data['chunk_normalized_distance'] = normalized_chunk_distance
 
@@ -780,8 +703,6 @@ class SearchDispatcher:
         # Sort by distance (lower is better)
         output_list.sort(key=lambda x: x.get('distance', 2.0))
 
-        # print(f"All results: {output_list}")
-
         # Limit to requested number of results
         return output_list[:requested_limit]
 
@@ -801,29 +722,6 @@ class SearchDispatcher:
 
         return items
 
-    def _calculate_text_search_performance(
-            self, start_time: float, metadata_search_time: float, chunks_search_time: float,
-            parameters: Dict[str, Any]
-    ) -> Dict[str, float]:
-        """Calculate performance metrics."""
-        total_search_time = metadata_search_time + chunks_search_time
-        total_time = (time.time() - start_time) * 1000
-
-        # Log performance metrics if analytics available
-        if self.analytics and 'query_id' in parameters:
-            self.analytics.log_performance_metrics(
-                query_id=parameters['query_id'],
-                search_time_ms=int(total_search_time),
-                total_time_ms=int(total_time)
-            )
-
-        return {
-            'metadata_search_time_ms': metadata_search_time,
-            'chunks_search_time_ms': chunks_search_time,
-            'total_search_time_ms': total_search_time,
-            'total_time_ms': total_time
-        }
-
     async def handle_metadata_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle a metadata-specific search query across multiple metadata tables.
@@ -841,7 +739,7 @@ class SearchDispatcher:
             user_id, requested_limit, chroma_filters = self._extract_text_search_parameters(parameters)
 
             # Define metadata tables to search with their weights
-            table_weights = self._get_metadata_table_weights()
+            table_weights = self.metadata_table_manager.get_metadata_table_weights()
 
             # STEP 0: Get global min/max distances for all collections
             collections = list(table_weights.keys()) + ["model_scripts_chunks"]
@@ -959,7 +857,7 @@ class SearchDispatcher:
 
         # Use metadata search flow to fetch complete metadata for these model_ids
         user_id, _, _ = self._extract_text_search_parameters(parameters)
-        table_weights = self._get_metadata_table_weights()
+        table_weights = self.metadata_table_manager.get_metadata_table_weights()
         chroma_filters = {"model_id": {"$in": model_ids}}
 
         # STEP 1 & 2: Search metadata tables and fetch complete metadata
@@ -1032,7 +930,7 @@ class SearchDispatcher:
 
         # Run existing metadata_search function twice
         results = [await self.handle_metadata_search(query, {
-            **parameters, "limit": 1 # Limit the size to control input size to LLM
+            **parameters, "limit": 1  # Limit the size to control input size to LLM
         }) for query in queries]
 
         # Tag each result with its cohort
@@ -1087,7 +985,7 @@ class SearchDispatcher:
                 accessible_models = []
                 for model_id in model_ids:
                     # Check if user has access to this model
-                    model_info = await self._fetch_model_metadata(model_id)
+                    model_info = await self.model_data_fetcher.fetch_model_metadata(model_id)
                     if model_info and self.access_control_manager.check_access(
                             {'metadata': model_info}, user_id, "view"
                     ):
@@ -1140,99 +1038,6 @@ class SearchDispatcher:
             self.logger.error(f"Error in notebook request: {e}", exc_info=True)
             raise
 
-    # Helper methods for the search functions
-    async def _search_metadata_table(self, table_name, query, filters, limit, weight):
-        """Search a specific metadata table and return weighted results."""
-        try:
-            search_params = {
-                'query': query,
-                'where': filters,
-                'limit': limit,
-                'include': ["metadatas", "documents", "distances"]
-            }
-
-            results = await self.chroma_manager.search(
-                collection_name=table_name,
-                **search_params
-            )
-
-            # Add the table name and weight to the results
-            return {
-                'table_name': table_name,
-                'weight': weight,
-                'results': results.get('results', [])
-            }
-        except Exception as e:
-            self.logger.error(f"Error searching metadata table {table_name}: {e}")
-            return {
-                'table_name': table_name,
-                'weight': weight,
-                'results': []
-            }
-
-    async def _get_metadata_table(self, table_name, filters, limit, weight):
-        """Get data from a specific metadata table based on filters."""
-        try:
-            get_params = {
-                'where': filters,
-                'limit': limit,
-                'include': ["metadatas"]
-            }
-
-            results = await self.chroma_manager.get(
-                collection_name=table_name,
-                **get_params
-            )
-
-            # Add the table name and weight to the results
-            return {
-                'table_name': table_name,
-                'weight': weight,
-                'results': results.get('results', [])
-            }
-        except Exception as e:
-            self.logger.error(f"Error getting metadata from table {table_name}: {e}")
-            return {
-                'table_name': table_name,
-                'weight': weight,
-                'results': []
-            }
-
-    async def _fetch_model_metadata_by_id(self, table_name, model_id, user_id=None):
-        """Fetch metadata for a specific model from a specific table."""
-        try:
-            # Prepare filters to get model metadata
-            filters = {'model_id': {'$eq': model_id}}
-
-            # Apply access control filter if applicable
-            if self.access_control_manager and user_id:
-                access_filter = self.access_control_manager.create_access_filter(user_id)
-                filters = {
-                    "$and": [
-                        filters,
-                        access_filter
-                    ]
-                }
-
-            # Fetch model metadata from specific table
-            result = await self.chroma_manager.get(
-                collection_name=table_name,
-                where=filters,
-                include=["metadatas"]
-            )
-
-            # Return the first result if available
-            if result and result.get('results'):
-                metadata = result['results'][0].get('metadata', {})
-                # Create a single top-level field for this table's data to avoid conflicts
-                table_key = table_name.replace('model_', '')  # e.g., "model_frameworks" becomes "frameworks"
-                return {'metadata': {table_key: metadata}}
-
-        except Exception as e:
-            self.logger.error(f"Error fetching model metadata for {model_id} from {table_name}: {e}")
-
-        return None
-
     async def handle_fallback_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
         Handle queries with unknown intent with a best-effort approach.
@@ -1284,484 +1089,3 @@ class SearchDispatcher:
                 'items': [],
                 'total_found': 0
             }
-
-    async def _fetch_model_data(self, model_id: str, dimensions: List[str], user_id: Optional[str] = None) -> Dict[
-        str, Any]:
-        """
-        Fetch data for a specific model with access control.
-
-        Args:
-            model_id: The model identifier
-            dimensions: List of data dimensions to fetch
-            user_id: Optional user ID for access control
-
-        Returns:
-            Dictionary containing model data
-        """
-        # Prepare filters to get model data
-        filters = {'model_id': {'$eq': model_id}}
-
-        # Apply access control filter if applicable
-        if self.access_control_manager and user_id:
-            access_filter = self.access_control_manager.create_access_filter(user_id)
-
-            # Combine filters with access control
-            filters = {
-                "$and": [
-                    filters,
-                    access_filter
-                ]
-            }
-
-        # Fetch model data from Chroma
-        model_data = await self.chroma_manager.get(
-            collection_name="model_scripts",
-            where=filters,
-            include=["metadata"]
-        )
-
-        # Process the results
-        if not model_data.get('results'):
-            return {'model_id': model_id, 'found': False}
-
-        result = {'model_id': model_id, 'found': True}
-
-        # Extract metadata from the first document (should be the main model document)
-        metadata = model_data['results'][0].get('metadata', {})
-
-        # Extract dimensions
-        for dimension in dimensions:
-            if dimension == 'architecture' and 'architecture_type' in metadata:
-                result['architecture'] = {
-                    'type': metadata.get('architecture_type', {}).get('value', 'unknown'),
-                    'hidden_size': metadata.get('model_dimensions', {}).get('hidden_size', {}).get('value'),
-                    'num_layers': metadata.get('model_dimensions', {}).get('num_layers', {}).get('value'),
-                    'num_attention_heads': metadata.get('model_dimensions', {}).get('num_attention_heads', {}).get(
-                        'value'),
-                    'total_parameters': metadata.get('model_dimensions', {}).get('total_parameters', {}).get('value')
-                }
-
-            elif dimension == 'performance' and 'performance' in metadata:
-                result['performance'] = {
-                    'accuracy': metadata.get('performance', {}).get('accuracy', {}).get('value'),
-                    'loss': metadata.get('performance', {}).get('loss', {}).get('value'),
-                    'perplexity': metadata.get('performance', {}).get('perplexity', {}).get('value'),
-                    'eval_dataset': metadata.get('performance', {}).get('eval_dataset', {}).get('value')
-                }
-
-            elif dimension == 'training' and 'training_config' in metadata:
-                result['training'] = {
-                    'batch_size': metadata.get('training_config', {}).get('batch_size', {}).get('value'),
-                    'learning_rate': metadata.get('training_config', {}).get('learning_rate', {}).get('value'),
-                    'optimizer': metadata.get('training_config', {}).get('optimizer', {}).get('value'),
-                    'epochs': metadata.get('training_config', {}).get('epochs', {}).get('value'),
-                    'training_time_hours': metadata.get('training_config', {}).get('training_time_hours', {}).get(
-                        'value'),
-                    'hardware_used': metadata.get('training_config', {}).get('hardware_used', {}).get('value')
-                }
-
-            elif dimension == 'dataset' and 'dataset' in metadata:
-                result['dataset'] = {
-                    'name': metadata.get('dataset', {}).get('name', {}).get('value'),
-                    'version': metadata.get('dataset', {}).get('version', {}).get('value'),
-                    'num_samples': metadata.get('dataset', {}).get('num_samples', {}).get('value')
-                }
-
-            elif dimension == 'framework' and 'framework' in metadata:
-                result['framework'] = {
-                    'name': metadata.get('framework', {}).get('name'),
-                    'version': metadata.get('framework', {}).get('version')
-                }
-
-        # Add basic metadata
-        result['basic'] = {
-            'version': metadata.get('version'),
-            'creation_date': metadata.get('creation_date'),
-            'last_modified_date': metadata.get('last_modified_date'),
-            'predecessor_models': metadata.get('predecessor_models', [])
-        }
-
-        return result
-
-    async def _fetch_model_metadata(self, model_id: str, user_id: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Fetch only the metadata for a specific model with access control.
-
-        Args:
-            model_id: The model identifier
-            user_id: Optional user ID for access control
-
-        Returns:
-            Dictionary containing model metadata or None if not found or no access
-        """
-        # Prepare filters to get model metadata
-        filters = {'model_id': {'$eq': model_id}}
-
-        # Apply access control filter if applicable
-        if self.access_control_manager and user_id:
-            access_filter = self.access_control_manager.create_access_filter(user_id)
-
-            # Combine filters with access control
-            filters = {
-                "$and": [
-                    filters,
-                    access_filter
-                ]
-            }
-
-        # Fetch model metadata from Chroma
-        try:
-            metadata_results = await self.chroma_manager.get(
-                collection_name="model_scripts_metadata",
-                where=filters,
-                include=["metadatas"]
-            )
-
-            # Return the first result's metadata if available
-            if metadata_results and metadata_results.get('results'):
-                return metadata_results['results'][0].get('metadata', {})
-
-        except Exception as e:
-            self.logger.error(f"Error fetching model metadata for {model_id}: {e}")
-
-        return None
-
-    def _generate_performance_comparisons(self, model_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Generate performance comparisons between models.
-
-        Args:
-            model_data_list: List of model data dictionaries
-
-        Returns:
-            Dictionary containing performance comparisons
-        """
-        comparisons = {
-            'accuracy': {},
-            'loss': {},
-            'perplexity': {},
-            'relative_improvement': {}
-        }
-
-        # Extract models with performance data
-        models_with_perf = []
-        for model_data in model_data_list:
-            if model_data.get('found', False) and 'performance' in model_data:
-                models_with_perf.append(model_data)
-
-        if len(models_with_perf) < 2:
-            return {'error': 'Not enough models with performance data for comparison'}
-
-        # Compare accuracy
-        accuracy_models = [(m['model_id'], m['performance']['accuracy'])
-                           for m in models_with_perf
-                           if m['performance'].get('accuracy') is not None]
-
-        if accuracy_models:
-            # Sort by accuracy (descending)
-            accuracy_models.sort(key=lambda x: x[1], reverse=True)
-            comparisons['accuracy'] = {
-                'best': {'model_id': accuracy_models[0][0], 'value': accuracy_models[0][1]},
-                'ranking': [{'model_id': m[0], 'value': m[1]} for m in accuracy_models]
-            }
-
-        # Compare loss
-        loss_models = [(m['model_id'], m['performance']['loss'])
-                       for m in models_with_perf
-                       if m['performance'].get('loss') is not None]
-
-        if loss_models:
-            # Sort by loss (ascending, lower is better)
-            loss_models.sort(key=lambda x: x[1])
-            comparisons['loss'] = {
-                'best': {'model_id': loss_models[0][0], 'value': loss_models[0][1]},
-                'ranking': [{'model_id': m[0], 'value': m[1]} for m in loss_models]
-            }
-
-        # Compare perplexity
-        perplexity_models = [(m['model_id'], m['performance']['perplexity'])
-                             for m in models_with_perf
-                             if m['performance'].get('perplexity') is not None]
-
-        if perplexity_models:
-            # Sort by perplexity (ascending, lower is better)
-            perplexity_models.sort(key=lambda x: x[1])
-            comparisons['perplexity'] = {
-                'best': {'model_id': perplexity_models[0][0], 'value': perplexity_models[0][1]},
-                'ranking': [{'model_id': m[0], 'value': m[1]} for m in perplexity_models]
-            }
-
-        # Calculate relative improvements
-        if len(models_with_perf) >= 2:
-            relative_improvements = {}
-
-            # Get pairs of models to compare
-            for i, model1 in enumerate(models_with_perf):
-                for j, model2 in enumerate(models_with_perf):
-                    if i == j:
-                        continue
-
-                    model1_id = model1['model_id']
-                    model2_id = model2['model_id']
-                    pair_key = f"{model1_id}_vs_{model2_id}"
-                    improvements = {}
-
-                    # Compare accuracy
-                    acc1 = model1['performance'].get('accuracy')
-                    acc2 = model2['performance'].get('accuracy')
-                    if acc1 is not None and acc2 is not None and acc2 > 0:
-                        improvements['accuracy'] = {
-                            'absolute': acc1 - acc2,
-                            'percentage': (acc1 - acc2) / acc2 * 100.0,
-                            'better': acc1 > acc2
-                        }
-
-                    # Compare loss
-                    loss1 = model1['performance'].get('loss')
-                    loss2 = model2['performance'].get('loss')
-                    if loss1 is not None and loss2 is not None and loss2 > 0:
-                        improvements['loss'] = {
-                            'absolute': loss1 - loss2,
-                            'percentage': (loss1 - loss2) / loss2 * 100.0,
-                            'better': loss1 < loss2
-                        }
-
-                    # Compare perplexity
-                    ppl1 = model1['performance'].get('perplexity')
-                    ppl2 = model2['performance'].get('perplexity')
-                    if ppl1 is not None and ppl2 is not None and ppl2 > 0:
-                        improvements['perplexity'] = {
-                            'absolute': ppl1 - ppl2,
-                            'percentage': (ppl1 - ppl2) / ppl2 * 100.0,
-                            'better': ppl1 < ppl2
-                        }
-
-                    relative_improvements[pair_key] = improvements
-
-            comparisons['relative_improvement'] = relative_improvements
-
-        return comparisons
-
-    def _generate_architecture_comparisons(self, model_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Generate architecture comparisons between models.
-
-        Args:
-            model_data_list: List of model data dictionaries
-
-        Returns:
-            Dictionary containing architecture comparisons
-        """
-        comparisons = {
-            'architecture_types': {},
-            'model_size': {},
-            'complexity': {}
-        }
-
-        # Extract models with architecture data
-        models_with_arch = []
-        for model_data in model_data_list:
-            if model_data.get('found', False) and 'architecture' in model_data:
-                models_with_arch.append(model_data)
-
-        if len(models_with_arch) < 2:
-            return {'error': 'Not enough models with architecture data for comparison'}
-
-        # Compare architecture types
-        arch_types = {}
-        for model in models_with_arch:
-            arch_type = model['architecture'].get('type', 'unknown')
-            if arch_type not in arch_types:
-                arch_types[arch_type] = []
-            arch_types[arch_type].append(model['model_id'])
-
-        comparisons['architecture_types'] = arch_types
-
-        # Compare model sizes (parameters)
-        param_models = [(m['model_id'], m['architecture'].get('total_parameters', 0))
-                        for m in models_with_arch]
-
-        if param_models:
-            # Sort by parameter count (descending)
-            param_models.sort(key=lambda x: x[1], reverse=True)
-            comparisons['model_size'] = {
-                'largest': {'model_id': param_models[0][0], 'parameters': param_models[0][1]},
-                'smallest': {'model_id': param_models[-1][0], 'parameters': param_models[-1][1]},
-                'ranking': [{'model_id': m[0], 'parameters': m[1]} for m in param_models]
-            }
-
-            # Add relative size comparisons
-            if len(param_models) >= 2:
-                size_ratios = {}
-                for i, (id1, params1) in enumerate(param_models):
-                    for j, (id2, params2) in enumerate(param_models):
-                        if i == j or params2 == 0:
-                            continue
-                        pair_key = f"{id1}_vs_{id2}"
-                        size_ratios[pair_key] = params1 / params2 if params2 > 0 else float('inf')
-
-                comparisons['model_size']['relative_sizes'] = size_ratios
-
-        # Compare model complexity (layers, heads)
-        complexity_metrics = {}
-        for model in models_with_arch:
-            model_id = model['model_id']
-            arch = model['architecture']
-            metrics = {
-                'layers': arch.get('num_layers', 0),
-                'attention_heads': arch.get('num_attention_heads', 0),
-                'hidden_size': arch.get('hidden_size', 0)
-            }
-            complexity_metrics[model_id] = metrics
-
-        comparisons['complexity'] = {
-            'metrics': complexity_metrics,
-            'comparisons': {}
-        }
-
-        # Compare layers
-        if all('layers' in metrics and metrics['layers'] > 0 for metrics in complexity_metrics.values()):
-            layer_models = [(model_id, metrics['layers'])
-                            for model_id, metrics in complexity_metrics.items()]
-            layer_models.sort(key=lambda x: x[1], reverse=True)
-
-            comparisons['complexity']['comparisons']['layers'] = {
-                'most': {'model_id': layer_models[0][0], 'value': layer_models[0][1]},
-                'least': {'model_id': layer_models[-1][0], 'value': layer_models[-1][1]},
-                'ranking': [{'model_id': m[0], 'value': m[1]} for m in layer_models]
-            }
-
-        # Compare attention heads
-        if all('attention_heads' in metrics and metrics['attention_heads'] > 0
-               for metrics in complexity_metrics.values()):
-            head_models = [(model_id, metrics['attention_heads'])
-                           for model_id, metrics in complexity_metrics.items()]
-            head_models.sort(key=lambda x: x[1], reverse=True)
-
-            comparisons['complexity']['comparisons']['attention_heads'] = {
-                'most': {'model_id': head_models[0][0], 'value': head_models[0][1]},
-                'least': {'model_id': head_models[-1][0], 'value': head_models[-1][1]},
-                'ranking': [{'model_id': m[0], 'value': m[1]} for m in head_models]
-            }
-
-        # Compare hidden size
-        if all('hidden_size' in metrics and metrics['hidden_size'] > 0
-               for metrics in complexity_metrics.values()):
-            size_models = [(model_id, metrics['hidden_size'])
-                           for model_id, metrics in complexity_metrics.items()]
-            size_models.sort(key=lambda x: x[1], reverse=True)
-
-            comparisons['complexity']['comparisons']['hidden_size'] = {
-                'largest': {'model_id': size_models[0][0], 'value': size_models[0][1]},
-                'smallest': {'model_id': size_models[-1][0], 'value': size_models[-1][1]},
-                'ranking': [{'model_id': m[0], 'value': m[1]} for m in size_models]
-            }
-
-        # Calculate efficiency metrics (if possible)
-        if all('total_parameters' in model['architecture'] and model['architecture']['total_parameters'] > 0
-               for model in models_with_arch):
-            efficiency_metrics = {}
-
-            for model in models_with_arch:
-                model_id = model['model_id']
-                params = model['architecture'].get('total_parameters', 0)
-
-                # Check if performance data is available
-                if 'performance' in model and model['performance'].get('accuracy') is not None:
-                    accuracy = model['performance'].get('accuracy', 0)
-
-                    # Parameter efficiency (accuracy per million parameters)
-                    if params > 0:
-                        efficiency_metrics[model_id] = {
-                            'accuracy_per_million_params': accuracy / (params / 1_000_000)
-                        }
-
-            if efficiency_metrics:
-                comparisons['efficiency'] = efficiency_metrics
-
-        return comparisons
-
-    def _translate_filters_to_chroma(self, filters: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Translate query filters to Chroma's filter format.
-
-        Args:
-            filters: Filters in the query format
-
-        Returns:
-            Filters in Chroma's format
-        """
-        # Add defensive checks at the beginning
-        if filters is None:
-            return {}
-
-        if isinstance(filters, list):
-            self.logger.warning("Filters received as list instead of dictionary. Converting to empty dict.")
-            return {}
-
-        # Handle case where we already have a properly structured filter (with $and, $or, etc.)
-        if len(filters) == 1 and list(filters.keys())[0].startswith('$'):
-            return filters
-
-        # Handle multiple top-level filter conditions
-        # ChromaDB expects them to be wrapped with an operator like $and
-        if len(filters) > 1:
-            conditions = []
-            for key, value in filters.items():
-                # Skip nested operators for separate handling
-                if isinstance(value, dict) and any(op.startswith('$') for op in value.keys()):
-                    conditions.append({key: value})
-                # Handle list values
-                elif isinstance(value, list):
-                    conditions.append({key: {"$in": value}})
-                # Handle simple values
-                else:
-                    conditions.append({key: {"$eq": value}})
-
-            return {"$and": conditions}
-
-        # Handle single filter condition
-        if len(filters) == 1:
-            key, value = next(iter(filters.items()))
-
-            # Handle nested operator filters
-            if isinstance(value, dict) and any(op.startswith('$') for op in value.keys()):
-                return filters
-
-            # Handle list values
-            if isinstance(value, list):
-                return {key: {"$in": value}}
-
-            # Handle simple values
-            return {key: {"$eq": value}}
-
-        return {}
-
-    def _sanitize_parameters(self, parameters: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Sanitize parameters for inclusion in response metadata.
-        Remove sensitive or internal fields.
-
-        Args:
-            parameters: Original parameters dictionary
-
-        Returns:
-            Sanitized parameters dictionary
-        """
-        if not parameters:
-            return {}
-
-        # Create a copy to avoid modifying the original
-        sanitized = parameters.copy()
-
-        # Remove sensitive fields
-        sensitive_fields = ['user_id', 'access_token', 'auth_context', 'raw_query', 'query_id']
-        for field in sensitive_fields:
-            if field in sanitized:
-                del sanitized[field]
-
-        # Remove image data (could be large)
-        if 'image_data' in sanitized:
-            sanitized['image_data'] = "[binary data removed]"
-
-        return sanitized
