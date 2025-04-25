@@ -2,19 +2,10 @@ import asyncio
 import logging
 import math
 import time
-from enum import Enum
 from typing import Dict, List, Any, Optional, Union, Tuple
 
+from src.query_engine.query_intent import QueryIntent
 from src.query_engine.image_search_manager import ImageSearchManager
-
-
-class QueryIntent(Enum):
-    RETRIEVAL = "retrieval"
-    COMPARISON = "comparison"
-    NOTEBOOK = "notebook"
-    IMAGE_SEARCH = "image_search"
-    METADATA = "metadata"
-    UNKNOWN = "unknown"
 
 
 class SearchDispatcher:
@@ -56,7 +47,7 @@ class SearchDispatcher:
             QueryIntent.RETRIEVAL: self.handle_metadata_search,
             QueryIntent.COMPARISON: self.handle_comparison,
             QueryIntent.NOTEBOOK: self.handle_notebook_request,
-            QueryIntent.IMAGE_SEARCH: self.handle_image_search,  # Now using image_search_manager
+            QueryIntent.IMAGE_SEARCH: self.handle_image_search,
             QueryIntent.METADATA: self.handle_metadata_search,
             QueryIntent.UNKNOWN: self.handle_fallback_search
         }
@@ -1008,6 +999,38 @@ class SearchDispatcher:
             'total_found': total_found,
             'total_models': total_models,
             'performance': performance_metrics
+        }
+
+    async def handle_comparison_cohort(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Compare two free-text cohorts by running multiple independent retrievals
+        (metadata_search) and merging their results.
+        """
+        cohorts = parameters.get("cohorts")
+        if not isinstance(cohorts, list):
+            raise ValueError("More than one cohorts are required for comparison_cohort")
+
+        # Build sub-queries by appending each cohort name
+        queries = [f"{query} {cohort}" for cohort in cohorts]
+
+        # Run your existing retrieval (e.g. metadata_search) twice
+        results = [await self.handle_metadata_search(query, {
+            **parameters, "limit": 2 # Limit the size to control input size to LLM
+        }) for query in queries]
+
+        # Tag each result with its cohort
+        for i, res in enumerate(results):
+            for item in res.get("items", []):
+                item["cohort"] = cohorts[i]
+
+        # Merge and sort by distance (lower is more similar)
+        combined = [item for res in results for item in res["items"]]
+        combined.sort(key=lambda x: x.get("distance", float("inf")))
+
+        return {
+            "success": True,
+            "type": "comparison_cohort",
+            "items": combined
         }
 
     async def handle_notebook_request(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:

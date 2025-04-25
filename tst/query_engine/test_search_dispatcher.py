@@ -2,7 +2,8 @@ import json
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.query_engine.search_dispatcher import SearchDispatcher, QueryIntent
+from src.query_engine.query_intent import QueryIntent
+from src.query_engine.search_dispatcher import SearchDispatcher
 
 
 # --- Improved Access Control Manager --- #

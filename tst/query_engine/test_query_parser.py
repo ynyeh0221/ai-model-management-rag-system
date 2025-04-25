@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import patch, MagicMock
 
+from src.query_engine.query_intent import QueryIntent
+
 
 # Create a mock for the stopwords module
 class MockStopwords:
@@ -15,7 +17,7 @@ with patch('nltk.corpus.stopwords', MockStopwords()), \
         patch('nltk.download'), \
         patch('nltk.data.find'):
     # Now import the module to be tested
-    from src.query_engine.query_parser import QueryParser, QueryIntent
+    from src.query_engine.query_parser import QueryParser
 
 
 class TestQueryParser(unittest.TestCase):
@@ -38,7 +40,7 @@ class TestQueryParser(unittest.TestCase):
 
         # Create an instance of QueryParser with mocked dependencies
         with patch('spacy.load', return_value=mock_nlp):
-            self.parser = QueryParser(nlp_model="en_core_web_sm", use_langchain=False)
+            self.parser = QueryParser(nlp_model="en_core_web_sm")
 
         # Override the nlp attribute to use our mock
         self.parser.nlp = mock_nlp
