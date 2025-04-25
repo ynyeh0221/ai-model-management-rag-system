@@ -275,7 +275,7 @@ class RAGSystem:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0.5,
-                    max_tokens=4100
+                    max_tokens=4096
                 )
 
                 # Process result
@@ -387,6 +387,7 @@ class RAGSystem:
                                ", last modified year: " + item.get('last_modified_year', '') +
                                ", last modified month: " + item.get('last_modified_month', ''))
 
+        """
         if reranker and items_to_rerank:
             self._log(f"Sending {len(items_to_rerank)} items to reranker")
             return reranker.rerank(
@@ -397,6 +398,8 @@ class RAGSystem:
             )
         else:
             return items_to_rerank
+        """
+        return items_to_rerank[:max_to_return]
 
     def _remove_field(self, dict_list, field_to_remove):
         """Remove a field from all dictionaries in a list"""
@@ -529,7 +532,7 @@ class RAGSystem:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             temperature=0.5,
-            max_tokens=4100
+            max_tokens=4096
         )
 
         # Safely extract constructed prompt text
