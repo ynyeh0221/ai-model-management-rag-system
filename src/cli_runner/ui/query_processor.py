@@ -260,7 +260,7 @@ class QueryProcessor:
                          f"You are provided user query and its searched results.\n"
 
         # 5. Create user prompt
-        user_prompt = f"\nUser query: {query_text}\n"
+        user_prompt = f"\nUser query:\n{query_text}\n"
         user_prompt += f"Search results:\n{results_text}"
 
         # 6. Query the answer LLM with the constructed prompt

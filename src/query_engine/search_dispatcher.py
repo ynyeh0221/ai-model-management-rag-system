@@ -4,8 +4,8 @@ import math
 import time
 from typing import Dict, List, Any, Optional, Union, Tuple
 
-from src.query_engine.query_intent import QueryIntent
 from src.query_engine.image_search_manager import ImageSearchManager
+from src.query_engine.query_intent import QueryIntent
 
 
 class SearchDispatcher:
@@ -45,7 +45,10 @@ class SearchDispatcher:
         # Define handlers mapping for dispatching
         self.handlers = {
             QueryIntent.RETRIEVAL: self.handle_metadata_search,
-            QueryIntent.COMPARISON: self.handle_comparison,
+            QueryIntent.COMPARISON: {
+                "model_id": self.handle_comparison,
+                "cohort": self.handle_comparison_cohort
+            },
             QueryIntent.NOTEBOOK: self.handle_notebook_request,
             QueryIntent.IMAGE_SEARCH: self.handle_image_search,
             QueryIntent.METADATA: self.handle_metadata_search,
@@ -82,7 +85,13 @@ class SearchDispatcher:
             parameters['user_id'] = user_id
 
         # Get the appropriate handler
-        handler = self.handlers.get(intent, self.handle_fallback_search)
+        if intent is not QueryIntent.COMPARISON:
+            handler = self.handlers.get(intent, self.handle_fallback_search)
+        else:
+            if len(parameters.get("filters", {}).get("model_id") or []) >= 2:
+                handler = self.handlers.get(intent, self.handle_fallback_search).get('model_id')
+            else:
+                handler = self.handlers.get(intent, self.handle_fallback_search).get('cohort')
 
         try:
             # Call the handler
@@ -164,8 +173,6 @@ class SearchDispatcher:
             all_results, chunks_search_time = await self._search_model_chunks_table(
                 query, chroma_filters, requested_limit, all_results, user_id, chunks_search_start
             )
-
-            print(f"Model ids to fetch metadata fields: {len(all_results)}")
 
             # STEP 3: Fetch complete metadata for ALL found models with distances
             all_results = await self._fetch_complete_model_metadata(
@@ -1006,16 +1013,26 @@ class SearchDispatcher:
         Compare two free-text cohorts by running multiple independent retrievals
         (metadata_search) and merging their results.
         """
+        self.logger.debug(f"Handling comparison (metadata search flow): {parameters}")
+        start_time = time.time()
+
         cohorts = parameters.get("cohorts")
         if not isinstance(cohorts, list):
             raise ValueError("More than one cohorts are required for comparison_cohort")
 
-        # Build sub-queries by appending each cohort name
-        queries = [f"{query} {cohort}" for cohort in cohorts]
+        base_query = parameters.get("base_query")
+        if base_query is None:
+            raise ValueError("base_query is required for comparison_cohort")
 
-        # Run your existing retrieval (e.g. metadata_search) twice
+        # Print for debug
+        print(f"base_query: {base_query}")
+
+        # Build sub-queries by appending each cohort name
+        queries = [f"{base_query} find models related to {cohort}" for cohort in cohorts]
+
+        # Run existing metadata_search function twice
         results = [await self.handle_metadata_search(query, {
-            **parameters, "limit": 2 # Limit the size to control input size to LLM
+            **parameters, "limit": 1 # Limit the size to control input size to LLM
         }) for query in queries]
 
         # Tag each result with its cohort
@@ -1027,10 +1044,19 @@ class SearchDispatcher:
         combined = [item for res in results for item in res["items"]]
         combined.sort(key=lambda x: x.get("distance", float("inf")))
 
+        total_found = len(combined)
+        total_time_ms = (time.time() - start_time) * 1000
+
+        performance_metrics = {
+            'total_time_ms': total_time_ms
+        }
+
         return {
             "success": True,
             "type": "comparison_cohort",
-            "items": combined
+            "items": combined,
+            'total_found': total_found,
+            'performance': performance_metrics
         }
 
     async def handle_notebook_request(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
