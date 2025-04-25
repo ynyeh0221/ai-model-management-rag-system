@@ -124,16 +124,22 @@ The system provides several formatted outputs:
 
 ## Sameple Inputs/Outputs
 
-Sample 1: [What diffusion models have been trained on the Oxford Flower dataset?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/sample_input_output_1.md)
+### Model - Deepseek-llm 7b
 
-Sample 2: [Which models use Unet architectures?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/sample_input_output_2.md)
+Sample 1: [What diffusion models have been trained on the Oxford Flower dataset?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-llm/sample_input_output_1.md)
 
-Sample 3: [Can you please compare differences in architecture between my diffusion models on CIFAR-10 and MNIST?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/sample_input_output_3.md)
+Sample 2: [Which models use Unet architectures?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-llm/sample_input_output_2.md)
 
-Sample 4: [What DQN (Deep Q-Learning) agent did I try for the game called 2048?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/sample_input_output_4.md)
+Sample 3: [Can you please compare differences in architecture between my diffusion models on CIFAR-10 and MNIST?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-llm/sample_input_output_3.md)
 
-Sample 5: [please compare architecture and training config of model id Generative-Fashion-MNIST_latent_new_model and model id Gnerative-CIFAR-10-GAN_v1](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/sample_input_output_5.md)
+Sample 4: [What DQN (Deep Q-Learning) agent did I try for the game called 2048?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-llm/sample_input_output_4.md)
 
-Sample 6: [Please find models created in April 2025 and using CelebA.](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/sample_input_output_6.md)
+Sample 5: [please compare architecture and training config of model id Generative-Fashion-MNIST_latent_new_model and model id Gnerative-CIFAR-10-GAN_v1](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-llm/sample_input_output_5.md)
 
-Sample 7: [Show me models trained on the MNIST dataset using autoencoder.](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/sample_input_output_7.md)
+Sample 6: [Please find models created in April 2025 and using CelebA.](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-llm/sample_input_output_6.md)
+
+Sample 7: [Show me models trained on the MNIST dataset using autoencoder.](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-llm/sample_input_output_7.md)
+
+### Model - Deepseek-r1 7b
+
+Sample 6: [Please find models created in April 2025 and using CelebA.]([https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-llm/sample_input_output_6.md](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-r1/sample_input_output_6.md))
