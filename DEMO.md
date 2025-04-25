@@ -21,6 +21,7 @@ The system supports model retrieval based on the following attributes:
 Which models use Unet architectures?
 Please find models created in March 2025 and using CNN.
 List all seq2seq models that use attention mechanisms.
+Show me models trained on the MNIST dataset using autoencoder.
 ```
 
 ### 2. Specific Model Details Retrieval
