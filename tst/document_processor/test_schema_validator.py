@@ -5,7 +5,7 @@ import unittest
 
 from jsonschema import ValidationError
 
-from data_processing.document_processor.schema_validator import SchemaValidator
+from src.data_processing.document_processor.schema_validator import SchemaValidator
 
 
 class TestSchemaValidator(unittest.TestCase):

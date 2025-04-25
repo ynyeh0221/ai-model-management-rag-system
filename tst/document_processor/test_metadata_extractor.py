@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
-from data_processing.document_processor.metadata_extractor import MetadataExtractor
+from src.data_processing.document_processor.metadata_extractor import MetadataExtractor
 
 # Add the path to the module being tested
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
