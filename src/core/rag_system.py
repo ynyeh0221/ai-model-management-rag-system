@@ -275,7 +275,7 @@ class RAGSystem:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0.25,
-                    max_tokens=30000
+                    max_tokens=32000
                 )
 
                 # Process result
@@ -531,8 +531,8 @@ class RAGSystem:
         builder_response = llm_interface.generate_structured_response(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            temperature=0.1,
-            max_tokens=30000
+            temperature=0.05,
+            max_tokens=32000
         )
 
         # Safely extract constructed prompt text

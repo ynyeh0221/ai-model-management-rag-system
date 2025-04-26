@@ -1,8 +1,8 @@
 import argparse
 import os
 
-from src.cli.ingest_images import ImageProcessorRunner
-from src.cli.ingest_model_scripts import ScriptProcessorRunner
+from src.cli.ingest_images_cli import ImageProcessorRunner
+from src.cli.ingest_model_scripts_cli import ScriptProcessorRunner
 from src.cli.query_cli import CLIInterface
 from src.core.colab_generator.code_generator import CodeGenerator
 from src.core.colab_generator.colab_api_client import ColabAPIClient
@@ -95,7 +95,7 @@ def main():
     process_scripts_parser.add_argument("directory", help="Directory containing model scripts")
 
     # Process single model model_script command
-    process_single_script_parser = subparsers.add_parser("process-single-model_script", help="Process a single model model_script")
+    process_single_script_parser = subparsers.add_parser("process-single-script", help="Process a single model model_script")
     process_single_script_parser.add_argument("file_path", help="Absolute path to target model model_script file")
 
     # Process image_processing command
@@ -118,7 +118,7 @@ def main():
         # Use deepseek-llm for speed and token length consideration
         components = initialize_components(llm_model_name="deepseek-llm:7b")
         script_processor_runner.process_model_scripts(components, args.directory)
-    elif args.command == "process-single-model_script":
+    elif args.command == "process-single-script":
         # Use deepseek-llm for speed and token length consideration
         components = initialize_components(llm_model_name="deepseek-llm:7b")
         script_processor_runner.process_single_script(components, args.file_path)

@@ -136,30 +136,49 @@ def split_summary_into_chunks(summary_text, overlap_sentences=2, max_sentences_p
     - max_sentences_per_chunk (int): Maximum sentences per chunk when no headings detected.
 
     Returns:
-    - List[str]: A list of text chunks.
+    - List[Dict]: A list of dictionaries with "description" and "offset" keys.
     """
     # Import and download NLTK resources
     import nltk
     try:
-        nltk.data.find('tokenizers/punkt_tab')
+        nltk.data.find('tokenizers/punkt')
     except LookupError:
-        nltk.download('punkt_tab')
+        nltk.download('punkt')
 
     sentences = nltk.sent_tokenize(summary_text)
 
     chunks = []
     total = len(sentences)
+    current_offset = 0
+
     for start in range(0, total, max_sentences_per_chunk):
-        chunk_sentences = sentences[start:start + max_sentences_per_chunk]
+        # Calculate starting position for this chunk
+        chunk_start = start
         if start > 0:
-            overlap = sentences[start - overlap_sentences:start]
-            chunk_sentences = overlap + chunk_sentences
-        chunks.append(' '.join(chunk_sentences))
+            chunk_start = start - overlap_sentences
 
-    # Filter out chunks with less than or equal to 5 characters
-    filtered_chunks = [chunk for chunk in chunks if len(chunk) > 5]
+        # Get sentences for this chunk
+        chunk_sentences = sentences[chunk_start:start + max_sentences_per_chunk]
+        chunk_text = ' '.join(chunk_sentences)
 
-    return filtered_chunks
+        # Calculate offset in characters from the original text
+        if chunk_start == 0:
+            offset = 0
+        else:
+            # Calculate offset by counting characters up to the start of this chunk
+            offset = len(' '.join(sentences[:chunk_start]))
+            # Add 1 for the space that would follow the last sentence
+            if offset > 0:
+                offset += 1
+
+        # Only add chunks that have meaningful content
+        if len(chunk_text) > 5:
+            chunks.append({
+                "description": chunk_text,
+                "offset": offset
+            })
+
+    return chunks
 
 def split_code_chunks_via_ast(file_content: str, file_path: str, chunk_size: int = 500, overlap: int = 100):
     try:
