@@ -9,6 +9,7 @@ from git import Repo
 
 from src.core.content_analyzer.model_script.ast_summary_generator import ASTSummaryGenerator
 
+
 def filter_ast_summary_for_metadata(summary: str) -> str:
     """
     Given a AST digest summary, return only the lines that
@@ -124,58 +125,78 @@ def get_creation_date(file_path):
     except Exception:
         return None
 
+import nltk
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
-def split_summary_into_chunks(summary_text, overlap_sentences=2, max_sentences_per_chunk=10):
+def split_summary_into_chunks(summary_text, similarity_threshold=0.5, max_sentences_per_chunk=10):
     """
-    Splits a summary into semantic chunks based on headings (markdown # or underlined headings),
-    with an overlap of sentences between chunks. Falls back to fixed-size chunking if no headings detected.
-
-    Parameters:
-    - summary_text (str): The full summary text.
-    - overlap_sentences (int): Number of sentences to overlap between chunks.
-    - max_sentences_per_chunk (int): Maximum sentences per chunk when no headings detected.
+    Splits a summary into semantic chunks by combining similar contiguous sentences.
+    Uses similarity between each new sentence and the last sentence in the current chunk.
 
     Returns:
-    - List[Dict]: A list of dictionaries with "description" and "offset" keys.
+      List[Dict]: each dict has "description" (chunk text) and "offset" (char index).
     """
-    # Import and download NLTK resources
-    import nltk
+    if not summary_text or not summary_text.strip():
+        return []
+
+    # ensure punkt tokenizer
     try:
         nltk.data.find('tokenizers/punkt_tab')
     except LookupError:
         nltk.download('punkt_tab')
 
-    sentences = nltk.sent_tokenize(summary_text)
+    tokenizer = nltk.data.load('tokenizers/punkt/english.pickle')
+    spans = list(tokenizer.span_tokenize(summary_text))
+    sentences = [summary_text[s:e] for s, e in spans]
+
+    # filter blank sentences
+    filtered = [(s, span) for s, span in zip(sentences, spans) if s.strip()]
+    if not filtered:
+        return []
+    sentences, spans = zip(*filtered)
+
+    if len(sentences) == 1:
+        return [{"description": sentences[0], "offset": spans[0][0]}]
+
+    # TF-IDF
+    vectorizer = TfidfVectorizer(min_df=1, stop_words='english')
+    tfidf = vectorizer.fit_transform(sentences)
 
     chunks = []
-    total = len(sentences)
+    current_idxs = [0]
 
-    for start in range(0, total, max_sentences_per_chunk):
-        # Calculate starting position for this chunk
-        chunk_start = start
-        if start > 0:
-            chunk_start = start - overlap_sentences
+    for i in range(1, len(sentences)):
+        # Compare to both first and last sentence in current chunk
+        first_idx = current_idxs[0]
+        last_idx = current_idxs[-1]
+        vec_first = tfidf[first_idx].toarray()
+        vec_last  = tfidf[last_idx].toarray()
+        vec_i     = tfidf[i].toarray()
 
-        # Get sentences for this chunk
-        chunk_sentences = sentences[chunk_start:start + max_sentences_per_chunk]
-        chunk_text = ' '.join(chunk_sentences)
+        # Determine similarity against both endpoints
+        sim_first = cosine_similarity(vec_first, vec_i)[0][0]
+        sim_last  = cosine_similarity(vec_last,  vec_i)[0][0]
+        sim = max(sim_first, sim_last)
 
-        # Calculate offset in characters from the original text
-        if chunk_start == 0:
-            offset = 0
+        # Decide whether to extend current chunk or start a new one
+        if sim >= similarity_threshold and len(current_idxs) < max_sentences_per_chunk:
+            current_idxs.append(i)
         else:
-            # Calculate offset by counting characters up to the start of this chunk
-            offset = len(' '.join(sentences[:chunk_start]))
-            # Add 1 for the space that would follow the last sentence
-            if offset > 0:
-                offset += 1
+            # flush the current chunk
+            start_off = spans[current_idxs[0]][0]
+            text = " ".join(sentences[j] for j in current_idxs)
+            chunks.append({"description": text, "offset": start_off})
+            # begin a new chunk
+            current_idxs = [i]
 
-        # Only add chunks that have meaningful content
-        if len(chunk_text) > 5:
-            chunks.append({
-                "description": chunk_text,
-                "offset": offset
-            })
+    # flush final
+    if current_idxs:
+        start_off = spans[current_idxs[0]][0]
+        text = " ".join(sentences[j] for j in current_idxs)
+        chunks.append({"description": text, "offset": start_off})
+
+    print(f"chunks: {chunks}")
 
     return chunks
 
@@ -438,7 +459,7 @@ class LLMBasedCodeParser:
 
         # STEP 3: Feed merged summary to LLM for structured metadata generation
         final = self.generate_metadata_from_ast_summary(ast_digest, max_retries=max_retries, file_path=file_path)
-        final['chunk_descriptions'] = split_summary_into_chunks(summary_text=summary.get("summary", ""), overlap_sentences=0, max_sentences_per_chunk=1)
+        final['chunk_descriptions'] = split_summary_into_chunks(summary_text=summary.get("summary", ""), max_sentences_per_chunk=1)
         print(f"Chunk descriptions count: {len(final['chunk_descriptions'])}")
 
         # STEP 4: Store AST digest summary
