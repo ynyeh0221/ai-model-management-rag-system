@@ -155,3 +155,5 @@ Sample 5: [please compare architecture and training config of model id Generativ
 Sample 6: [Please find models created in April 2025 and using CelebA.](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-r1/sample_input_output_6.md)
 
 Sample 7: [Show me models trained on the MNIST dataset using autoencoder.](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-r1/sample_input_output_7.md)
+
+Sample 8: [Show me models using autoencoder but not trained on MNIST dataset](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-r1/sample_input_output_8.md)
