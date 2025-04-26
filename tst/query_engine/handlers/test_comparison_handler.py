@@ -177,8 +177,7 @@ class TestComparisonHandler(unittest.IsolatedAsyncioTestCase):
 
         self.handler._process_model_descriptions_text_search.assert_called_once_with(
             query="",
-            all_results=all_results,
-            search_limit=5
+            all_results=all_results
         )
 
     async def test_handle_comparison_model_id_error(self):
@@ -271,12 +270,12 @@ class TestComparisonHandler(unittest.IsolatedAsyncioTestCase):
         # First call should be for cohort1
         first_call_args = self.metadata_search_manager.handle_metadata_search.call_args_list[0][0]
         self.assertEqual(first_call_args[0], "Tell me about find models related to cohort1")
-        self.assertEqual(first_call_args[1]['limit'], 1)
+        self.assertEqual(first_call_args[1]['limit'], 2)
 
         # Second call should be for cohort2
         second_call_args = self.metadata_search_manager.handle_metadata_search.call_args_list[1][0]
         self.assertEqual(second_call_args[0], "Tell me about find models related to cohort2")
-        self.assertEqual(second_call_args[1]['limit'], 1)
+        self.assertEqual(second_call_args[1]['limit'], 2)
 
     async def test_handle_comparison_cohort_missing_cohorts(self):
         """Test handle_comparison_cohort with missing cohorts."""

@@ -258,8 +258,22 @@ class BaseSearchHandler:
         return all_results
 
     async def _process_model_descriptions_text_search(self, query: str, all_results: Dict[str, Any],
-                                                      search_limit: int = 5) -> Dict[str, Any]:
-        """Process model descriptions using chunks."""
+                                                      search_limit: int = 8) -> Dict[str, Any]:
+        """Process model descriptions using chunks.
+
+        Args:
+            query: The search query string
+            all_results: Dictionary containing all model results
+            search_limit: Number of records to search (default: 8)
+
+        Returns:
+            Updated all_results dictionary with description data
+
+        Note: This method searches for search_limit records but only uses top 5
+        most similar records to calculate the distance.
+        """
+        # Define the max number of chunks to use for distance calculation
+        top_chunks_for_distance = 5
         for model_id, model_data in all_results.items():
             try:
                 if not model_id or model_id == 'unknown':
@@ -278,6 +292,7 @@ class BaseSearchHandler:
 
                 try:
                     # Search for the most relevant chunks using the query
+                    # Note: search_limit could be higher than 5 if passed in
                     model_chunks_search = await self.chroma_manager.search(
                         collection_name="model_descriptions",
                         query=query,  # Use the same query to find the most relevant chunks
@@ -287,8 +302,8 @@ class BaseSearchHandler:
                     )
 
                     # Process chunk results to collect descriptions and distances
-                    chunk_distances = []
-                    chunk_descriptions = []
+                    chunk_results = []
+                    all_chunk_descriptions = []
 
                     if model_chunks_search and isinstance(model_chunks_search,
                                                           dict) and 'results' in model_chunks_search:
@@ -301,45 +316,64 @@ class BaseSearchHandler:
                             # Log the distance value
                             self.logger.debug(f"Distance for description chunk of model {model_id}: {distance}")
 
-                            # Only add valid distances
-                            if distance is not None:
-                                chunk_distances.append(distance)
-                            else:
-                                # If no distance is provided, use a moderate default (2.0)
-                                chunk_distances.append(2.0)
-
                             # Get description
                             description = None
                             if 'metadata' in chunk_result and isinstance(chunk_result['metadata'], dict):
                                 description = chunk_result['metadata'].get('description')
 
+                            # Store all valid descriptions regardless of distance
                             if description and isinstance(description, str):
-                                chunk_descriptions.append(description)
+                                all_chunk_descriptions.append(description)
 
-                    # Store collected data
-                    model_data['chunk_descriptions'] = chunk_descriptions
-                    model_data['chunk_description_distances'] = chunk_distances
+                                # For distance calculation, only add entries with valid distances
+                                if distance is not None:
+                                    chunk_results.append({
+                                        'distance': distance,
+                                        'description': description
+                                    })
+                                else:
+                                    # If no distance is provided, use a moderate default (2.0)
+                                    chunk_results.append({
+                                        'distance': 2.0,
+                                        'description': description
+                                    })
 
-                    # Create merged description from chunks
-                    if chunk_descriptions:
-                        model_data['merged_description'] = " ".join(chunk_descriptions)
-                        # Calculate average distance for model_descriptions (as requested)
-                        if chunk_distances:
-                            avg_description_distance = sum(chunk_distances) / len(chunk_distances)
-                            self.logger.debug(
-                                f"Average description distance for model {model_id}: {avg_description_distance}")
-                            model_data['table_initial_distances']['model_descriptions'] = avg_description_distance
-                    else:
-                        model_data['merged_description'] = ""
-                        # Use a moderate default distance if no descriptions found
-                        model_data['table_initial_distances']['model_descriptions'] = 2.0
+                        # Sort by distance (ascending) and take only top chunks for distance calculation
+                        chunk_results.sort(key=lambda x: x['distance'])
+                        top_chunks = chunk_results[
+                                     :top_chunks_for_distance]  # Take only the top most similar chunks for distance
 
-                    # Update metadata with merged description
-                    model_data['metadata']['description'] = model_data.get('merged_description', '')
+                        # Extract distances from top 5 chunks only
+                        chunk_distances = [chunk['distance'] for chunk in top_chunks]
 
-                    # Add to tables list if not already there
-                    if 'model_descriptions' not in model_data['tables']:
-                        model_data['tables'].append('model_descriptions')
+                        # Use all descriptions from the search
+                        chunk_descriptions = all_chunk_descriptions
+
+                        # Store collected data
+                        model_data['chunk_descriptions'] = chunk_descriptions
+                        model_data['chunk_description_distances'] = chunk_distances
+
+                        # Create merged description from all chunks found
+                        if chunk_descriptions:
+                            model_data['merged_description'] = " ".join(chunk_descriptions)
+                            # Calculate average distance using only top 5 chunks
+                            if chunk_distances:
+                                # Note: chunk_distances contains only the top most similar chunks
+                                avg_description_distance = sum(chunk_distances) / len(chunk_distances)
+                                self.logger.debug(
+                                    f"Average description distance for model {model_id} (using top {top_chunks_for_distance}): {avg_description_distance}")
+                                model_data['table_initial_distances']['model_descriptions'] = avg_description_distance
+                        else:
+                            model_data['merged_description'] = ""
+                            # Use a moderate default distance if no descriptions found
+                            model_data['table_initial_distances']['model_descriptions'] = 2.0
+
+                        # Update metadata with merged description
+                        model_data['metadata']['description'] = model_data.get('merged_description', '')
+
+                        # Add to tables list if not already there
+                        if 'model_descriptions' not in model_data['tables']:
+                            model_data['tables'].append('model_descriptions')
 
                 except Exception as e:
                     self.logger.error(f"Error in chunk description search for model {model_id}: {e}")

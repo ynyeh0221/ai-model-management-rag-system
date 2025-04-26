@@ -54,7 +54,7 @@ class ComparisonHandler(BaseSearchHandler):
             table_weights=table_weights, user_id=user_id
         )
         all_results = await self._process_model_descriptions_text_search(
-            query="", all_results=all_results, search_limit=5
+            query="", all_results=all_results
         )
 
         # Prepare items list
@@ -113,7 +113,7 @@ class ComparisonHandler(BaseSearchHandler):
 
         # Run existing metadata_search function twice
         results = [await self.metadata_search_manager.handle_metadata_search(query, {
-            **parameters, "limit": 1  # Limit the size to control input size to LLM
+            **parameters, "limit": 2  # Limit the size to control input size to LLM
         }) for query in queries]
 
         # Tag each result with its cohort
