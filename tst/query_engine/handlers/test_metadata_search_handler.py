@@ -199,7 +199,7 @@ class TestMetadataSearchHandler(unittest.IsolatedAsyncioTestCase):
         )
 
         self.handler._process_model_descriptions_text_search.assert_called_once_with(
-            query, all_results_2, 5
+            query, all_results_2
         )
 
         self.handler._calculate_model_distances.assert_called_once_with(
