@@ -269,15 +269,40 @@ This will:
 ### Folder Structure
 
 ```bash
-.
-├── colab/                     # Google Colab integration
-├── codegen/                   # Notebook and code generation
-├── processing/                # Script parsing and metadata extraction
-├── vector_db/                 # Chroma and embedding management
-├── schemas/                   # Metadata schema definitions
-├── models/                    # Example model scripts
-├── run_model_processor.py     # Entry point script
-└── README.md
+src/
+├── api/                        # API and UI layer for user-facing query interface
+│
+├── cli/                        # Command-line tools for ingestion and querying
+│   ├── cli_response_utils/     # Helpers for formatting LLM output for CLI display
+│   ├── ingest_images.py        # CLI to ingest and embed image files
+│   ├── ingest_model_scripts.py # CLI to process and ingest model code files
+│   └── query_cli.py            # CLI interface for submitting queries
+│
+├── core/                       # Core system logic and orchestration
+│   ├── colab_generator/        # Modules to generate and manage Google Colab notebooks
+│
+│   ├── content_analyzer/       # Static + LLM-based analysis of code, images, and metadata
+│   │   ├── image/              # Image analyzers and CLIP-based embedding tools
+│   │   ├── metadata/           # Extractors and schema validators for metadata
+│   │   └── model_script/       # AST, summarizers, and LLM-based code parsers
+│
+│   ├── query_engine/           # Main RAG query logic and orchestration
+│   │   ├── handlers/           # Response templates, fallback logic, and flow controllers
+│   │   ├── llm_interface.py    # LLM interaction layer
+│   │   ├── query_analytics.py  # Query logging, usage stats, or intent distribution
+│   │   ├── query_intent.py     # Intent detection from user queries
+│   │   ├── query_parser.py     # Turns raw query into structured intent + filters
+│   │   ├── result_reranker.py  # Reranks raw retrieved results for contextual fit
+│   │   └── search_dispatcher.py# Dispatches to one or more vector DBs based on intent
+│
+│   ├── vector_db/              # Vector DB management and embedding orchestration
+│   │   └── notebook_generator.py # (Optional) auto-generates notebooks from stored code
+│
+│   └── rag_system.py           # Entry point for orchestrating end-to-end processing
+│
+├── main.py                     # Standalone app entry point (optional)
+└── analytics.db                # Local usage logging or performance tracking DB
+
 ```
 
 ---
