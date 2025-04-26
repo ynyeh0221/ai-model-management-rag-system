@@ -157,13 +157,14 @@ class CLIInterface:
     def _handle_result(self, result):
         """Handle result callback"""
         if result.get("type") == "text_search":
-            # Display text search results
-            print("\nRetrieving and displaying reranked search results:\n")
-            self.model_display_manager.display_reranked_results_pretty(result.get("search_results", []))
 
             # Display full response
             print("\nLLM Final Response:")
             self.llm_response_processor.print_llm_content(result.get("final_response", ""))
+
+            # Display text search results
+            print("\nRetrieving and displaying reranked search results:\n")
+            self.model_display_manager.display_reranked_results_pretty(result.get("search_results", []))
 
         elif result.get("type") == "image_search":
             # Display image search results
