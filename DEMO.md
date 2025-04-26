@@ -142,4 +142,8 @@ Sample 7: [Show me models trained on the MNIST dataset using autoencoder.](https
 
 ### Model - Deepseek-r1 7b
 
+Sample 1: [What diffusion models have been trained on the Oxford Flower dataset?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-r1/sample_input_output_1.md)
+
+Sample 3: [Can you please compare differences in architecture between my diffusion models on CIFAR-10 and MNIST?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-r1/sample_input_output_3.md)
+
 Sample 6: [Please find models created in April 2025 and using CelebA.](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-r1/sample_input_output_6.md)
