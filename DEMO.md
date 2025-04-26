@@ -148,4 +148,6 @@ Sample 2: [Which models use Unet architectures?](https://github.com/ynyeh0221/mo
 
 Sample 3: [Can you please compare differences in architecture between my diffusion models on CIFAR-10 and MNIST?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-r1/sample_input_output_3.md)
 
+Sample 4: [What DQN (Deep Q-Learning) agent did I try for the game called 2048?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-r1/sample_input_output_4.md)
+
 Sample 6: [Please find models created in April 2025 and using CelebA.](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-r1/sample_input_output_6.md)
