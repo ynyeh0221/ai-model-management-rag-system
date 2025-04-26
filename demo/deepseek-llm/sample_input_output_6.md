@@ -7,6 +7,40 @@ Please find models created in April 2025 and using CelebA.
 
 Output:
 ```
+**Executive Summary**
+
+In April 2025, two generative models were created utilizing the CelebA dataset for image generation purposes. Both use PyTorch 2.7 as their framework and train on the same dataset with different architectures and configurations. Below are summaries of these two models along with their technical specifications, implementation details, performance analysis, and insights drawn from them.
+
+**Model #1: CycleGAN_s**
+- Model ID: CycleGAN_s
+- File Size: 4975
+- Created On: April 04, 2025
+- Last Modified: April 04, 2025
+- Architecture: Encoder-Decoder with attention mechanism
+- Dataset: CelebA dataset
+- Training Configuration: Batch size = 32, Learning rate = 0.001, Optimizer - Adam, Epochs = 10 (on a GPU), and the model's hardware used is PyTorch.
+
+**Model #2: Generative-CelebA-smiling-notsmining_script_v1**
+- Model ID: Generative-CelebA-smiling-notsmining_script_v1
+- File Size: 63080
+- Created On: April 22, 2025
+- Last Modified: April 22, 2025
+- Architecture: UNet
+- Dataset: CelebA dataset
+- Training Configuration: Batch size = 128, Learning rate = 0.001, Optimizer - Adam, Epochs = 500 (on a CPU), and the model's hardware used is PyTorch.
+
+**Model #1: CycleGAN_s Summary**
+- The purpose of this script is to generate images based on the CelebA dataset using an Encoder-Decoder architecture with attention mechanism, which could be useful for tasks such as image classification or segmentation.
+- Data Pipeline and Preprocessing steps are not provided in the document, but the script downloads, splits the dataset into training/evaluation sets, preprocesses each image, and stores them in a 'img_align_celeba' folder (presumably within Google Colab).
+- No hardware information is available beyond CPU or GPU used.
+- The model aims to improve facial expressions from CelebA images through conditional denoising diffusion modeling.
+
+**Model #2: Generative-CelebA-smiling-notsmining_script_v1 Summary**
+- This script appears to be a complex deep learning project focusing on facial expression generation from the CelebA dataset using a Conditional Denoising Diffusion model (based on UNet architecture).
+- The data pipeline and preprocessing steps are not detailed in this document but involve downloading and splitting images and their attributes for training purposes. The scripts would ideally require Google Colab or another compatible GPU environment, such as PyTorch 2.7 framework and CUDA version.
+
+Both models demonstrate advancements in generative deep learning with the CelebA dataset using Encoder-Decoder architecture and UNet architecture respectively. These can be further utilized to generate facial expressions from provided images accurately by employing Conditional Denoising Diffusion or Attention mechanisms, catering to various applications like image classification, segmentation, and more.
+
   +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
 | Rank | Model ID        | Similarity Score | Similarity Distance |   Size | Created    | Modified   | Path            | Description          | Framework | Arch       | Dataset    | Batch | LR   | Optimizer | Epochs | HW  |
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
@@ -99,40 +133,4 @@ Output:
 |      |                 |                  |                     |        |            |            |                 | Denoising Diffusion  |           |            |            |       |      |           |        |     |
 |      |                 |                  |                     |        |            |            |                 | model.               |           |            |            |       |      |           |        |     |
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
-
-**Executive Summary**
-
-In April 2025, two generative models were created utilizing the CelebA dataset for image generation purposes. Both use PyTorch 2.7 as their framework and train on the same dataset with different architectures and configurations. Below are summaries of these two models along with their technical specifications, implementation details, performance analysis, and insights drawn from them.
-
-**Model #1: CycleGAN_s**
-- Model ID: CycleGAN_s
-- File Size: 4975
-- Created On: April 04, 2025
-- Last Modified: April 04, 2025
-- Architecture: Encoder-Decoder with attention mechanism
-- Dataset: CelebA dataset
-- Training Configuration: Batch size = 32, Learning rate = 0.001, Optimizer - Adam, Epochs = 10 (on a GPU), and the model's hardware used is PyTorch.
-
-**Model #2: Generative-CelebA-smiling-notsmining_script_v1**
-- Model ID: Generative-CelebA-smiling-notsmining_script_v1
-- File Size: 63080
-- Created On: April 22, 2025
-- Last Modified: April 22, 2025
-- Architecture: UNet
-- Dataset: CelebA dataset
-- Training Configuration: Batch size = 128, Learning rate = 0.001, Optimizer - Adam, Epochs = 500 (on a CPU), and the model's hardware used is PyTorch.
-
-**Model #1: CycleGAN_s Summary**
-- The purpose of this script is to generate images based on the CelebA dataset using an Encoder-Decoder architecture with attention mechanism, which could be useful for tasks such as image classification or segmentation.
-- Data Pipeline and Preprocessing steps are not provided in the document, but the script downloads, splits the dataset into training/evaluation sets, preprocesses each image, and stores them in a 'img_align_celeba' folder (presumably within Google Colab).
-- No hardware information is available beyond CPU or GPU used.
-- The model aims to improve facial expressions from CelebA images through conditional denoising diffusion modeling.
-
-**Model #2: Generative-CelebA-smiling-notsmining_script_v1 Summary**
-- This script appears to be a complex deep learning project focusing on facial expression generation from the CelebA dataset using a Conditional Denoising Diffusion model (based on UNet architecture).
-- The data pipeline and preprocessing steps are not detailed in this document but involve downloading and splitting images and their attributes for training purposes. The scripts would ideally require Google Colab or another compatible GPU environment, such as PyTorch 2.7 framework and CUDA version.
-
-Both models demonstrate advancements in generative deep learning with the CelebA dataset using Encoder-Decoder architecture and UNet architecture respectively. These can be further utilized to generate facial expressions from provided images accurately by employing Conditional Denoising Diffusion or Attention mechanisms, catering to various applications like image classification, segmentation, and more.
-
-
 ```

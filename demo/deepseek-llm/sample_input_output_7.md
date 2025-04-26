@@ -7,6 +7,80 @@ Show me models trained on the MNIST dataset using autoencoder.
 
 Output:
 ```
+Model 1: Generative-Fashion-MNIST_latent_new_model
+-------------------------------
+### Technical Specifications
+
+**Framework**: PyTorch 2.7
+
+**Architecture**: SimpleUNet, UNetAttentionBlock, and UNetResidualBlock classes inheriting from Module. They form the basis of the architecture.
+
+**Dataset**: Fashion MNIST
+
+**Training Configuration**:
+- Batch Size: 256
+- Learning Rate: 0.001
+- Optimizer: Adam
+- Epochs: 10
+- Hardware Used: GPU
+
+### Implementation Details
+The trained autoencoder is validated using the provided train_dataset and test\_dataset from Fashion MNIST dataset. The trained autoencoder can be used to reconstruct or denoise input images in the latent space, enabling visualization and exploration of this space. Use the trained autoencoder model to generate clean samples in the latent space by supplying it with noise input vectors and explore t-SNE visualizations, which can provide insights into how different classes are mapped within lower-dimensional spaces of Fashion MNIST dataset. The trained SimpleAutoencoder model can be used for denoising purposes by supplying it with noise input vectors.
+
+### Performance Analysis
+Performance metrics such as reconstruction error or MSE loss is calculated during the training phase to monitor and adjust the learning process, as well as at the end of each epoch, providing insight into the training progress of the autoencoder model. The trained SimpleAutoencoder performs denoising on Fashion MNIST dataset by selectively removing or enhancing features within images for clean output.
+
+### Technical Insights
+This implementation uses a simple yet effective architecture consisting of three types of modules that can be adapted and fine-tuned to various tasks requiring reconstruction, denosing, or generative capabilities in the context of datasets such as Fashion MNIST. The trained model could also serve as a starting point for more complex architectures or data augmentation experiments.
+
+### No Data Found
+
+**Information Gaps**:
+1. Lack of information about validation performance on the Fashion MNIST dataset and how it compares to other state-of-the-art models in denoising tasks within this dataset.
+2. The model's ability to generalize to other datasets, such as CIFAR or SVHN.
+3. Details about the data preprocessing pipeline used (such as normalization or image augmentation) that could impact performance and might be of interest for further experimentation. 
+
+### Implementation Guidance
+This implementation can serve as a starting point for researchers and developers interested in exploring autoencoder-based denoising solutions, particularly in the context of Fashion MNIST dataset. It also provides insights into how to fine-tune or adapt this architecture for other tasks involving image reconstruction or generation. The lack of information about performance on other datasets and comparison with other models could be investigated by further experimentation and evaluation.
+
+### No Data Found
+
+Model 2: Generative-Fashion-MNIST_transformer
+--------------------------------------------------
+### Technical Specifications
+
+**Framework**: PyTorch 2.7
+
+**Architecture**: ConditionalTransformerDenoiser, a custom denoising model that inherits from nn.Module class and consists of an encoder-decoder structure with multi-head self-attention and a transformer block followed by a denoising layer that leverages noise levels input to the model during forward pass, allowing it to selectively remove or enhance features within each image for clean output.
+
+**Dataset**: FashionMNIST
+
+**Training Configuration**:
+- Batch Size: 64
+- Learning Rate: 0.001
+- Optimizer: Adam
+- Epochs: 20
+- Hardware Used: MPS
+
+### Implementation Details
+The model is trained for 20 epochs, adjusting noise levels during the forward pass to achieve optimal denoising results on FashionMNIST data. Evaluation metrics such as reconstruction error or MSE loss are calculated during training and at the end of each epoch providing insight into the training progress. The architecture uses a conditional transformer block that leverages self-attention mechanisms for feature learning within images, resulting in better performance compared to simple convolutional networks, while maintaining compatibility with existing transformer architectures.
+
+### Performance Analysis
+The trained model achieves high denoising accuracy on FashionMNIST dataset by selectively removing or enhancing features within each image during forward pass, allowing it to generate clean samples that are semantically meaningful and visually appealing. The trained conditional transformer denoiser can be used for various tasks involving reconstruction, denosing, or generative capabilities in the context of this dataset.
+
+### Technical Insights
+The use of a conditional transformer block, which leverages multi-head self-attention mechanisms within the model architecture, allows it to learn features at different resolutions and focus on important regions while ignoring noise details, contributing to improved performance compared with simple convolutional networks. The trained ConditionalTransformerDenoiser can be leveraged as a starting point for other tasks involving image reconstruction or generation, given its scalability in handling various denoising challenges within FashionMNIST dataset.
+
+### No Data Found
+
+**Information Gaps**:
+1. Lack of information about validation performance on the FashionMNIST dataset and how it compares to other state-of-the-art models in denoising tasks within this dataset.
+2. The model's ability to generalize to other datasets, such as CIFAR or SVHN.
+3. Details about the data preprocessing pipeline used (such as normalization or image augmentation) that could impact performance and might be of interest for further experimentation. 
+
+### Implementation Guidance
+This implementation can serve as a starting point for researchers and developers interested in exploring transformer-based denoising solutions, particularly within FashionMNIST dataset. It also provides insights into how to fine-tune or adapt this architecture for other tasks involving image reconstruction or generation. The lack of information about performance on other datasets and comparison with other models could be investigated by further experimentation and evaluation.
+
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
 | Rank | Model ID        | Similarity Score | Similarity Distance |   Size | Created    | Modified   | Path            | Description          | Framework | Arch       | Dataset    | Batch | LR   | Optimizer | Epochs | HW  |
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
@@ -189,79 +263,4 @@ Output:
 |      |                 |                  |                     |        |            |            |                 | during training to   |           |            |            |       |      |           |        |     |
 |      |                 |                  |                     |        |            |            |                 | avoid overfitting.   |           |            |            |       |      |           |        |     |
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
-
-Model 1: Generative-Fashion-MNIST_latent_new_model
--------------------------------
-### Technical Specifications
-
-**Framework**: PyTorch 2.7
-
-**Architecture**: SimpleUNet, UNetAttentionBlock, and UNetResidualBlock classes inheriting from Module. They form the basis of the architecture.
-
-**Dataset**: Fashion MNIST
-
-**Training Configuration**:
-- Batch Size: 256
-- Learning Rate: 0.001
-- Optimizer: Adam
-- Epochs: 10
-- Hardware Used: GPU
-
-### Implementation Details
-The trained autoencoder is validated using the provided train_dataset and test\_dataset from Fashion MNIST dataset. The trained autoencoder can be used to reconstruct or denoise input images in the latent space, enabling visualization and exploration of this space. Use the trained autoencoder model to generate clean samples in the latent space by supplying it with noise input vectors and explore t-SNE visualizations, which can provide insights into how different classes are mapped within lower-dimensional spaces of Fashion MNIST dataset. The trained SimpleAutoencoder model can be used for denoising purposes by supplying it with noise input vectors.
-
-### Performance Analysis
-Performance metrics such as reconstruction error or MSE loss is calculated during the training phase to monitor and adjust the learning process, as well as at the end of each epoch, providing insight into the training progress of the autoencoder model. The trained SimpleAutoencoder performs denoising on Fashion MNIST dataset by selectively removing or enhancing features within images for clean output.
-
-### Technical Insights
-This implementation uses a simple yet effective architecture consisting of three types of modules that can be adapted and fine-tuned to various tasks requiring reconstruction, denosing, or generative capabilities in the context of datasets such as Fashion MNIST. The trained model could also serve as a starting point for more complex architectures or data augmentation experiments.
-
-### No Data Found
-
-**Information Gaps**:
-1. Lack of information about validation performance on the Fashion MNIST dataset and how it compares to other state-of-the-art models in denoising tasks within this dataset.
-2. The model's ability to generalize to other datasets, such as CIFAR or SVHN.
-3. Details about the data preprocessing pipeline used (such as normalization or image augmentation) that could impact performance and might be of interest for further experimentation. 
-
-### Implementation Guidance
-This implementation can serve as a starting point for researchers and developers interested in exploring autoencoder-based denoising solutions, particularly in the context of Fashion MNIST dataset. It also provides insights into how to fine-tune or adapt this architecture for other tasks involving image reconstruction or generation. The lack of information about performance on other datasets and comparison with other models could be investigated by further experimentation and evaluation.
-
-### No Data Found
-
-Model 2: Generative-Fashion-MNIST_transformer
---------------------------------------------------
-### Technical Specifications
-
-**Framework**: PyTorch 2.7
-
-**Architecture**: ConditionalTransformerDenoiser, a custom denoising model that inherits from nn.Module class and consists of an encoder-decoder structure with multi-head self-attention and a transformer block followed by a denoising layer that leverages noise levels input to the model during forward pass, allowing it to selectively remove or enhance features within each image for clean output.
-
-**Dataset**: FashionMNIST
-
-**Training Configuration**:
-- Batch Size: 64
-- Learning Rate: 0.001
-- Optimizer: Adam
-- Epochs: 20
-- Hardware Used: MPS
-
-### Implementation Details
-The model is trained for 20 epochs, adjusting noise levels during the forward pass to achieve optimal denoising results on FashionMNIST data. Evaluation metrics such as reconstruction error or MSE loss are calculated during training and at the end of each epoch providing insight into the training progress. The architecture uses a conditional transformer block that leverages self-attention mechanisms for feature learning within images, resulting in better performance compared to simple convolutional networks, while maintaining compatibility with existing transformer architectures.
-
-### Performance Analysis
-The trained model achieves high denoising accuracy on FashionMNIST dataset by selectively removing or enhancing features within each image during forward pass, allowing it to generate clean samples that are semantically meaningful and visually appealing. The trained conditional transformer denoiser can be used for various tasks involving reconstruction, denosing, or generative capabilities in the context of this dataset.
-
-### Technical Insights
-The use of a conditional transformer block, which leverages multi-head self-attention mechanisms within the model architecture, allows it to learn features at different resolutions and focus on important regions while ignoring noise details, contributing to improved performance compared with simple convolutional networks. The trained ConditionalTransformerDenoiser can be leveraged as a starting point for other tasks involving image reconstruction or generation, given its scalability in handling various denoising challenges within FashionMNIST dataset.
-
-### No Data Found
-
-**Information Gaps**:
-1. Lack of information about validation performance on the FashionMNIST dataset and how it compares to other state-of-the-art models in denoising tasks within this dataset.
-2. The model's ability to generalize to other datasets, such as CIFAR or SVHN.
-3. Details about the data preprocessing pipeline used (such as normalization or image augmentation) that could impact performance and might be of interest for further experimentation. 
-
-### Implementation Guidance
-This implementation can serve as a starting point for researchers and developers interested in exploring transformer-based denoising solutions, particularly within FashionMNIST dataset. It also provides insights into how to fine-tune or adapt this architecture for other tasks involving image reconstruction or generation. The lack of information about performance on other datasets and comparison with other models could be investigated by further experimentation and evaluation.
-
 ```

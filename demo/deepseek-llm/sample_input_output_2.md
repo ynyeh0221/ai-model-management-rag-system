@@ -7,6 +7,62 @@ Which models use Unet architectures?
 
 Output:
 ```
+### EXECUTIVE SUMMARY
+
+This report presents a detailed analysis of three models that use variations of the Unet architecture: Generative-Fashion-MNIST_script_unet, Generative-Oxford-102-Flower_v1, and Generative-Fashion-MNIST_latent_new_model. These models employ UNet or ConditionalUnet architectures for various tasks such as image denoising, flower classification, and fashion item recognition using grayscale images. The three models have distinct features, hyperparameters, frameworks, and datasets.
+
+### TECHNICAL SPECIFICATIONS
+
+Model 1: Generative-Fashion-MNIST_latent_new_model
+* Architecture: SimpleUNet
+	+ Input channels: Equal to 1
+	+ Hidden dimensions: [32, 64, 128]
+	+ Residual blocks: UNetResidualBlock (5)
+	* Framework: PyTorch 2.7
+* Dataset: Fashion MNIST
+* Training Configuration:
+	+ Batch Size: 256
+	+ Learning Rate: 0.001
+	+ Optimizer: Adam
+	+ Epochs: 10
+	+ Hardware Used: GPU (or CPU)
+
+Model 2: Generative-Oxford-102-Flower_v1
+* Architecture: ConditionalUNet
+	+ Decoder with conditioning layers for flower classification
+	* Dataset: Oxford-102 Flowers Dataset
+* Framework: PyTorch 2.7
+* Training Configuration:
+	+ Batch Size: 256
+	+ Learning Rate: 0.001
+	+ Optimizer: Adam
+	+ Epochs: 1000
+	+ Hardware Used: GPU (or CPU)
+
+Model 3: Generative-Fashion-MNIST_script_unet
+* Architecture: UNetDenoiser
+	+ Modified U-Net architecture for grayscale image denoising
+	* Dataset: Fashion MNIST
+* Framework: PyTorch 2.7
+* Training Configuration:
+	+ Batch Size: 128
+	+ Learning Rate: 0.0002
+	+ Optimizer: AdamW
+	+ Epochs: 150
+	+ Hardware Used: CPU (or GPU)
+
+### IMPLEMENTATION DETAILS
+
+Each model has its distinct implementation details, such as the number of layers and parameters in UNet or ConditionalUNet architectures. The SimpleAutoencoder class in Model 1 employs the aforementioned architecture with a few adjustments for autoencoding tasks. Similarly, conditional branches are included in the ConditionalUNet architecture used in Model 2 to handle flower classification.
+
+### PERFORMANCE ANALYSIS
+
+Each model offers different performance metrics based on their respective architectures and datasets. The Generative-Fashion-MNIST_latent_new_model achieves better denoising results, while the other two models excel in classifying flowers using the Fashion MNIST dataset.
+
+### TECHNICAL INSIGHTS
+
+These three UNet or ConditionalUnet variations showcase how a well-structured neural network architecture can be adapted to address various tasks like image denoising and classification by incorporating additional conditioning layers in conditional networks. However, further enhancements could include adjusting hyperparameters for better learning, implementing data augmentation techniques to increase training diversity, and fine-tuning the UNet architecture based on certain performance criteria (e.g., minimal amount of noise).
+
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
 | Rank | Model ID        | Similarity Score | Similarity Distance |   Size | Created    | Modified   | Path            | Description          | Framework | Arch       | Dataset    | Batch | LR   | Optimizer | Epochs | HW  |
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
@@ -216,61 +272,4 @@ Output:
 |      |                 |                  |                     |        |            |            |                 | images of fashion    |           |            |            |       |      |           |        |     |
 |      |                 |                  |                     |        |            |            |                 | items.               |           |            |            |       |      |           |        |     |
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
-
-### EXECUTIVE SUMMARY
-
-This report presents a detailed analysis of three models that use variations of the Unet architecture: Generative-Fashion-MNIST_script_unet, Generative-Oxford-102-Flower_v1, and Generative-Fashion-MNIST_latent_new_model. These models employ UNet or ConditionalUnet architectures for various tasks such as image denoising, flower classification, and fashion item recognition using grayscale images. The three models have distinct features, hyperparameters, frameworks, and datasets.
-
-### TECHNICAL SPECIFICATIONS
-
-Model 1: Generative-Fashion-MNIST_latent_new_model
-* Architecture: SimpleUNet
-	+ Input channels: Equal to 1
-	+ Hidden dimensions: [32, 64, 128]
-	+ Residual blocks: UNetResidualBlock (5)
-	* Framework: PyTorch 2.7
-* Dataset: Fashion MNIST
-* Training Configuration:
-	+ Batch Size: 256
-	+ Learning Rate: 0.001
-	+ Optimizer: Adam
-	+ Epochs: 10
-	+ Hardware Used: GPU (or CPU)
-
-Model 2: Generative-Oxford-102-Flower_v1
-* Architecture: ConditionalUNet
-	+ Decoder with conditioning layers for flower classification
-	* Dataset: Oxford-102 Flowers Dataset
-* Framework: PyTorch 2.7
-* Training Configuration:
-	+ Batch Size: 256
-	+ Learning Rate: 0.001
-	+ Optimizer: Adam
-	+ Epochs: 1000
-	+ Hardware Used: GPU (or CPU)
-
-Model 3: Generative-Fashion-MNIST_script_unet
-* Architecture: UNetDenoiser
-	+ Modified U-Net architecture for grayscale image denoising
-	* Dataset: Fashion MNIST
-* Framework: PyTorch 2.7
-* Training Configuration:
-	+ Batch Size: 128
-	+ Learning Rate: 0.0002
-	+ Optimizer: AdamW
-	+ Epochs: 150
-	+ Hardware Used: CPU (or GPU)
-
-### IMPLEMENTATION DETAILS
-
-Each model has its distinct implementation details, such as the number of layers and parameters in UNet or ConditionalUNet architectures. The SimpleAutoencoder class in Model 1 employs the aforementioned architecture with a few adjustments for autoencoding tasks. Similarly, conditional branches are included in the ConditionalUNet architecture used in Model 2 to handle flower classification.
-
-### PERFORMANCE ANALYSIS
-
-Each model offers different performance metrics based on their respective architectures and datasets. The Generative-Fashion-MNIST_latent_new_model achieves better denoising results, while the other two models excel in classifying flowers using the Fashion MNIST dataset.
-
-### TECHNICAL INSIGHTS
-
-These three UNet or ConditionalUnet variations showcase how a well-structured neural network architecture can be adapted to address various tasks like image denoising and classification by incorporating additional conditioning layers in conditional networks. However, further enhancements could include adjusting hyperparameters for better learning, implementing data augmentation techniques to increase training diversity, and fine-tuning the UNet architecture based on certain performance criteria (e.g., minimal amount of noise).
-
 ```

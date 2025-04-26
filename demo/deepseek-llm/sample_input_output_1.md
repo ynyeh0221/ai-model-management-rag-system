@@ -6,6 +6,34 @@ What diffusion models have been trained on the Oxford Flower dataset?
 ```
 Output:
 ```
+Model #1 - Generative-Oxford-102-Flower_v2:
+
+* Model ID: Generative-Oxford-102-Flower_v2
+* File Size: 78491
+* Created On: 2025-04-04T21:50:47.672074
+* Last Modified: 2025-04-04T21:50:47.672074
+* Framework: PyTorch 2.7
+* Architecture: ConditionalUNet
+
+The code combines features of a convolutional UNet and a conditional denoising diffusion model. The architecture consists of three main parts - the encoder, the decoder, and the conditioning layers which are used for learning class embeddings.
+
+* Dataset: Oxford-102 Flower Dataset (Conditional Improved v3)
+* Training Configuration:
+	+ Batch Size: 64
+	+ Learning Rate: 0.001
+	+ Optimizer: Adam
+	+ Epochs: 10
+	+ Hardware Used: CPU
+* Description: Navigate to the data folder's path (specified in script), download Oxford-102 Flowers dataset from its official website or any other available source with high quality images of 256x256 resolution saved as .png files. Saving Artifacts - The trained autoencoder and conditional denoising diffusion network are saved at the completion of each epoch using a checkpoint callback function within PyTorch's learning algorithm. Clone this GitHub repository or copy the entire codebase into your working environment to have the necessary scripts, data folders and models to start training and testing this specific example: [https://github.com/Your-Username/Conditional-Autoencoder-for-Oxford-102-Flower](https://github.com/Your-Username/Conditional-Autoencoder-for-Oxford-102-Flower)
+* The script uses TensorBoard and Web-based logging frameworks (Matplotlib, PyPlot) to visualize training progress and evaluate model performance metrics:
+	+ Time Embedding Visualization - Displays time embeddings for class features during a specific growth stage or lighting condition.
+	+ Data Pipeline and Preprocessing
+	+ Training Configuration
+	+ Evaluation Methodology
+	
+* Purpose and Overview: The primary goal of this script is to build a conditional generative autoencoder (CGAE) for the Oxford Flowers dataset, capable of learning class embeddings and reconstructing input images with high accuracy while incorporating perceptual loss during training. This model architecture aims to be suitable for generating flower images under various conditions or lighting stages by using conditioning layers that learn features specific to each stage or condition throughout its training process.
+* Test various extensions by adding new datasets or modifying existing architecture configurations such as batch normalization, dropout layers, etc., in order to further improve the performance of this CGAE model on different flower classification tasks.
+
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
 | Rank | Model ID        | Similarity Score | Similarity Distance |   Size | Created    | Modified   | Path            | Description          | Framework | Arch       | Dataset    | Batch | LR   | Optimizer | Epochs | HW  |
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
@@ -159,33 +187,4 @@ Output:
 |      |                 |                  |                     |        |            |            |                 | normalization,       |           |            |            |       |      |           |        |     |
 |      |                 |                  |                     |        |            |            |                 | dropout layers, etc. |           |            |            |       |      |           |        |     |
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
-
-Model #1 - Generative-Oxford-102-Flower_v2:
-
-* Model ID: Generative-Oxford-102-Flower_v2
-* File Size: 78491
-* Created On: 2025-04-04T21:50:47.672074
-* Last Modified: 2025-04-04T21:50:47.672074
-* Framework: PyTorch 2.7
-* Architecture: ConditionalUNet
-
-The code combines features of a convolutional UNet and a conditional denoising diffusion model. The architecture consists of three main parts - the encoder, the decoder, and the conditioning layers which are used for learning class embeddings.
-
-* Dataset: Oxford-102 Flower Dataset (Conditional Improved v3)
-* Training Configuration:
-	+ Batch Size: 64
-	+ Learning Rate: 0.001
-	+ Optimizer: Adam
-	+ Epochs: 10
-	+ Hardware Used: CPU
-* Description: Navigate to the data folder's path (specified in script), download Oxford-102 Flowers dataset from its official website or any other available source with high quality images of 256x256 resolution saved as .png files. Saving Artifacts - The trained autoencoder and conditional denoising diffusion network are saved at the completion of each epoch using a checkpoint callback function within PyTorch's learning algorithm. Clone this GitHub repository or copy the entire codebase into your working environment to have the necessary scripts, data folders and models to start training and testing this specific example: [https://github.com/Your-Username/Conditional-Autoencoder-for-Oxford-102-Flower](https://github.com/Your-Username/Conditional-Autoencoder-for-Oxford-102-Flower)
-* The script uses TensorBoard and Web-based logging frameworks (Matplotlib, PyPlot) to visualize training progress and evaluate model performance metrics:
-	+ Time Embedding Visualization - Displays time embeddings for class features during a specific growth stage or lighting condition.
-	+ Data Pipeline and Preprocessing
-	+ Training Configuration
-	+ Evaluation Methodology
-	
-* Purpose and Overview: The primary goal of this script is to build a conditional generative autoencoder (CGAE) for the Oxford Flowers dataset, capable of learning class embeddings and reconstructing input images with high accuracy while incorporating perceptual loss during training. This model architecture aims to be suitable for generating flower images under various conditions or lighting stages by using conditioning layers that learn features specific to each stage or condition throughout its training process.
-* Test various extensions by adding new datasets or modifying existing architecture configurations such as batch normalization, dropout layers, etc., in order to further improve the performance of this CGAE model on different flower classification tasks.
-
 ```

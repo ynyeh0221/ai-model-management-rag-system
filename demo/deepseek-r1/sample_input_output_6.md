@@ -7,6 +7,65 @@ Please find models created in April 2025 and using CelebA.
 
 Output:
 ```
+<think>
+Okay, so I'm trying to figure out what these three models are about based on the information given. Let me start by going through each model one by one and see if I can understand their features and purposes.
+
+Starting with Model #1: Generative-CelebA-smiling-notsmining_script_v1. It's created using PyTorch 2.7, which I know is a machine learning framework for tensor computations. The architecture is UNet, which I've heard about in the context of image segmentation tasks. From the code description, it mentions classes like SimpleAutoencoder, ConditionalUNet, and UNetAttentionBlock. These all inherit from Module, so they're part of PyTorch's neural network library.
+
+The dataset used here is CelebA, which I think is a large dataset of celebrity photos with lots of attributes. The training configuration has a batch size of 128, learning rate of 0.001 using Adam optimizer, trained for 500 epochs on CPU. The code talks about data preprocessing where images are loaded from Google Drive and model checkpoints saved every epoch to MyDrive. So this model is probably trained to generate or manipulate celebrity images in some way.
+
+Model #2: Generative-CelebA-smiling-notsmining_script_v2 also uses PyTorch 2.7 with a ConditionalDenoiseDiffusion architecture. It includes an SimpleAutoencoder and ConditionalUNet, so this seems more complex than Model #1. The training config is similar but with batch size 256, learning rate 0.001 using AdamW optimizer, trained for 1000 epochs on MPS, which I think is a type of GPU or Neural Engine chip. This model is likely used for conditional denoising diffusion, maybe generating images by adding and removing noise based on certain conditions from the CelebA dataset.
+
+Model #3: Generative-Fashion-MNIST_latent_new_model uses PyTorch 2.7 with a SimpleUNet architecture. The dataset here is Fashion MNIST, which has grayscale images of fashion items. Training config has smaller batch size 256, learning rate 0.001 using Adam optimizer, trained for 10 epochs on GPU. The description mentions using DataLoader to load data and generating samples in latent space with t-SNE visualizations. This seems like it's focusing on dimensionality reduction or style transfer in fashion images.
+
+Putting this all together, Model #1 is probably a basic UNet-based image generation model, maybe for facial expressions since it uses CelebA. Model #2 appears to be more advanced with denoising diffusion and handles the same dataset but perhaps offers better image quality. Model #3 shifts focus to Fashion MNIST, suggesting it's specialized in clothing or fashion-related tasks.
+
+I'm a bit confused about what "notsmining" refers to in all of them. Maybe it's a typo? Perhaps it stands for something else, maybe "no smiling" if the original query was looking at non-smiling faces? But since it's using CelebA which includes varied expressions, I might be wrong.
+
+Also, I'm not entirely sure about the difference between SimpleAutoencoder and ConditionalUNet in Model #2. Maybe they're used together for some kind of conditional generation where an encoder (autoencoder) feeds into a UNet-like decoder to generate images conditioned on certain attributes?
+
+I think the key takeaway is that each model uses different architectures tailored to specific datasets, with varying training parameters optimized for their tasks.
+</think>
+
+The analysis of the three models reveals distinct approaches and purposes within machine learning, particularly focusing on generative models using different architectures. Here's a structured summary:
+
+1. **Model #1: Generative-CelebA-smiling-notsmining_script_v1**
+   - **Architecture**: UNet
+   - **Dataset**: CelebA (Celebrity Faces Attributes Dataset)
+   - **Training Configuration**:
+     - Batch Size: 128
+     - Learning Rate: 0.001 (Adam optimizer)
+     - Epochs: 500
+     - Hardware: CPU
+   - **Description**: Likely a basic UNet-based model for generating or manipulating celebrity images, possibly focusing on facial expressions.
+
+2. **Model #2: Generative-CelebA-smiling-notsmining_script_v2**
+   - **Architecture**: ConditionalDenoiseDiffusion with SimpleAutoencoder and ConditionalUNet
+   - **Dataset**: CelebA
+   - **Training Configuration**:
+     - Batch Size: 256
+     - Learning Rate: 0.001 (AdamW optimizer)
+     - Epochs: 1000
+     - Hardware: MPS (likely a GPU or Neural Engine chip)
+   - **Description**: An advanced model using denoising diffusion, possibly for generating high-quality images with conditional attributes from the CelebA dataset.
+
+3. **Model #3: Generative-Fashion-MNIST_latent_new_model**
+   - **Architecture**: SimpleUNet
+   - **Dataset**: Fashion MNIST (Fashion articles of clothing)
+   - **Training Configuration**:
+     - Batch Size: 256
+     - Learning Rate: 0.001 (Adam optimizer)
+     - Epochs: 10
+     - Hardware: GPU
+   - **Description**: Focused on fashion-related tasks, such as dimensionality reduction or style transfer, utilizing DataLoader for data loading and t-SNE visualizations.
+
+**Key Takeaways**:
+- Each model is tailored to a specific dataset (CelebA for Models 1 and 2, Fashion MNIST for Model 3).
+- Varying architectures are used: UNet for image segmentation tasks in Models 1 and 2, and SimpleUNet for fashion-related tasks in Model 3.
+- Training parameters differ, optimized for each task's complexity and dataset size.
+
+The term "notsmining" is unclear but possibly refers to a specific attribute or context not detailed here. Each model represents a different approach to image generation, highlighting the versatility of generative models across various datasets and tasks.
+
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
 | Rank | Model ID        | Similarity Score | Similarity Distance |   Size | Created    | Modified   | Path            | Description          | Framework | Arch       | Dataset    | Batch | LR   | Optimizer | Epochs | HW  |
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
@@ -117,65 +176,4 @@ Output:
 |      |                 |                  |                     |        |            |            |                 | spaces of Fashion    |           |            |            |       |      |           |        |     |
 |      |                 |                  |                     |        |            |            |                 | MNIST dataset.       |           |            |            |       |      |           |        |     |
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
-
-<think>
-Okay, so I'm trying to figure out what these three models are about based on the information given. Let me start by going through each model one by one and see if I can understand their features and purposes.
-
-Starting with Model #1: Generative-CelebA-smiling-notsmining_script_v1. It's created using PyTorch 2.7, which I know is a machine learning framework for tensor computations. The architecture is UNet, which I've heard about in the context of image segmentation tasks. From the code description, it mentions classes like SimpleAutoencoder, ConditionalUNet, and UNetAttentionBlock. These all inherit from Module, so they're part of PyTorch's neural network library.
-
-The dataset used here is CelebA, which I think is a large dataset of celebrity photos with lots of attributes. The training configuration has a batch size of 128, learning rate of 0.001 using Adam optimizer, trained for 500 epochs on CPU. The code talks about data preprocessing where images are loaded from Google Drive and model checkpoints saved every epoch to MyDrive. So this model is probably trained to generate or manipulate celebrity images in some way.
-
-Model #2: Generative-CelebA-smiling-notsmining_script_v2 also uses PyTorch 2.7 with a ConditionalDenoiseDiffusion architecture. It includes an SimpleAutoencoder and ConditionalUNet, so this seems more complex than Model #1. The training config is similar but with batch size 256, learning rate 0.001 using AdamW optimizer, trained for 1000 epochs on MPS, which I think is a type of GPU or Neural Engine chip. This model is likely used for conditional denoising diffusion, maybe generating images by adding and removing noise based on certain conditions from the CelebA dataset.
-
-Model #3: Generative-Fashion-MNIST_latent_new_model uses PyTorch 2.7 with a SimpleUNet architecture. The dataset here is Fashion MNIST, which has grayscale images of fashion items. Training config has smaller batch size 256, learning rate 0.001 using Adam optimizer, trained for 10 epochs on GPU. The description mentions using DataLoader to load data and generating samples in latent space with t-SNE visualizations. This seems like it's focusing on dimensionality reduction or style transfer in fashion images.
-
-Putting this all together, Model #1 is probably a basic UNet-based image generation model, maybe for facial expressions since it uses CelebA. Model #2 appears to be more advanced with denoising diffusion and handles the same dataset but perhaps offers better image quality. Model #3 shifts focus to Fashion MNIST, suggesting it's specialized in clothing or fashion-related tasks.
-
-I'm a bit confused about what "notsmining" refers to in all of them. Maybe it's a typo? Perhaps it stands for something else, maybe "no smiling" if the original query was looking at non-smiling faces? But since it's using CelebA which includes varied expressions, I might be wrong.
-
-Also, I'm not entirely sure about the difference between SimpleAutoencoder and ConditionalUNet in Model #2. Maybe they're used together for some kind of conditional generation where an encoder (autoencoder) feeds into a UNet-like decoder to generate images conditioned on certain attributes?
-
-I think the key takeaway is that each model uses different architectures tailored to specific datasets, with varying training parameters optimized for their tasks.
-</think>
-
-The analysis of the three models reveals distinct approaches and purposes within machine learning, particularly focusing on generative models using different architectures. Here's a structured summary:
-
-1. **Model #1: Generative-CelebA-smiling-notsmining_script_v1**
-   - **Architecture**: UNet
-   - **Dataset**: CelebA (Celebrity Faces Attributes Dataset)
-   - **Training Configuration**:
-     - Batch Size: 128
-     - Learning Rate: 0.001 (Adam optimizer)
-     - Epochs: 500
-     - Hardware: CPU
-   - **Description**: Likely a basic UNet-based model for generating or manipulating celebrity images, possibly focusing on facial expressions.
-
-2. **Model #2: Generative-CelebA-smiling-notsmining_script_v2**
-   - **Architecture**: ConditionalDenoiseDiffusion with SimpleAutoencoder and ConditionalUNet
-   - **Dataset**: CelebA
-   - **Training Configuration**:
-     - Batch Size: 256
-     - Learning Rate: 0.001 (AdamW optimizer)
-     - Epochs: 1000
-     - Hardware: MPS (likely a GPU or Neural Engine chip)
-   - **Description**: An advanced model using denoising diffusion, possibly for generating high-quality images with conditional attributes from the CelebA dataset.
-
-3. **Model #3: Generative-Fashion-MNIST_latent_new_model**
-   - **Architecture**: SimpleUNet
-   - **Dataset**: Fashion MNIST (Fashion articles of clothing)
-   - **Training Configuration**:
-     - Batch Size: 256
-     - Learning Rate: 0.001 (Adam optimizer)
-     - Epochs: 10
-     - Hardware: GPU
-   - **Description**: Focused on fashion-related tasks, such as dimensionality reduction or style transfer, utilizing DataLoader for data loading and t-SNE visualizations.
-
-**Key Takeaways**:
-- Each model is tailored to a specific dataset (CelebA for Models 1 and 2, Fashion MNIST for Model 3).
-- Varying architectures are used: UNet for image segmentation tasks in Models 1 and 2, and SimpleUNet for fashion-related tasks in Model 3.
-- Training parameters differ, optimized for each task's complexity and dataset size.
-
-The term "notsmining" is unclear but possibly refers to a specific attribute or context not detailed here. Each model represents a different approach to image generation, highlighting the versatility of generative models across various datasets and tasks.
-
-
 ```

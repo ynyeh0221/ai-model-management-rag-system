@@ -7,6 +7,54 @@ please compare architecture and training config of model id Generative-Fashion-M
 
 Output:
 ```
+### Executive Summary
+
+This report compares the architecture and training configurations of two machine learning models: Generative-Fashion-MNIST_latent_new_model (Model ID: Gnerative-Fashion-MNIST_latent_new_model) and Gnerative-CIFAR-10-GAN_v1 (Model ID: Gnerative-CIFAR-10-GAN_v1). Both models utilize PyTorch as their framework, with different architectures tailored for specific datasets.
+
+### Technical Specifications
+
+**Generative-Fashion-MNIST\_latent\_new\_model:**
+* Model ID: Generative-Fashion-MNIST\_latent\_new_model
+* File Size: 44421
+* Created On: 2025-03-16T15:06:40.737226
+* Last Modified: 2025-04-09T11:17:44.630196
+* Framework: PyTorch 2.7
+* Architecture: SimpleUNet
+	* The script contains implementations of UNET and UNetAttentionBlock classes, along with other related modules such as Encoder, Decoder, and UNetResidualBlock.
+* Dataset: Fashion MNIST
+* Training Configuration:
+	+ Batch Size: 256
+	+ Learning Rate: 0.001
+	+ Optimizer: Adam
+	+ Epochs: 10
+	+ Hardware Used: GPU
+	+ `loss`: PyTorch's loss module is used for calculating losses during training, including contrastive loss for autoencoder training and Focal Losses with Softplus activation functions to handle unbalanced datasets in denoising diffusion processes (Fashion MNIST).
+* SimpleAutoencoder: A simple autoencoder with input channels set to 1 (grayscale images) and latent dimensions equal to 64.
+	+ `scheduler`: A learning rate scheduler based on the OneCyclePolicy class from 'torch.optim' manages learning rates during the training process.
+	+ Key evaluation metrics are:
+		- epoch_loss: A training loss tracker used to monitor how well each model is learning during its training process, and a cumulative score calculated from the average of epoch losses for all models per each epoch (using function 'epoch_loss += loss.item()').
+* SimpleUNet: A UNet architecture with input channels equal to 1, hidden dimensions [32, 64, 128], and five residual blocks (UnetResidualBlock).
+
+**Gnerative-CIFAR-10-GAN\_v1:**
+* Model ID: Gnerative-CIFAR-10-GAN_v1
+* File Size: 59600
+* Created On: 2025-04-01T07:43:03.142255
+* Last Modified: 2025-04-01T07:43:03.142255
+* Framework: PyTorch 2.7
+* Architecture: ConditionalUNet
+	* The script contains implementations of UNet and Attention mechanisms, along with other related modules such as residual blocks and attention mechanisms. It also has a custom DatasetLoader class for data loading.
+* Dataset: CIFAR10CatDog
+* Training Configuration:
+	+ Batch Size: 256
+	+ Learning Rate: 0.0001
+	+ Optimizer: Adam
+	+ Epochs: 1000
+	+ Hardware Used: CPU
+* Description:
+	+ The main objective of this code is to train a generative adversarial network (GAN) that can generate new images from the CIFAR10CatDog dataset by conditioning on the original training data.
+	+ Important dependencies include torchvision for data augmentation and preprocessing, tqdm for progress tracking, imageio for viewing generated images, and numpy & os for various computations.
+	+ Additionally, the script generates a series of tensorboard files (.pt) containing various metrics throughout training, along with visualizations using matplotlib's pyplot library for detailed monitoring of loss curves, feature embeddings, and generated image samples.
+	
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
 | Rank | Model ID        | Similarity Score | Similarity Distance |   Size | Created    | Modified   | Path            | Description          | Framework | Arch       | Dataset    | Batch | LR   | Optimizer | Epochs | HW  |
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
@@ -133,53 +181,4 @@ Output:
 |      |                 |                  |                     |        |            |            |                 | residual blocks (`Un |           |            |            |       |      |           |        |     |
 |      |                 |                  |                     |        |            |            |                 | etResidualBlock`).   |           |            |            |       |      |           |        |     |
 +------+-----------------+------------------+---------------------+--------+------------+------------+-----------------+----------------------+-----------+------------+------------+-------+------+-----------+--------+-----+
-
-### Executive Summary
-
-This report compares the architecture and training configurations of two machine learning models: Generative-Fashion-MNIST_latent_new_model (Model ID: Gnerative-Fashion-MNIST_latent_new_model) and Gnerative-CIFAR-10-GAN_v1 (Model ID: Gnerative-CIFAR-10-GAN_v1). Both models utilize PyTorch as their framework, with different architectures tailored for specific datasets.
-
-### Technical Specifications
-
-**Generative-Fashion-MNIST\_latent\_new\_model:**
-* Model ID: Generative-Fashion-MNIST\_latent\_new_model
-* File Size: 44421
-* Created On: 2025-03-16T15:06:40.737226
-* Last Modified: 2025-04-09T11:17:44.630196
-* Framework: PyTorch 2.7
-* Architecture: SimpleUNet
-	* The script contains implementations of UNET and UNetAttentionBlock classes, along with other related modules such as Encoder, Decoder, and UNetResidualBlock.
-* Dataset: Fashion MNIST
-* Training Configuration:
-	+ Batch Size: 256
-	+ Learning Rate: 0.001
-	+ Optimizer: Adam
-	+ Epochs: 10
-	+ Hardware Used: GPU
-	+ `loss`: PyTorch's loss module is used for calculating losses during training, including contrastive loss for autoencoder training and Focal Losses with Softplus activation functions to handle unbalanced datasets in denoising diffusion processes (Fashion MNIST).
-* SimpleAutoencoder: A simple autoencoder with input channels set to 1 (grayscale images) and latent dimensions equal to 64.
-	+ `scheduler`: A learning rate scheduler based on the OneCyclePolicy class from 'torch.optim' manages learning rates during the training process.
-	+ Key evaluation metrics are:
-		- epoch_loss: A training loss tracker used to monitor how well each model is learning during its training process, and a cumulative score calculated from the average of epoch losses for all models per each epoch (using function 'epoch_loss += loss.item()').
-* SimpleUNet: A UNet architecture with input channels equal to 1, hidden dimensions [32, 64, 128], and five residual blocks (UnetResidualBlock).
-
-**Gnerative-CIFAR-10-GAN\_v1:**
-* Model ID: Gnerative-CIFAR-10-GAN_v1
-* File Size: 59600
-* Created On: 2025-04-01T07:43:03.142255
-* Last Modified: 2025-04-01T07:43:03.142255
-* Framework: PyTorch 2.7
-* Architecture: ConditionalUNet
-	* The script contains implementations of UNet and Attention mechanisms, along with other related modules such as residual blocks and attention mechanisms. It also has a custom DatasetLoader class for data loading.
-* Dataset: CIFAR10CatDog
-* Training Configuration:
-	+ Batch Size: 256
-	+ Learning Rate: 0.0001
-	+ Optimizer: Adam
-	+ Epochs: 1000
-	+ Hardware Used: CPU
-* Description:
-	+ The main objective of this code is to train a generative adversarial network (GAN) that can generate new images from the CIFAR10CatDog dataset by conditioning on the original training data.
-	+ Important dependencies include torchvision for data augmentation and preprocessing, tqdm for progress tracking, imageio for viewing generated images, and numpy & os for various computations.
-	+ Additionally, the script generates a series of tensorboard files (.pt) containing various metrics throughout training, along with visualizations using matplotlib's pyplot library for detailed monitoring of loss curves, feature embeddings, and generated image samples.
-
 ```
