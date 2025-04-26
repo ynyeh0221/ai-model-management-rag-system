@@ -141,15 +141,14 @@ def split_summary_into_chunks(summary_text, overlap_sentences=2, max_sentences_p
     # Import and download NLTK resources
     import nltk
     try:
-        nltk.data.find('tokenizers/punkt')
+        nltk.data.find('tokenizers/punkt_tab')
     except LookupError:
-        nltk.download('punkt')
+        nltk.download('punkt_tab')
 
     sentences = nltk.sent_tokenize(summary_text)
 
     chunks = []
     total = len(sentences)
-    current_offset = 0
 
     for start in range(0, total, max_sentences_per_chunk):
         # Calculate starting position for this chunk
