@@ -28,7 +28,7 @@ GitPython = "*"
 psutil = "*"
 nltk = "*"
 spacy = "*"
-sklearn = "*"
+scikit-learn = "*"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "*"
