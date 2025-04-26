@@ -1,66 +1,65 @@
 import argparse
 import os
 
-from colab_generator.code_generator import CodeGenerator
-from colab_generator.colab_api_client import ColabAPIClient
-from colab_generator.reproducibility_manager import ReproducibilityManager
-from colab_generator.resource_quota_manager import ResourceQuotaManager
-from data_processing.cli_interface.image_processor_runner import ImageProcessorRunner
-from data_processing.cli_interface.script_processor_runner import ScriptProcessorRunner
-from data_processing.document_processor.image_processor import ImageProcessor
-from data_processing.document_processor.llm_based_code_parser import LLMBasedCodeParser
-from data_processing.document_processor.metadata_extractor import MetadataExtractor
-from data_processing.document_processor.schema_validator import SchemaValidator
-from query_engine.query_analytics import QueryAnalytics
-from query_engine.query_parser import QueryParser
-from query_engine.search_dispatcher import SearchDispatcher
-
-from response_generator.llm_interface import LLMInterface
-from response_generator.result_reranker import CrossEncoderReranker
-from user_interface.cli_interface.cli_interface import CLIInterface
-from vector_db_manager.access_control import AccessControlManager
-from vector_db_manager.chroma_manager import ChromaManager
-from vector_db_manager.image_embedder import ImageEmbedder
-from vector_db_manager.text_embedder import TextEmbedder
+from src.cli.ingest_images import ImageProcessorRunner
+from src.cli.ingest_model_scripts import ScriptProcessorRunner
+from src.cli.query_cli import CLIInterface
+from src.core.colab_generator.code_generator import CodeGenerator
+from src.core.colab_generator.colab_api_client import ColabAPIClient
+from src.core.colab_generator.reproducibility_manager import ReproducibilityManager
+from src.core.colab_generator.resource_quota_manager import ResourceQuotaManager
+from src.core.content_analyzer.image.image_processor import ImageProcessor
+from src.core.content_analyzer.metadata.metadata_extractor import MetadataExtractor
+from src.core.content_analyzer.metadata.schema_validator import SchemaValidator
+from src.core.content_analyzer.model_script.llm_based_code_parser import LLMBasedCodeParser
+from src.core.query_engine.llm_interface import LLMInterface
+from src.core.query_engine.query_analytics import QueryAnalytics
+from src.core.query_engine.query_parser import QueryParser
+from src.core.query_engine.result_reranker import CrossEncoderReranker
+from src.core.query_engine.search_dispatcher import SearchDispatcher
+from src.core.vector_db.access_control import AccessControlManager
+from src.core.vector_db.chroma_manager import ChromaManager
+from src.core.vector_db.image_embedder import ImageEmbedder
+from src.core.vector_db.text_embedder import TextEmbedder
 
 
 def initialize_components(config_path="./config", llm_model_name: str = "llm"):
-    """Initialize all components of the RAG system."""
+    """Initialize all cli_response_utils of the RAG system."""
 
     llm_interface = LLMInterface(model_name=llm_model_name, timeout=60000)
 
-    # Initialize document cli_runner components
+    # Initialize document cli_runner cli_response_utils
     schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
     code_parser = LLMBasedCodeParser(schema_validator=schema_validator, llm_interface=llm_interface)
     metadata_extractor = MetadataExtractor()
     image_processor = ImageProcessor(schema_validator)
     
-    # Initialize vector database components
+    # Initialize vector database cli_response_utils
     text_embedder = TextEmbedder(device="mps")
     image_embedder = ImageEmbedder()
     chroma_manager = ChromaManager(text_embedder, image_embedder, "./chroma_db")
     access_control = AccessControlManager(chroma_manager)
     
-    # Initialize query engine components
+    # Initialize query engine cli_response_utils
     query_parser = QueryParser()
     search_dispatcher = SearchDispatcher(chroma_manager, text_embedder, image_embedder)
     query_analytics = QueryAnalytics()
     result_reranker = CrossEncoderReranker(device="mps")
     
-    # Initialize Colab notebook generator components
+    # Initialize Colab notebook generator cli_response_utils
     code_generator = CodeGenerator()
     colab_api_client = ColabAPIClient()
     reproducibility_manager = ReproducibilityManager()
     resource_quota_manager = ResourceQuotaManager()
 
     return {
-        "document_processor": {
+        "content_analyzer": {
             "schema_validator": schema_validator,
             "code_parser": code_parser,
             "metadata_extractor": metadata_extractor,
             "image_processor": image_processor
         },
-        "vector_db_manager": {
+        "vector_db": {
             "text_embedder": text_embedder,
             "image_embedder": image_embedder,
             "chroma_manager": chroma_manager,
@@ -95,9 +94,9 @@ def main():
     process_scripts_parser = subparsers.add_parser("process-scripts", help="Process model scripts")
     process_scripts_parser.add_argument("directory", help="Directory containing model scripts")
 
-    # Process single model script command
-    process_single_script_parser = subparsers.add_parser("process-single-script", help="Process a single model script")
-    process_single_script_parser.add_argument("file_path", help="Absolute path to target model script file")
+    # Process single model model_script command
+    process_single_script_parser = subparsers.add_parser("process-single-model_script", help="Process a single model model_script")
+    process_single_script_parser.add_argument("file_path", help="Absolute path to target model model_script file")
 
     # Process image_processing command
     process_images_parser = subparsers.add_parser("process-image_processing", help="Process image_processing")
@@ -119,7 +118,7 @@ def main():
         # Use deepseek-llm for speed and token length consideration
         components = initialize_components(llm_model_name="deepseek-llm:7b")
         script_processor_runner.process_model_scripts(components, args.directory)
-    elif args.command == "process-single-script":
+    elif args.command == "process-single-model_script":
         # Use deepseek-llm for speed and token length consideration
         components = initialize_components(llm_model_name="deepseek-llm:7b")
         script_processor_runner.process_single_script(components, args.file_path)
