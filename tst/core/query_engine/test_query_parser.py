@@ -40,7 +40,7 @@ class TestQueryParser(unittest.TestCase):
 
         # Create an instance of QueryParser with mocked dependencies
         with patch('spacy.load', return_value=mock_nlp):
-            self.parser = QueryParser(nlp_model="en_core_web_sm")
+            self.parser = QueryParser(nlp_model="en_core_web_sm", llm_model_name="deepseek_llm:7b")
 
         # Override the nlp attribute to use our mock
         self.parser.nlp = mock_nlp

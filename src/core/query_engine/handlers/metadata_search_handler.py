@@ -41,7 +41,7 @@ class MetadataSearchHandler(BaseSearchHandler):
             # STEP 1: Search all metadata tables in parallel to collect model_ids
             metadata_search_start = time.time()
             all_results = await self._search_all_metadata_tables(
-                query, chroma_filters, requested_limit, table_weights, user_id
+                query, chroma_filters, requested_limit, table_weights, user_id, parameters['ner_filters'] if 'ner_filters' in parameters else None
             )
 
             print(f"Model ids to fetch metadata fields: {len(all_results)}")

@@ -1,9 +1,11 @@
+import json
 import logging
 import re
 from typing import Dict, List, Any, Optional, Union
 
 import nltk
 import spacy
+from langchain_core.messages import SystemMessage
 from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 
@@ -58,7 +60,7 @@ class QueryParser:
         >>> print(result["parameters"]["limit"])  # 5
     """
 
-    def __init__(self, nlp_model: str = "en_core_web_sm", llm_model_name: str = "deepseek-llm:7b"):
+    def __init__(self, nlp_model: str = "en_core_web_sm", llm_model_name: str = "deepseek-r1:7b"):
         """
         Initialize the QueryParser with necessary NLP cli_response_utils.
 
@@ -147,7 +149,7 @@ class QueryParser:
             )
 
             # Use the correct model identifier as expected by Ollama.
-            self.langchain_llm = OllamaLLM(model=llm_model_name, temperature=0)
+            self.langchain_llm = OllamaLLM(model=llm_model_name, temperature=0, num_predict=10000)
 
             self.intent_chain = self.intent_prompt | self.langchain_llm
 
@@ -367,6 +369,11 @@ class QueryParser:
                 "order": sort_match.group(4) if sort_match.group(4) else "descending"
             }
 
+        # Extract architecture, dataset, and training configuration using LLM
+        # Store these in a separate ner_filters parameter
+        parameters["ner_filters"] = self._extract_entities_with_llm(query_text)
+        print(f"ner_filters: {parameters['ner_filters']}")
+
         # Intent-specific
         if intent == QueryIntent.IMAGE_SEARCH:
             parameters.update(self._extract_image_parameters(query_text, valid_model_ids))
@@ -390,6 +397,228 @@ class QueryParser:
                 parameters["base_query"] = base_query
 
         return parameters
+
+    def _extract_entities_with_llm(self, query_text: str, max_retries: int = 5) -> Dict[str, Any]:
+        """
+        Use LangChain chat‐style LLM to extract entities from query text with enhanced reasoning,
+        strict JSON schema, and separated system vs. human roles.
+        """
+        # default structure to return on failure
+        default_entities = {
+            "architecture": {"value": "N/A", "is_positive": True},
+            "dataset": {"name": {"value": "N/A", "is_positive": True}},
+            "training_config": {
+                "batch_size": {"value": "N/A", "is_positive": True},
+                "learning_rate": {"value": "N/A", "is_positive": True},
+                "optimizer": {"value": "N/A", "is_positive": True},
+                "epochs": {"value": "N/A", "is_positive": True},
+                "hardware_used": {"value": "N/A", "is_positive": True},
+            },
+        }
+
+        def _is_valid_schema(entities: Dict[str, Any]) -> bool:
+            required = [
+                ("architecture", "value"), ("architecture", "is_positive"),
+                ("dataset", "value"), ("dataset", "is_positive"),
+                ("training_config", "batch_size", "value"), ("training_config", "batch_size", "is_positive"),
+                ("training_config", "learning_rate", "value"), ("training_config", "learning_rate", "is_positive"),
+                ("training_config", "optimizer", "value"), ("training_config", "optimizer", "is_positive"),
+                ("training_config", "epochs", "value"), ("training_config", "epochs", "is_positive"),
+                ("training_config", "hardware_used", "value"), ("training_config", "hardware_used", "is_positive"),
+            ]
+            for path in required:
+                d = entities
+                for key in path:
+                    if not isinstance(d, dict) or key not in d:
+                        return False
+                    d = d[key]
+            return True
+
+        try:
+            from langchain.prompts import (
+                ChatPromptTemplate,
+                SystemMessagePromptTemplate,
+                HumanMessagePromptTemplate,
+            )
+            from langchain.chains import LLMChain
+
+            # system message: all instructions, schema, examples
+            system_template = """
+    You are an expert system analyzing a user query about AI models. Extract ONLY the technical details EXPLICITLY mentioned.
+
+    -- NEGATION RULE --
+    If you see “not X”, “without X”, “excluding X” for an architecture or dataset:
+      • **Do not** set `"value": "N/A"`.  
+      • Instead set `"value": "X"` and `"is_positive": false`.
+
+    -- JSON SCHEMA (strict, no extra fields, no missing fields) --
+    ```json
+    {{
+      "type":"object",
+      "properties":{{
+        "architecture": {{
+          "type":"object","properties":{{"value":{{"type":"string"}}, "is_positive":{{"type":"boolean"}}}}, "required":["value","is_positive"]
+        }},
+        "dataset": {{
+          "type":"object","properties":{{"value":"object","properties":{{"value":{{"type":"string"}}, "is_positive":{{"type":"boolean"}}}},"required":["value","is_positive"]
+        }},
+        "training_config": {{
+          "type":"object","properties":{{
+            "batch_size":    {{ "type":"object","properties":{{"value":{{"type":"string"}}, "is_positive":{{"type":"boolean"}}}},"required":["value","is_positive"] }},
+            "learning_rate": {{ "type":"object","properties":{{"value":{{"type":"string"}}, "is_positive":{{"type":"boolean"}}}},"required":["value","is_positive"] }},
+            "optimizer":     {{ "type":"object","properties":{{"value":{{"type":"string"}}, "is_positive":{{"type":"boolean"}}}},"required":["value","is_positive"] }},
+            "epochs":        {{ "type":"object","properties":{{"value":{{"type":"string"}}, "is_positive":{{"type":"boolean"}}}},"required":["value","is_positive"] }},
+            "hardware_used": {{ "type":"object","properties":{{"value":{{"type":"string"}}, "is_positive":{{"type":"boolean"}}}},"required":["value","is_positive"] }}
+          }},
+          "required":["batch_size","learning_rate","optimizer","epochs","hardware_used"]
+        }}
+      }},
+      "required":["architecture","dataset","training_config"],
+      "additionalProperties":false
+    }}
+    ```
+
+    -- EXAMPLES --
+    User: Find models using RNN  
+    Assistant: {"architecture":{"value":"RNN","is_positive":true},"dataset":{"value":"N/A","is_positive":true}, "training_config": {"batch_size": {"value": "N/A", "is_positive": true}, "learning_rate": {"value": "N/A", "is_positive": true}, "optimizer": {"value": "N/A", "is_positive": true}, "epochs": {"value": "N/A", "is_positive": true}, "hardware_used": {"value": "N/A", "is_positive": true}}
+
+    User: Find models not using CNN  
+    Assistant: {"architecture":{"value":"CNN","is_positive":false},"dataset":{"value":"N/A","is_positive":true}, "training_config": {"batch_size": {"value": "N/A", "is_positive": true}, "learning_rate": {"value": "N/A", "is_positive": true}, "optimizer": {"value": "N/A", "is_positive": true}, "epochs": {"value": "N/A", "is_positive": true}, "hardware_used": {"value": "N/A", "is_positive": true}}
+
+    User: List models without CelebA  
+    Assistant: {"architecture":{"value":"N/A","is_positive":true},"dataset":{"value":"CelebA","is_positive":false}, "training_config": {"batch_size": {"value": "N/A", "is_positive": true}, "learning_rate": {"value": "N/A", "is_positive": true}, "optimizer": {"value": "N/A", "is_positive": true}, "epochs": {"value": "N/A", "is_positive": true}, "hardware_used": {"value": "N/A", "is_positive": true}}
+    
+    CRITICAL RULES
+    * NEVER infer or assume values that aren't explicitly stated
+    * NEVER make up information
+    * If a field is not explicitly mentioned in the query, set `"value": "N/A"` and `"is_positive": true` (do not invent one)
+    * Do NOT guess or hallucinate values
+    * Negation constructions (“not X”, “without X”, “excluding X”) still count as explicit mentions of X → set "value": "X" and "is_positive": false
+    * If a parameter is not explicitly mentioned, it MUST be marked as "N/A"
+    * Only extract exact values as they appear in the query
+    ARCHITECTURE RECOGNITION
+    Architecture types include (but are not limited to):
+    * transformer, attention, bert, gpt
+    * cnn, convolutional, resnet, vgg, unet
+    * rnn, lstm, gru, recurrent
+    * mlp, feedforward, perceptron
+    * autoencoder, vae, variational
+    * gan, generative, adversarial
+    * diffusion, stable diffusion
+    DATASET RECOGNITION
+    Dataset names include (but are not limited to):
+    * MNIST, Fashion-MNIST
+    * CIFAR-10, CIFAR-100
+    * ImageNet, MS-COCO
+    * Pascal VOC, Cityscapes
+    * CelebA
+    """
+            system_message = SystemMessage(content=system_template)
+
+            # human message: only the user’s query
+            human_message = HumanMessagePromptTemplate.from_template("User query: {query}")
+
+            # assemble chat prompt
+            chat_prompt = ChatPromptTemplate.from_messages([system_message, human_message])
+
+            # chain
+            entity_chain = chat_prompt | self.langchain_llm
+
+            last_exception = None
+            for attempt in range(1, max_retries + 1):
+                try:
+                    # use the chain to invoke with the {"query": ...} input
+                    raw_response = entity_chain.invoke({"query": query_text})
+
+                    # extract text from the chain's response
+                    if hasattr(raw_response, "content"):
+                        raw = raw_response.content
+                    elif isinstance(raw_response, dict):
+                        raw = raw_response.get("text", "")
+                    else:
+                        raw = str(raw_response).strip()
+
+                    # strip any LLM “thinking” dumps
+                    raw = re.sub(r'<thinking>.*?</thinking>', '', raw, flags=re.DOTALL)
+                    raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
+
+                    # grab only the first balanced JSON-looking chunk
+                    match = re.search(r'{.*}', raw, re.DOTALL)
+                    if not match:
+                        raise ValueError("No JSON object found in LLM response")
+
+                    entities = json.loads(match.group(0))
+                    self._convert_numeric_values(entities)
+
+                    print(f"entities: {entities}")
+
+                    if _is_valid_schema(entities):
+                        return entities
+                    else:
+                        raise ValueError(f"Schema validation failed on attempt {attempt}")
+
+                except Exception as e:
+                    print(f"[WARNING] Attempt {attempt}/{max_retries} failed: {e}")
+                    last_exception = e
+
+            print(f"[ERROR] Entity extraction failed after {max_retries} attempts: {last_exception}")
+            return default_entities
+
+        except Exception as e:
+            print(f"[ERROR] Entity extraction with LLM failed: {e}")
+            return default_entities
+
+    def _convert_numeric_values(self, entities: Dict[str, Any]) -> None:
+        """
+        Convert string numeric values to actual numeric types in the entities dictionary
+        with the new nested structure that includes is_positive flags.
+
+        Args:
+            entities: Dictionary of entities extracted by the LLM
+        """
+        # Convert training config numeric values
+        if "training_config" in entities:
+            config = entities["training_config"]
+
+            # Convert batch size to integer
+            if "batch_size" in config and config["batch_size"]["value"] != "N/A":
+                try:
+                    # Handle potential formatted strings like "32" or "32 samples"
+                    batch_size_str = str(config["batch_size"]["value"])
+                    # Extract the numeric part
+                    numeric_part = re.search(r'\d+', batch_size_str)
+                    if numeric_part:
+                        config["batch_size"]["value"] = int(numeric_part.group(0))
+                except (ValueError, TypeError):
+                    pass
+
+            # Convert learning rate to float
+            if "learning_rate" in config and config["learning_rate"]["value"] != "N/A":
+                try:
+                    # Handle potential formatted strings like "0.001" or "1e-3"
+                    lr_str = str(config["learning_rate"]["value"])
+                    # Check for scientific notation
+                    if 'e' in lr_str.lower():
+                        config["learning_rate"]["value"] = float(lr_str)
+                    else:
+                        # Extract the numeric part
+                        numeric_part = re.search(r'([0-9]*[.])?[0-9]+', lr_str)
+                        if numeric_part:
+                            config["learning_rate"]["value"] = float(numeric_part.group(0))
+                except (ValueError, TypeError):
+                    pass
+
+            # Convert epochs to integer
+            if "epochs" in config and config["epochs"]["value"] != "N/A":
+                try:
+                    # Handle potential formatted strings like "100" or "100 epochs"
+                    epochs_str = str(config["epochs"]["value"])
+                    # Extract the numeric part
+                    numeric_part = re.search(r'\d+', epochs_str)
+                    if numeric_part:
+                        config["epochs"]["value"] = int(numeric_part.group(0))
+                except (ValueError, TypeError):
+                    pass
 
     def _extract_model_id_mentions(self, query_text: str) -> List[str]:
         """

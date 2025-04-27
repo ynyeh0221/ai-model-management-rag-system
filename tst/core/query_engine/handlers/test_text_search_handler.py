@@ -371,7 +371,7 @@ class TestTextSearchHandler(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(call_args[2], user_id)
 
             self.handler._search_all_metadata_tables.assert_called_once_with(
-                query, chroma_filters, requested_limit, table_weights, user_id
+                query, chroma_filters, requested_limit, table_weights, user_id, None
             )
 
             # Verify _search_model_chunks_table was called with correct parameters
