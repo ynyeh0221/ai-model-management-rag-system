@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, Any, Tuple, Optional, List
+from typing import Dict, Any, Tuple, Optional, List, Coroutine
 
 from src.core.query_engine.handlers.utils.distance_normalizer import DistanceNormalizer
 from src.core.query_engine.handlers.utils.filter_translator import FilterTranslator
@@ -248,59 +248,18 @@ class BaseSearchHandler:
 
         self.logger.info(f"Processing search with NER filters: {ner_filters}")
 
-        # Check architecture
-        if 'architecture' in ner_filters:
-            # Ensure it's a dict with value and is_positive fields
-            if isinstance(ner_filters['architecture'], dict) and 'value' in ner_filters['architecture']:
-                arch_value = ner_filters['architecture']['value']
-                is_positive = ner_filters['architecture'].get('is_positive', True)
+        # Process single-value entities (architecture and dataset)
+        for entity_type in ["architecture", "dataset"]:
+            if entity_type in ner_filters:
+                self._process_single_entity(
+                    entity_type=entity_type,
+                    entity_data=ner_filters[entity_type],
+                    entity_table_mapping=entity_table_mapping,
+                    table_weights=table_weights,
+                    result=result
+                )
 
-                # Only process if there's an actual value
-                if arch_value != "N/A":
-                    if is_positive:
-                        self.logger.info(f"Found positive architecture entity: {arch_value}")
-                        result["has_positive_entities"] = True
-                        # Map to correct table
-                        arch_tables = []
-                        for table in entity_table_mapping.get("architecture", []):
-                            if table in table_weights:
-                                arch_tables.append(table)
-                                # Use the architecture value as the query for this table
-                                result["positive_table_queries"][table] = arch_value
-
-                        # Store architecture tables for intersection
-                        if arch_tables:
-                            result["entity_type_tables"]["architecture"] = set(arch_tables)
-                    else:
-                        result["has_negative_entities"] = True
-                        result["negative_entities"]['architecture'] = arch_value
-
-        # Check dataset - note the nested structure
-        if 'dataset' in ner_filters:
-            # The dataset has a nested 'name' field
-            if isinstance(ner_filters['dataset'], dict) and 'value' in ner_filters['dataset']:
-                dataset_value = ner_filters['dataset'].get('value')
-                is_positive = ner_filters['dataset'].get('is_positive', True)
-
-                if dataset_value != "N/A":
-                    if is_positive:
-                        self.logger.info(f"Found positive dataset entity: {dataset_value}")
-                        result["has_positive_entities"] = True
-                        # Map to correct table
-                        dataset_tables = []
-                        for table in entity_table_mapping.get("dataset", []):
-                            if table in table_weights:
-                                dataset_tables.append(table)
-                                result["positive_table_queries"][table] = dataset_value
-
-                        # Store dataset tables for intersection
-                        if dataset_tables:
-                            result["entity_type_tables"]["dataset"] = set(dataset_tables)
-                    else:
-                        result["has_negative_entities"] = True
-                        result["negative_entities"]['dataset'] = dataset_value
-
-        # Check training config fields
+        # Process training_config separately as it can have multiple fields
         if 'training_config' in ner_filters:
             training_config = ner_filters['training_config']
             training_tables = []
@@ -330,6 +289,42 @@ class BaseSearchHandler:
                 result["entity_type_tables"]["training_config"] = set(training_tables)
 
         return result
+
+    def _process_single_entity(self, entity_type: str, entity_data: Dict[str, Any],
+                               entity_table_mapping: Dict[str, List[str]],
+                               table_weights: Dict[str, float], result: Dict[str, Any]) -> None:
+        """Process a single-value entity type (architecture or dataset).
+
+        Args:
+            entity_type: Type of the entity (architecture or dataset)
+            entity_data: Entity data from ner_filters
+            entity_table_mapping: Mapping of entity types to tables
+            table_weights: Weights for each table
+            result: Result dictionary to update
+        """
+        if isinstance(entity_data, dict) and 'value' in entity_data:
+            entity_value = entity_data['value']
+            is_positive = entity_data.get('is_positive', True)
+
+            # Only process if there's an actual value
+            if entity_value != "N/A":
+                if is_positive:
+                    self.logger.info(f"Found positive {entity_type} entity: {entity_value}")
+                    result["has_positive_entities"] = True
+                    # Map to correct table
+                    entity_tables = []
+                    for table in entity_table_mapping.get(entity_type, []):
+                        if table in table_weights:
+                            entity_tables.append(table)
+                            # Use the entity value as the query for this table
+                            result["positive_table_queries"][table] = entity_value
+
+                    # Store entity tables for intersection
+                    if entity_tables:
+                        result["entity_type_tables"][entity_type] = set(entity_tables)
+                else:
+                    result["has_negative_entities"] = True
+                    result["negative_entities"][entity_type] = entity_value
 
     def _determine_tables_to_search(
             self, has_positive_entities: bool, entity_type_tables: Dict[str, set],
@@ -447,42 +442,39 @@ class BaseSearchHandler:
         negative_search_tasks = []
         negative_table_queries = {}
 
+        # Entity type to table mapping
+        entity_table_mapping = {
+            "architecture": "model_architectures",
+            "dataset": "model_datasets",
+            "training_config": "model_training_configs"
+        }
+
         # Prepare negative entity searches
         for entity_type, value in negative_entities.items():
-            if entity_type == 'architecture':
-                table = "model_architectures"
-                negative_table_queries[table] = value
-                negative_search_tasks.append(self.chroma_manager.search(
-                    collection_name=table,
-                    query=value,
-                    where={},
-                    limit=requested_limit * 3,  # Use higher limit for negative queries too
-                    include=["metadatas", "documents", "distances"]
-                ))
-            elif entity_type == 'dataset':
-                table = "model_datasets"
-                negative_table_queries[table] = value
-                negative_search_tasks.append(self.chroma_manager.search(
-                    collection_name=table,
-                    query=value,
-                    where={},
-                    limit=requested_limit * 3,
-                    include=["metadatas", "documents", "distances"]
-                ))
+            if entity_type in ["architecture", "dataset"]:
+                # Handle single-value entity types
+                table = entity_table_mapping[entity_type]
+                self._prepare_negative_search(
+                    table=table,
+                    query_value=value,
+                    negative_table_queries=negative_table_queries,
+                    negative_search_tasks=negative_search_tasks,
+                    requested_limit=requested_limit
+                )
             elif entity_type == 'training_config':
-                table = "model_training_configs"
-                # For training_config, we need to handle multiple fields
+                # For training_config, handle multiple fields
+                table = entity_table_mapping[entity_type]
                 for field, field_value in value.items():
                     if field_value != "N/A":
                         query_value = f"{field} {field_value}"
-                        negative_table_queries[f"{table}_{field}"] = query_value
-                        negative_search_tasks.append(self.chroma_manager.search(
-                            collection_name=table,
-                            query=query_value,
-                            where={},
-                            limit=requested_limit * 3,
-                            include=["metadatas", "documents", "distances"]
-                        ))
+                        self._prepare_negative_search(
+                            table=table,
+                            query_value=query_value,
+                            negative_table_queries=negative_table_queries,
+                            negative_search_tasks=negative_search_tasks,
+                            requested_limit=requested_limit,
+                            table_key=f"{table}_{field}"  # Use a unique key for each field
+                        )
 
         # Execute all negative searches in parallel
         if negative_search_tasks:
@@ -522,6 +514,33 @@ class BaseSearchHandler:
 
         return negative_results
 
+    def _prepare_negative_search(
+            self, table: str, query_value: str,
+            negative_table_queries: Dict[str, str],
+            negative_search_tasks: List[Coroutine],
+            requested_limit: int,
+            table_key: str = None
+    ) -> None:
+        """Prepare a negative search task.
+
+        Args:
+            table: Collection name to search
+            query_value: Query value for search
+            negative_table_queries: Dictionary to store table and query mapping
+            negative_search_tasks: List to store search tasks
+            requested_limit: Number of results to return
+            table_key: Optional custom key for the table (used for training_config fields)
+        """
+        key = table_key or table
+        negative_table_queries[key] = query_value
+        negative_search_tasks.append(self.chroma_manager.search(
+            collection_name=table,
+            query=query_value,
+            where={},
+            limit=requested_limit * 3,  # Use higher limit for negative queries
+            include=["metadatas", "documents", "distances"]
+        ))
+
     def _process_search_results(
             self, positive_search_results: List[Dict[str, Any]], tables_to_search: List[str],
             entity_type_tables: Dict[str, set], has_positive_entities: bool,
@@ -544,23 +563,16 @@ class BaseSearchHandler:
         """
         all_results = {}
 
-        # Track models that match each entity type (for intersection)
-        models_by_entity_type = {}
-        if has_positive_entities and len(entity_type_tables) > 1:
-            # Only initialize this tracking when we have multiple entity types
-            for entity_type in entity_type_tables.keys():
-                models_by_entity_type[entity_type] = set()
+        # Initialize tracking for models by entity type (for intersection)
+        models_by_entity_type = self._initialize_entity_type_tracking(
+            has_positive_entities, entity_type_tables)
 
         # Process positive search results
         for table_idx, result in enumerate(positive_search_results):
             table_name = tables_to_search[table_idx]
 
-            # Determine which entity type this table belongs to (if any)
-            matching_entity_type = None
-            for entity_type, tables in entity_type_tables.items():
-                if table_name in tables:
-                    matching_entity_type = entity_type
-                    break
+            # Find entity type for this table
+            matching_entity_type = self._find_matching_entity_type(table_name, entity_type_tables)
 
             for idx, item in enumerate(result.get('results', [])):
                 metadata = item.get('metadata', {})
@@ -571,14 +583,13 @@ class BaseSearchHandler:
                     continue
 
                 # Apply access control
-                if self.access_control_manager and user_id:
-                    if not self.access_control_manager.check_access({'metadata': metadata}, user_id, "view"):
-                        continue
+                if not self._check_access_control(metadata, user_id):
+                    continue
 
-                # Track this model for the matching entity type ONLY if we're tracking multiple entity types
-                if has_positive_entities and matching_entity_type and len(entity_type_tables) > 1:
-                    if matching_entity_type in models_by_entity_type:  # Safety check
-                        models_by_entity_type[matching_entity_type].add(model_id)
+                # Track model for entity type intersection if needed
+                self._track_model_for_entity_type(
+                    has_positive_entities, matching_entity_type,
+                    models_by_entity_type, model_id, entity_type_tables)
 
                 # Get distance for this positive result
                 distance = self.distance_normalizer.extract_search_distance(
@@ -587,73 +598,195 @@ class BaseSearchHandler:
 
                 # Check if this model should be filtered out based on negative entities
                 if has_negative_entities and negative_results:
-                    skip_result = False
-                    filter_reason = ""
-                    negative_distance_threshold = 1.3  # Lower distance means better match
+                    skip_result, filter_reason = self._should_filter_by_negative_entities(
+                        model_id, negative_results)
 
-                    # Check each negative entity result
-                    for neg_table, neg_items in negative_results.items():
-                        # Find this model in negative results
-                        matching_neg_items = [item for item in neg_items if item['model_id'] == model_id]
-
-                        if matching_neg_items:
-                            # Get lowest distance (best match)
-                            min_distance = min(item['distance'] for item in matching_neg_items)
-
-                            # If distance is below threshold (better match), filter out this model
-                            if min_distance < negative_distance_threshold:
-                                table_type = neg_table.split('_')[0] if '_' in neg_table else neg_table
-                                if table_type == "model_architectures":
-                                    filter_reason = f"negative architecture match (distance: {min_distance:.4f})"
-                                elif table_type == "model_datasets":
-                                    filter_reason = f"negative dataset match (distance: {min_distance:.4f})"
-                                else:
-                                    # Extract field name for training_config
-                                    field = neg_table.split('_')[-1] if '_' in neg_table else "unknown"
-                                    filter_reason = f"negative training config match: {field} (distance: {min_distance:.4f})"
-
-                                skip_result = True
-                                break
-
-                    # Skip this result if it matched negative criteria
                     if skip_result:
                         self.logger.info(f"Filtering out model {model_id} due to {filter_reason}")
                         continue
 
-                # If we got here, the result passed all filters
-                # If first time seeing this model, initialize its entry
-                if model_id not in all_results:
-                    all_results[model_id] = {
-                        'model_id': model_id,
-                        'tables': [],
-                        'table_initial_distances': {},
-                        'match_source': 'metadata',
-                        'filter_info': {
-                            'used_ner_query': has_positive_entities,
-                            'applied_negative_filter': has_negative_entities
-                        }
-                    }
+                # Add result to all_results
+                self._add_result_to_all_results(
+                    all_results, model_id, table_name, distance,
+                    has_positive_entities, has_negative_entities)
 
-                # Add this table to the list of matching tables if not already there
-                if table_name not in all_results[model_id]['tables']:
-                    all_results[model_id]['tables'].append(table_name)
-
-                # Store distance in table_initial_distances
-                if 'table_initial_distances' not in all_results[model_id]:
-                    all_results[model_id]['table_initial_distances'] = {}
-
-                all_results[model_id]['table_initial_distances'][table_name] = distance
-
-        # If we have multiple positive entity types, find models that match ALL entity types
+        # Apply intersection filtering if needed
         if has_positive_entities and len(models_by_entity_type) > 1:
-            # Check that all entity types have at least one model
-            if all(len(models) > 0 for models in models_by_entity_type.values()):
-                valid_models = set.intersection(*models_by_entity_type.values())
-                self.logger.info(f"Models matching ALL positive entity criteria: {valid_models}")
+            all_results = self._apply_intersection_filtering(all_results, models_by_entity_type)
 
-                # Filter all_results to only include models in the intersection
-                all_results = {model_id: data for model_id, data in all_results.items()
-                               if model_id in valid_models}
+        return all_results
+
+    def _initialize_entity_type_tracking(
+            self, has_positive_entities: bool, entity_type_tables: Dict[str, set]
+    ) -> Dict[str, set]:
+        """Initialize tracking for models by entity type.
+
+        Args:
+            has_positive_entities: Whether positive entities were found
+            entity_type_tables: Mapping of entity types to their corresponding tables
+
+        Returns:
+            Dictionary to track models by entity type
+        """
+        models_by_entity_type = {}
+        if has_positive_entities and len(entity_type_tables) > 1:
+            # Only initialize tracking when we have multiple entity types
+            for entity_type in entity_type_tables.keys():
+                models_by_entity_type[entity_type] = set()
+        return models_by_entity_type
+
+    def _find_matching_entity_type(
+            self, table_name: str, entity_type_tables: Dict[str, set]
+    ) -> Optional[str]:
+        """Find the entity type that matches the given table.
+
+        Args:
+            table_name: Name of the table
+            entity_type_tables: Mapping of entity types to their corresponding tables
+
+        Returns:
+            Matching entity type or None
+        """
+        for entity_type, tables in entity_type_tables.items():
+            if table_name in tables:
+                return entity_type
+        return None
+
+    def _check_access_control(
+            self, metadata: Dict[str, Any], user_id: Optional[str]
+    ) -> bool:
+        """Check if the user has access to the model.
+
+        Args:
+            metadata: Model metadata
+            user_id: User ID for access control
+
+        Returns:
+            True if the user has access, False otherwise
+        """
+        if self.access_control_manager and user_id:
+            return self.access_control_manager.check_access({'metadata': metadata}, user_id, "view")
+        return True
+
+    def _track_model_for_entity_type(
+            self, has_positive_entities: bool, matching_entity_type: Optional[str],
+            models_by_entity_type: Dict[str, set], model_id: str,
+            entity_type_tables: Dict[str, set]
+    ) -> None:
+        """Track model for entity type intersection.
+
+        Args:
+            has_positive_entities: Whether positive entities were found
+            matching_entity_type: Entity type that matches the current table
+            models_by_entity_type: Dictionary tracking models by entity type
+            model_id: ID of the current model
+            entity_type_tables: Mapping of entity types to their corresponding tables
+        """
+        if has_positive_entities and matching_entity_type and len(entity_type_tables) > 1:
+            if matching_entity_type in models_by_entity_type:  # Safety check
+                models_by_entity_type[matching_entity_type].add(model_id)
+
+    def _should_filter_by_negative_entities(
+            self, model_id: str, negative_results: Dict[str, List[Dict[str, Any]]]
+    ) -> Tuple[bool, str]:
+        """Check if a model should be filtered out based on negative entities.
+
+        Args:
+            model_id: ID of the model to check
+            negative_results: Results from negative entity searches
+
+        Returns:
+            Tuple of (should_filter, filter_reason)
+        """
+        skip_result = False
+        filter_reason = ""
+        negative_distance_threshold = 1.3  # Lower distance means better match
+
+        # Check each negative entity result
+        for neg_table, neg_items in negative_results.items():
+            # Find this model in negative results
+            matching_neg_items = [item for item in neg_items if item['model_id'] == model_id]
+
+            if matching_neg_items:
+                # Get the lowest distance (best match)
+                min_distance = min(item['distance'] for item in matching_neg_items)
+
+                # If distance is below threshold (better match), filter out this model
+                if min_distance < negative_distance_threshold:
+                    table_type = neg_table.split('_')[0] if '_' in neg_table else neg_table
+                    if table_type == "model_architectures":
+                        filter_reason = f"negative architecture match (distance: {min_distance:.4f})"
+                    elif table_type == "model_datasets":
+                        filter_reason = f"negative dataset match (distance: {min_distance:.4f})"
+                    else:
+                        # Extract field name for training_config
+                        field = neg_table.split('_')[-1] if '_' in neg_table else "unknown"
+                        filter_reason = f"negative training config match: {field} (distance: {min_distance:.4f})"
+
+                    skip_result = True
+                    break
+
+        return skip_result, filter_reason
+
+    def _add_result_to_all_results(
+            self, all_results: Dict[str, Dict[str, Any]], model_id: str,
+            table_name: str, distance: float, has_positive_entities: bool,
+            has_negative_entities: bool
+    ) -> None:
+        """Add a result to the all_results dictionary.
+
+        Args:
+            all_results: Dictionary of all results
+            model_id: ID of the model
+            table_name: Name of the table
+            distance: Distance score for this result
+            has_positive_entities: Whether positive entities were found
+            has_negative_entities: Whether negative entities were found
+        """
+        # If first time seeing this model, initialize its entry
+        if model_id not in all_results:
+            all_results[model_id] = {
+                'model_id': model_id,
+                'tables': [],
+                'table_initial_distances': {},
+                'match_source': 'metadata',
+                'filter_info': {
+                    'used_ner_query': has_positive_entities,
+                    'applied_negative_filter': has_negative_entities
+                }
+            }
+
+        # Add this table to the list of matching tables if not already there
+        if table_name not in all_results[model_id]['tables']:
+            all_results[model_id]['tables'].append(table_name)
+
+        # Store distance in table_initial_distances
+        if 'table_initial_distances' not in all_results[model_id]:
+            all_results[model_id]['table_initial_distances'] = {}
+
+        all_results[model_id]['table_initial_distances'][table_name] = distance
+
+    def _apply_intersection_filtering(
+            self, all_results: Dict[str, Dict[str, Any]],
+            models_by_entity_type: Dict[str, set]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Apply intersection filtering for models that match ALL entity types.
+
+        Args:
+            all_results: Dictionary of all results
+            models_by_entity_type: Dictionary tracking models by entity type
+
+        Returns:
+            Filtered dictionary of results
+        """
+        # Check that all entity types have at least one model
+        if all(len(models) > 0 for models in models_by_entity_type.values()):
+            valid_models = set.intersection(*models_by_entity_type.values())
+            self.logger.info(f"Models matching ALL positive entity criteria: {valid_models}")
+
+            # Filter all_results to only include models in the intersection
+            return {model_id: data for model_id, data in all_results.items()
+                    if model_id in valid_models}
 
         return all_results
 
