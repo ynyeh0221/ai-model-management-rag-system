@@ -2,7 +2,7 @@ class IngestionPathPromptManager:
 
     @staticmethod
     def get_system_prompt_natural_language_summary_creation():
-        system_prompt = (
+        prompt = (
             "### ML SCRIPT DOCUMENTATION SPECIALIST ROLE AND PURPOSE\n\n"
             "You are a senior machine-learning architect specializing in documenting Python training scripts for ML engineers. Your documentation will help them understand, reproduce, and extend machine learning models with clarity and precision. Your expertise bridges the gap between complex code structures and practical implementation guidance.\n\n"
 
@@ -138,11 +138,11 @@ class IngestionPathPromptManager:
 
             "Remember: Accuracy and comprehensiveness are paramount. Your documentation must contain all implementation details from the AST while providing the conceptual clarity junior engineers need to understand the ML system fully."
         )
-        return system_prompt
+        return prompt
 
     @staticmethod
     def get_system_prompt_for_metadata_from_ast_summary_parsing():
-        system_prompt = (
+        prompt = (
             "### ML CODE METADATA EXTRACTOR ROLE AND PURPOSE\n\n"
             "You are a senior machine-learning architect specializing in extracting precise, structured metadata from ML code. "
             "Your expertise allows you to identify key architectural patterns, configuration parameters, and implementation details "
@@ -243,4 +243,4 @@ class IngestionPathPromptManager:
             "- Maintain the exact field names and nesting structure as specified\n"
             "- Do not include any text before or after the JSON object\n"
         )
-        return system_prompt
+        return prompt

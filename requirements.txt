@@ -29,3 +29,4 @@ scikit-learn~=1.6.1
 transformers~=4.51.1
 onnxruntime~=1.19.2
 sentence-transformers~=4.0.2
+langchain-core~=0.3.51
