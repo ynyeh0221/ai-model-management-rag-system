@@ -162,16 +162,78 @@ class BaseSearchHandler:
         """
         # Initialize result dictionary
         all_results = {}
+        all_tables = list(table_weights.keys())
+        tables_to_search = all_tables.copy()
 
-        # Handle NER filters if provided
-        has_positive_entities = False
-        has_negative_entities = False
+        # For debugging
+        self.logger.info(f"Raw NER filters: {ner_filters}")
 
-        # Map entity types to their corresponding tables and query values
-        positive_table_queries = {}  # {table_name: query_value}
+        # Step 1: Analyze NER filters and determine positive/negative entities and their query values
+        entity_analysis_result = self._analyze_ner_filters(ner_filters, table_weights)
 
-        # For tracking tables by entity type (for intersection)
-        entity_type_tables = {}  # {entity_type: set(tables)}
+        has_positive_entities = entity_analysis_result["has_positive_entities"]
+        has_negative_entities = entity_analysis_result["has_negative_entities"]
+        positive_table_queries = entity_analysis_result["positive_table_queries"]
+        entity_type_tables = entity_analysis_result["entity_type_tables"]
+        negative_entities = entity_analysis_result["negative_entities"]
+
+        # Step 2: Determine which tables to search based on positive entities
+        tables_to_search = self._determine_tables_to_search(
+            has_positive_entities, entity_type_tables, chroma_filters, all_tables
+        )
+
+        # Log the analysis results
+        self.logger.info(f"NER analysis: positive={has_positive_entities}, negative={has_negative_entities}")
+        self.logger.info(f"Tables to search: {tables_to_search}")
+        self.logger.info(f"Table queries: {positive_table_queries}")
+        self.logger.info(f"Negative entities to filter: {negative_entities}")
+
+        # Step 3: Execute searches for positive NER fields
+        positive_search_results = await self._execute_positive_searches(
+            tables_to_search, has_positive_entities, positive_table_queries,
+            query, requested_limit, chroma_filters
+        )
+
+        # Step 4: Execute searches for negative NER fields
+        negative_results = {}
+        if has_negative_entities:
+            negative_results = await self._execute_negative_searches(
+                negative_entities, requested_limit
+            )
+
+        print(f"Positive results: {positive_search_results}")
+        print(f"Negative results: {negative_results}")
+
+        # Step 5: Process search results and apply filters
+        all_results = self._process_search_results(
+            positive_search_results, tables_to_search, entity_type_tables,
+            has_positive_entities, has_negative_entities, negative_results,
+            user_id
+        )
+
+        # Log summary of results
+        self.logger.info(f"Found {len(all_results)} models after NER filtering")
+        return all_results
+
+    def _analyze_ner_filters(self, ner_filters: Optional[Dict[str, Any]], table_weights: Dict[str, float]) -> Dict[
+        str, Any]:
+        """Analyze NER filters to determine positive and negative entities.
+
+        Args:
+            ner_filters: Named entity filters extracted from query
+            table_weights: Weights for each table
+
+        Returns:
+            Dictionary containing analysis results
+        """
+        # Initialize result
+        result = {
+            "has_positive_entities": False,
+            "has_negative_entities": False,
+            "positive_table_queries": {},  # {table_name: query_value}
+            "entity_type_tables": {},  # {entity_type: set(tables)}
+            "negative_entities": {}
+        }
 
         # Table mappings for each entity type using correct table names
         entity_table_mapping = {
@@ -180,97 +242,111 @@ class BaseSearchHandler:
             "training_config": ["model_training_configs"]
         }
 
-        # For debugging
-        self.logger.info(f"Raw NER filters: {ner_filters}")
+        # If no NER filters, return default values
+        if not ner_filters:
+            return result
 
-        negative_entities = {}
-        all_tables = list(table_weights.keys())
+        self.logger.info(f"Processing search with NER filters: {ner_filters}")
+
+        # Check architecture
+        if 'architecture' in ner_filters:
+            # Ensure it's a dict with value and is_positive fields
+            if isinstance(ner_filters['architecture'], dict) and 'value' in ner_filters['architecture']:
+                arch_value = ner_filters['architecture']['value']
+                is_positive = ner_filters['architecture'].get('is_positive', True)
+
+                # Only process if there's an actual value
+                if arch_value != "N/A":
+                    if is_positive:
+                        self.logger.info(f"Found positive architecture entity: {arch_value}")
+                        result["has_positive_entities"] = True
+                        # Map to correct table
+                        arch_tables = []
+                        for table in entity_table_mapping.get("architecture", []):
+                            if table in table_weights:
+                                arch_tables.append(table)
+                                # Use the architecture value as the query for this table
+                                result["positive_table_queries"][table] = arch_value
+
+                        # Store architecture tables for intersection
+                        if arch_tables:
+                            result["entity_type_tables"]["architecture"] = set(arch_tables)
+                    else:
+                        result["has_negative_entities"] = True
+                        result["negative_entities"]['architecture'] = arch_value
+
+        # Check dataset - note the nested structure
+        if 'dataset' in ner_filters:
+            # The dataset has a nested 'name' field
+            if isinstance(ner_filters['dataset'], dict) and 'value' in ner_filters['dataset']:
+                dataset_value = ner_filters['dataset'].get('value')
+                is_positive = ner_filters['dataset'].get('is_positive', True)
+
+                if dataset_value != "N/A":
+                    if is_positive:
+                        self.logger.info(f"Found positive dataset entity: {dataset_value}")
+                        result["has_positive_entities"] = True
+                        # Map to correct table
+                        dataset_tables = []
+                        for table in entity_table_mapping.get("dataset", []):
+                            if table in table_weights:
+                                dataset_tables.append(table)
+                                result["positive_table_queries"][table] = dataset_value
+
+                        # Store dataset tables for intersection
+                        if dataset_tables:
+                            result["entity_type_tables"]["dataset"] = set(dataset_tables)
+                    else:
+                        result["has_negative_entities"] = True
+                        result["negative_entities"]['dataset'] = dataset_value
+
+        # Check training config fields
+        if 'training_config' in ner_filters:
+            training_config = ner_filters['training_config']
+            training_tables = []
+
+            for field, data in training_config.items():
+                if isinstance(data, dict) and 'value' in data and data['value'] != "N/A":
+                    field_value = data['value']
+                    is_positive = data.get('is_positive', True)
+
+                    self.logger.info(f"Training config {field}: {field_value}, positive: {is_positive}")
+
+                    if is_positive:
+                        result["has_positive_entities"] = True
+                        # Add training config tables with the field value as query
+                        for table in entity_table_mapping.get("training_config", []):
+                            if table in table_weights and table not in training_tables:
+                                training_tables.append(table)
+                                # Use the field name and value in the query
+                                query_value = f"{field} {field_value}"
+                                result["positive_table_queries"][table] = query_value
+                    else:
+                        result["has_negative_entities"] = True
+                        result["negative_entities"].setdefault('training_config', {})[field] = field_value
+
+            # Store training config tables for intersection
+            if training_tables:
+                result["entity_type_tables"]["training_config"] = set(training_tables)
+
+        return result
+
+    def _determine_tables_to_search(
+            self, has_positive_entities: bool, entity_type_tables: Dict[str, set],
+            chroma_filters: Dict[str, Any], all_tables: List[str]
+    ) -> List[str]:
+        """Determine which tables to search based on positive entities.
+
+        Args:
+            has_positive_entities: Whether positive entities were found
+            entity_type_tables: Mapping of entity types to their corresponding tables
+            chroma_filters: Database filters in Chroma format
+            all_tables: List of all available tables
+
+        Returns:
+            List of tables to search
+        """
         tables_to_search = all_tables.copy()
-
-        # Step 1: Analyze NER filters and determine positive/negative entities and their query values
-        if ner_filters:
-            self.logger.info(f"Processing search with NER filters: {ner_filters}")
-
-            # Check architecture
-            if 'architecture' in ner_filters:
-                # Ensure it's a dict with value and is_positive fields
-                if isinstance(ner_filters['architecture'], dict) and 'value' in ner_filters['architecture']:
-                    arch_value = ner_filters['architecture']['value']
-                    is_positive = ner_filters['architecture'].get('is_positive', True)
-
-                    # Only process if there's an actual value
-                    if arch_value != "N/A":
-                        if is_positive:
-                            self.logger.info(f"Found positive architecture entity: {arch_value}")
-                            has_positive_entities = True
-                            # Map to correct table
-                            arch_tables = []
-                            for table in entity_table_mapping.get("architecture", []):
-                                if table in table_weights:
-                                    arch_tables.append(table)
-                                    # Use the architecture value as the query for this table
-                                    positive_table_queries[table] = arch_value
-
-                            # Store architecture tables for intersection
-                            if arch_tables:
-                                entity_type_tables["architecture"] = set(arch_tables)
-                        else:
-                            has_negative_entities = True
-                            negative_entities['architecture'] = arch_value
-
-            # Check dataset - note the nested structure
-            if 'dataset' in ner_filters:
-                # The dataset has a nested 'name' field
-                if isinstance(ner_filters['dataset'], dict) and 'value' in ner_filters['dataset']:
-                    dataset_value = ner_filters['dataset'].get('value')
-                    is_positive = ner_filters['dataset'].get('is_positive', True)
-
-                    if dataset_value != "N/A":
-                        if is_positive:
-                            self.logger.info(f"Found positive dataset entity: {dataset_value}")
-                            has_positive_entities = True
-                            # Map to correct table
-                            dataset_tables = []
-                            for table in entity_table_mapping.get("dataset", []):
-                                if table in table_weights:
-                                    dataset_tables.append(table)
-                                    positive_table_queries[table] = dataset_value
-
-                            # Store dataset tables for intersection
-                            if dataset_tables:
-                                entity_type_tables["dataset"] = set(dataset_tables)
-                        else:
-                            has_negative_entities = True
-                            negative_entities['dataset'] = dataset_value
-
-            # Check training config fields
-            if 'training_config' in ner_filters:
-                training_config = ner_filters['training_config']
-                training_tables = []
-
-                for field, data in training_config.items():
-                    if isinstance(data, dict) and 'value' in data and data['value'] != "N/A":
-                        field_value = data['value']
-                        is_positive = data.get('is_positive', True)
-
-                        self.logger.info(f"Training config {field}: {field_value}, positive: {is_positive}")
-
-                        if is_positive:
-                            has_positive_entities = True
-                            # Add training config tables with the field value as query
-                            for table in entity_table_mapping.get("training_config", []):
-                                if table in table_weights and table not in training_tables:
-                                    training_tables.append(table)
-                                    # Use the field name and value in the query
-                                    query_value = f"{field} {field_value}"
-                                    positive_table_queries[table] = query_value
-                        else:
-                            has_negative_entities = True
-                            negative_entities.setdefault('training_config', {})[field] = field_value
-
-                # Store training config tables for intersection
-                if training_tables:
-                    entity_type_tables["training_config"] = set(training_tables)
 
         # Determine which tables to search based on positive entities
         if has_positive_entities and entity_type_tables:
@@ -300,20 +376,33 @@ class BaseSearchHandler:
             self.logger.warning("No tables matched positive entity criteria, using all tables")
             tables_to_search = all_tables
 
-        # Log the analysis results
-        self.logger.info(f"NER analysis: positive={has_positive_entities}, negative={has_negative_entities}")
-        self.logger.info(f"Tables to search: {tables_to_search}")
-        self.logger.info(f"Table queries: {positive_table_queries}")
-        self.logger.info(f"Negative entities to filter: {negative_entities}")
+        return tables_to_search
 
-        # Step 2: Execute searches for positive NER fields
+    async def _execute_positive_searches(
+            self, tables_to_search: List[str], has_positive_entities: bool,
+            positive_table_queries: Dict[str, str], query: str,
+            requested_limit: int, chroma_filters: Dict[str, Any]
+    ) -> List[Dict[str, Any]]:
+        """Execute searches for positive NER fields.
+
+        Args:
+            tables_to_search: List of tables to search
+            has_positive_entities: Whether positive entities were found
+            positive_table_queries: Mapping of tables to their query values
+            query: The original user query
+            requested_limit: Number of results to return
+            chroma_filters: Database filters in Chroma format
+
+        Returns:
+            List of search results
+        """
         positive_search_tasks = []
         for table_name in tables_to_search:
             # Set base search limit
             search_limit = (
                 requested_limit * 40
                 if table_name == "model_descriptions"
-                else requested_limit * 5
+                else requested_limit * 3
                 if table_name == "model_date"
                 else requested_limit
             )
@@ -323,7 +412,7 @@ class BaseSearchHandler:
                 # Use the entity value as the query
                 table_query = positive_table_queries[table_name]
                 # Increase limit by 5x for NER queries
-                search_limit = search_limit * 5
+                search_limit = search_limit * 3
                 self.logger.info(f"Searching table {table_name} with NER query: {table_query} (limit: {search_limit})")
             else:
                 # Use the original query if no positive entity for this table
@@ -339,99 +428,130 @@ class BaseSearchHandler:
                 include=["metadatas", "documents", "distances"]
             ))
 
-        # Step 3: Execute searches for negative NER fields
+        # Execute all positive searches in parallel
+        return await asyncio.gather(*positive_search_tasks)
+
+    async def _execute_negative_searches(
+            self, negative_entities: Dict[str, Any], requested_limit: int
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Execute searches for negative NER fields.
+
+        Args:
+            negative_entities: Mapping of negative entity types to their values
+            requested_limit: Number of results to return
+
+        Returns:
+            Dictionary of negative search results
+        """
         negative_results = {}
-        if has_negative_entities:
-            negative_search_tasks = []
-            negative_table_queries = {}
+        negative_search_tasks = []
+        negative_table_queries = {}
 
-            # Prepare negative entity searches
-            for entity_type, value in negative_entities.items():
-                if entity_type == 'architecture':
-                    table = "model_architectures"
-                    negative_table_queries[table] = value
-                    negative_search_tasks.append(self.chroma_manager.search(
-                        collection_name=table,
-                        query=value,
-                        where={},
-                        limit=requested_limit * 5,  # Use higher limit for negative queries too
-                        include=["metadatas", "documents", "distances"]
-                    ))
-                elif entity_type == 'dataset':
-                    table = "model_datasets"
-                    negative_table_queries[table] = value
-                    negative_search_tasks.append(self.chroma_manager.search(
-                        collection_name=table,
-                        query=value,
-                        where={},
-                        limit=requested_limit * 5,
-                        include=["metadatas", "documents", "distances"]
-                    ))
-                elif entity_type == 'training_config':
-                    table = "model_training_configs"
-                    # For training_config, we need to handle multiple fields
-                    for field, field_value in value.items():
-                        if field_value != "N/A":
-                            query_value = f"{field} {field_value}"
-                            negative_table_queries[f"{table}_{field}"] = query_value
-                            negative_search_tasks.append(self.chroma_manager.search(
-                                collection_name=table,
-                                query=query_value,
-                                where={},
-                                limit=requested_limit * 5,
-                                include=["metadatas", "documents", "distances"]
-                            ))
+        # Prepare negative entity searches
+        for entity_type, value in negative_entities.items():
+            if entity_type == 'architecture':
+                table = "model_architectures"
+                negative_table_queries[table] = value
+                negative_search_tasks.append(self.chroma_manager.search(
+                    collection_name=table,
+                    query=value,
+                    where={},
+                    limit=requested_limit * 3,  # Use higher limit for negative queries too
+                    include=["metadatas", "documents", "distances"]
+                ))
+            elif entity_type == 'dataset':
+                table = "model_datasets"
+                negative_table_queries[table] = value
+                negative_search_tasks.append(self.chroma_manager.search(
+                    collection_name=table,
+                    query=value,
+                    where={},
+                    limit=requested_limit * 3,
+                    include=["metadatas", "documents", "distances"]
+                ))
+            elif entity_type == 'training_config':
+                table = "model_training_configs"
+                # For training_config, we need to handle multiple fields
+                for field, field_value in value.items():
+                    if field_value != "N/A":
+                        query_value = f"{field} {field_value}"
+                        negative_table_queries[f"{table}_{field}"] = query_value
+                        negative_search_tasks.append(self.chroma_manager.search(
+                            collection_name=table,
+                            query=query_value,
+                            where={},
+                            limit=requested_limit * 3,
+                            include=["metadatas", "documents", "distances"]
+                        ))
 
-            # Execute all negative searches in parallel
-            if negative_search_tasks:
-                negative_search_results = await asyncio.gather(*negative_search_tasks)
+        # Execute all negative searches in parallel
+        if negative_search_tasks:
+            negative_search_results = await asyncio.gather(*negative_search_tasks)
 
-                # Process negative search results
-                neg_table_idx = 0
-                for table, query_value in negative_table_queries.items():
-                    if neg_table_idx >= len(negative_search_results):
-                        break
+            # Process negative search results
+            neg_table_idx = 0
+            for table, query_value in negative_table_queries.items():
+                if neg_table_idx >= len(negative_search_results):
+                    break
 
-                    result = negative_search_results[neg_table_idx]
-                    neg_table_idx += 1
+                result = negative_search_results[neg_table_idx]
+                neg_table_idx += 1
 
-                    # Store results with their distances
-                    negative_results[table] = []
+                # Store results with their distances
+                negative_results[table] = []
 
-                    for idx, item in enumerate(result.get('results', [])):
-                        metadata = item.get('metadata', {})
-                        model_id = metadata.get('model_id', 'unknown')
+                for idx, item in enumerate(result.get('results', [])):
+                    metadata = item.get('metadata', {})
+                    model_id = metadata.get('model_id', 'unknown')
 
-                        if model_id == 'unknown':
-                            continue
+                    if model_id == 'unknown':
+                        continue
 
-                        # Get distance using the proper extraction method
-                        distance = self.distance_normalizer.extract_search_distance(
-                            result, idx, item, table.split('_')[0] if '_' in table else table
-                        )
+                    # Get distance using the proper extraction method
+                    distance = self.distance_normalizer.extract_search_distance(
+                        result, idx, item, table.split('_')[0] if '_' in table else table
+                    )
 
-                        negative_results[table].append({
-                            'model_id': model_id,
-                            'distance': distance,
-                            'metadata': metadata
-                        })
+                    negative_results[table].append({
+                        'model_id': model_id,
+                        'distance': distance,
+                        'metadata': metadata
+                    })
 
-                        self.logger.info(f"Negative result for {table}: model_id={model_id}, distance={distance:.4f}")
+                    self.logger.info(f"Negative result for {table}: model_id={model_id}, distance={distance:.4f}")
 
-        # Step 4: Execute all positive searches in parallel
-        positive_search_results = await asyncio.gather(*positive_search_tasks)
+        return negative_results
 
-        # Step 5: Track models that match each entity type (for intersection)
+    def _process_search_results(
+            self, positive_search_results: List[Dict[str, Any]], tables_to_search: List[str],
+            entity_type_tables: Dict[str, set], has_positive_entities: bool,
+            has_negative_entities: bool, negative_results: Dict[str, List[Dict[str, Any]]],
+            user_id: Optional[str]
+    ) -> Dict[str, Dict[str, Any]]:
+        """Process search results and apply filters.
+
+        Args:
+            positive_search_results: Results from positive entity searches
+            tables_to_search: List of tables that were searched
+            entity_type_tables: Mapping of entity types to their corresponding tables
+            has_positive_entities: Whether positive entities were found
+            has_negative_entities: Whether negative entities were found
+            negative_results: Results from negative entity searches
+            user_id: User ID for access control
+
+        Returns:
+            Dictionary of filtered search results
+        """
+        all_results = {}
+
+        # Track models that match each entity type (for intersection)
         models_by_entity_type = {}
         if has_positive_entities and len(entity_type_tables) > 1:
             # Only initialize this tracking when we have multiple entity types
             for entity_type in entity_type_tables.keys():
                 models_by_entity_type[entity_type] = set()
 
-        print(f"Positive results: {positive_search_results}")
-        print(f"Negative results: {negative_results}")
-
-        # Step 6: Process positive search results
+        # Process positive search results
         for table_idx, result in enumerate(positive_search_results):
             table_name = tables_to_search[table_idx]
 
@@ -465,7 +585,7 @@ class BaseSearchHandler:
                     result, idx, item, table_name
                 )
 
-                # Step 7: Check if this model should be filtered out based on negative entities
+                # Check if this model should be filtered out based on negative entities
                 if has_negative_entities and negative_results:
                     skip_result = False
                     filter_reason = ""
@@ -500,7 +620,7 @@ class BaseSearchHandler:
                         self.logger.info(f"Filtering out model {model_id} due to {filter_reason}")
                         continue
 
-                # Step 8: If we got here, the result passed all filters
+                # If we got here, the result passed all filters
                 # If first time seeing this model, initialize its entry
                 if model_id not in all_results:
                     all_results[model_id] = {
@@ -524,7 +644,7 @@ class BaseSearchHandler:
 
                 all_results[model_id]['table_initial_distances'][table_name] = distance
 
-        # Step 9: If we have multiple positive entity types, find models that match ALL entity types
+        # If we have multiple positive entity types, find models that match ALL entity types
         if has_positive_entities and len(models_by_entity_type) > 1:
             # Check that all entity types have at least one model
             if all(len(models) > 0 for models in models_by_entity_type.values()):
@@ -535,8 +655,6 @@ class BaseSearchHandler:
                 all_results = {model_id: data for model_id, data in all_results.items()
                                if model_id in valid_models}
 
-        # Log summary of results
-        self.logger.info(f"Found {len(all_results)} models after NER filtering")
         return all_results
 
     async def _fetch_complete_model_metadata(

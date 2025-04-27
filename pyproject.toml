@@ -29,6 +29,7 @@ psutil = "*"
 nltk = "*"
 spacy = "*"
 scikit-learn = "*"
+langchain_core = "*"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "*"
