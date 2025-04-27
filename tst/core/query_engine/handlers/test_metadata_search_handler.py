@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import AsyncMock, MagicMock
 
+from src.core.query_engine.handlers.utils.performance_metrics_calculator import PerformanceMetricsCalculator
 from src.core.query_engine.handlers.metadata_search_handler import MetadataSearchHandler
 from src.core.query_engine.handlers.utils.distance_normalizer import DistanceNormalizer
 from src.core.query_engine.handlers.utils.filter_translator import FilterTranslator
@@ -16,6 +17,7 @@ class TestMetadataSearchHandler(unittest.IsolatedAsyncioTestCase):
         self.access_control_manager = MagicMock(spec=AccessControlManager)
         self.filter_translator = MagicMock(spec=FilterTranslator)
         self.distance_normalizer = MagicMock(spec=DistanceNormalizer)
+        self.performance_metrics = MagicMock(spec=PerformanceMetricsCalculator)
 
         # Make search method an AsyncMock
         self.chroma_manager.search = AsyncMock()
@@ -25,7 +27,8 @@ class TestMetadataSearchHandler(unittest.IsolatedAsyncioTestCase):
             chroma_manager=self.chroma_manager,
             filter_translator=self.filter_translator,
             distance_normalizer=self.distance_normalizer,
-            access_control_manager=self.access_control_manager
+            access_control_manager=self.access_control_manager,
+            performance_metrics=self.performance_metrics
         )
 
         # Mock the MetadataTableManager
@@ -308,10 +311,6 @@ class TestMetadataSearchHandler(unittest.IsolatedAsyncioTestCase):
         # Restore the original methods we patched in setUp
         self.handler._extract_text_search_parameters = self.handler.__class__._extract_text_search_parameters.__get__(
             self.handler)
-        self.handler._sort_and_limit_search_results = self.handler.__class__._sort_and_limit_search_results.__get__(
-            self.handler)
-        self.handler._prepare_text_search_items = self.handler.__class__._prepare_text_search_items.__get__(
-            self.handler)
 
         # Setup test data
         query = "test query"
@@ -370,13 +369,49 @@ class TestMetadataSearchHandler(unittest.IsolatedAsyncioTestCase):
         self.handler._process_model_descriptions_text_search.return_value = all_results
 
         # For _calculate_model_distances, we'll create model distance data
-        # Since we restored the original _sort_and_limit_search_results method, we need to add distance values
         calculated_results = all_results.copy()
         calculated_results["model1"]["distance"] = 0.35  # (0.3 * 0.5 + 0.4 * 0.5)
         calculated_results["model2"]["distance"] = 0.25  # (0.2 * 0.5 + 0.3 * 0.5)
         calculated_results["model3"]["distance"] = 0.75  # (0.5 * 0.5 + 1.0 * 0.5) - missing table gets 1.0
 
         self.handler._calculate_model_distances.return_value = calculated_results
+
+        # Mock _sort_and_limit_search_results to return expected sorted list
+        sorted_results = [
+            calculated_results["model2"],  # Lowest distance first
+            calculated_results["model1"]  # Second-lowest distance
+        ]
+        self.handler._sort_and_limit_search_results.return_value = sorted_results
+
+        # Mock _prepare_text_search_items to return properly formatted items
+        prepared_items = [
+            {
+                "id": "model_metadata_model2",
+                "model_id": "model2",
+                "metadata": {"name": "Model 2", "description": "Test model 2"},
+                "rank": 1,
+                "match_source": "metadata",
+                "distance": 0.25,
+                "merged_description": ""
+            },
+            {
+                "id": "model_metadata_model1",
+                "model_id": "model1",
+                "metadata": {"name": "Model 1", "description": "Test model 1"},
+                "rank": 2,
+                "match_source": "metadata",
+                "distance": 0.35,
+                "merged_description": ""
+            }
+        ]
+        self.handler._prepare_text_search_items.return_value = prepared_items
+
+        # Mock performance metrics calculation
+        self.handler.performance_metrics.calculate_text_search_performance.return_value = {
+            "total_time_ms": 200.0,
+            "metadata_search_time_ms": 100.0,
+            "chunks_search_time_ms": 0.0
+        }
 
         # Call the method
         result = await self.handler.handle_metadata_search(query, parameters)
@@ -390,7 +425,7 @@ class TestMetadataSearchHandler(unittest.IsolatedAsyncioTestCase):
 
         # The results should be ordered by distance (lower is better)
         self.assertEqual(result["items"][0]["model_id"], "model2")  # Lowest distance first
-        self.assertEqual(result["items"][1]["model_id"], "model1")  # Second lowest distance
+        self.assertEqual(result["items"][1]["model_id"], "model1")  # Second-lowest distance
 
         # Model3 should not be included because limit is 2
         model_ids = [item["model_id"] for item in result["items"]]
@@ -403,7 +438,6 @@ class TestMetadataSearchHandler(unittest.IsolatedAsyncioTestCase):
         # Check metadata
         self.assertEqual(result["items"][0]["metadata"]["name"], "Model 2")
         self.assertEqual(result["items"][1]["metadata"]["name"], "Model 1")
-
 
 if __name__ == '__main__':
     unittest.main()

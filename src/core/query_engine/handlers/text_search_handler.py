@@ -1,6 +1,7 @@
 import time
 from typing import Dict, Any, Optional, Tuple
 
+from src.core.query_engine.handlers.utils.performance_metrics_calculator import PerformanceMetricsCalculator
 from src.core.query_engine.handlers.base_search_handler import BaseSearchHandler
 from src.core.query_engine.handlers.utils.distance_normalizer import DistanceNormalizer
 from src.core.query_engine.handlers.utils.filter_translator import FilterTranslator
@@ -11,8 +12,9 @@ from src.core.vector_db.chroma_manager import ChromaManager
 
 class TextSearchHandler(BaseSearchHandler):
     def __init__(self, metadata_table_manager: MetadataTableManager, access_control_manager: AccessControlManager, filter_translator: FilterTranslator,
-                 chroma_manager: ChromaManager, distance_normalizer: DistanceNormalizer):
+                 chroma_manager: ChromaManager, distance_normalizer: DistanceNormalizer, performance_metrics: PerformanceMetricsCalculator):
         super().__init__(chroma_manager, access_control_manager, filter_translator, distance_normalizer)
+        self.performance_metrics = performance_metrics
         self.metadata_table_manager = metadata_table_manager
 
     async def handle_text_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:

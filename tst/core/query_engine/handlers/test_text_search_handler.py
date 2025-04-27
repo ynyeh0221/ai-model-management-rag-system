@@ -2,6 +2,7 @@ import time
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from src.core.query_engine.handlers.utils.performance_metrics_calculator import PerformanceMetricsCalculator
 from src.core.query_engine.handlers.text_search_handler import TextSearchHandler
 from src.core.query_engine.handlers.utils.distance_normalizer import DistanceNormalizer
 from src.core.query_engine.handlers.utils.filter_translator import FilterTranslator
@@ -18,6 +19,7 @@ class TestTextSearchHandler(unittest.IsolatedAsyncioTestCase):
         self.filter_translator = MagicMock(spec=FilterTranslator)
         self.distance_normalizer = MagicMock(spec=DistanceNormalizer)
         self.metadata_table_manager = MagicMock(spec=MetadataTableManager)
+        self.performance_metrics = PerformanceMetricsCalculator()
 
         # Make search method an AsyncMock
         self.chroma_manager.search = AsyncMock()
@@ -28,7 +30,8 @@ class TestTextSearchHandler(unittest.IsolatedAsyncioTestCase):
             access_control_manager=self.access_control_manager,
             filter_translator=self.filter_translator,
             chroma_manager=self.chroma_manager,
-            distance_normalizer=self.distance_normalizer
+            distance_normalizer=self.distance_normalizer,
+            performance_metrics=self.performance_metrics
         )
 
         # Mock performance metrics
@@ -501,12 +504,8 @@ class TestTextSearchHandler(unittest.IsolatedAsyncioTestCase):
         """Test handle_text_search with more realistic integration of parent class methods"""
         # For this test, we'll patch fewer methods to make it more like an integration test
 
-        # Restore some of the original methods we patched in setUp
+        # Restore the original methods we patched in setUp, but be careful with static methods
         self.handler._extract_text_search_parameters = self.handler.__class__._extract_text_search_parameters.__get__(
-            self.handler)
-        self.handler._sort_and_limit_search_results = self.handler.__class__._sort_and_limit_search_results.__get__(
-            self.handler)
-        self.handler._prepare_text_search_items = self.handler.__class__._prepare_text_search_items.__get__(
             self.handler)
 
         # Setup test data
@@ -584,6 +583,38 @@ class TestTextSearchHandler(unittest.IsolatedAsyncioTestCase):
             calculated_results["model2"]["distance"] = 0.3  # Highest distance
             calculated_results["model3"]["distance"] = 0.1  # Lowest distance
             self.handler._calculate_model_distances.return_value = calculated_results
+
+            # Mock _sort_and_limit_search_results with expected sorted results
+            sorted_results = [
+                {"model_id": "model3", "distance": 0.1, "metadata": {"name": "Model 3", "description": "Description 3"},
+                 "match_source": "chunks"},
+                {"model_id": "model1", "distance": 0.2, "metadata": {"name": "Model 1", "description": "Description 1"},
+                 "match_source": "metadata+chunks"}
+            ]
+            self.handler._sort_and_limit_search_results.return_value = sorted_results
+
+            # Also need to mock _prepare_text_search_items to return the expected items
+            prepared_items = [
+                {
+                    "id": "model_metadata_model3",
+                    "model_id": "model3",
+                    "metadata": {"name": "Model 3", "description": "Description 3"},
+                    "rank": 1,
+                    "match_source": "chunks",
+                    "distance": 0.1,
+                    "merged_description": ""
+                },
+                {
+                    "id": "model_metadata_model1",
+                    "model_id": "model1",
+                    "metadata": {"name": "Model 1", "description": "Description 1"},
+                    "rank": 2,
+                    "match_source": "metadata+chunks",
+                    "distance": 0.2,
+                    "merged_description": ""
+                }
+            ]
+            self.handler._prepare_text_search_items.return_value = prepared_items
 
             # Mock performance metrics calculation
             self.handler.performance_metrics.calculate_text_search_performance.return_value = {

@@ -48,7 +48,7 @@ class SearchDispatcher:
         self.metadata_table_manager = MetadataTableManager(chroma_manager, access_control_manager)
 
         # Initialize handlers
-        self.metadata_search_manager = MetadataSearchHandler(self.chroma_manager, self.filter_translator, self.distance_normalizer, self.access_control_manager)
+        self.metadata_search_manager = MetadataSearchHandler(self.chroma_manager, self.filter_translator, self.distance_normalizer, self.performance_metrics, self.access_control_manager)
         self.image_search_manager = image_search_manager or ImageSearchHandler(
             chroma_manager=chroma_manager,
             image_embedder=image_embedder,

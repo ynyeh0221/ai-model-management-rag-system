@@ -1,6 +1,7 @@
 import time
 from typing import Dict, Any
 
+from src.core.query_engine.handlers.utils.performance_metrics_calculator import PerformanceMetricsCalculator
 from src.core.query_engine.handlers.base_search_handler import BaseSearchHandler
 from src.core.query_engine.handlers.utils.distance_normalizer import DistanceNormalizer
 from src.core.query_engine.handlers.utils.filter_translator import FilterTranslator
@@ -8,11 +9,12 @@ from src.core.query_engine.handlers.utils.metadata_table_manager import Metadata
 
 
 class MetadataSearchHandler(BaseSearchHandler):
-    def __init__(self, chroma_manager, filter_translator: FilterTranslator, distance_normalizer: DistanceNormalizer, access_control_manager=None):
+    def __init__(self, chroma_manager, filter_translator: FilterTranslator, distance_normalizer: DistanceNormalizer, performance_metrics: PerformanceMetricsCalculator, access_control_manager=None):
         super().__init__(chroma_manager, access_control_manager, filter_translator, distance_normalizer)
         self.chroma_manager = chroma_manager
         self.access_control_manager = access_control_manager
         self.metadata_table_manager = MetadataTableManager(chroma_manager, access_control_manager)
+        self.performance_metrics = performance_metrics
 
     async def handle_metadata_search(self, query: str, parameters: Dict[str, Any]) -> Dict[str, Any]:
         """
