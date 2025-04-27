@@ -30,6 +30,7 @@ nltk = "*"
 spacy = "*"
 scikit-learn = "*"
 langchain_core = "*"
+langchain_ollama = "*"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "*"
