@@ -7,7 +7,7 @@ All core functionality is exposed through the RAGSystem class, which can be call
 
 import asyncio
 import logging
-from typing import Dict, Any, Callable
+from typing import Dict, Any, Callable, List, Tuple
 
 def remove_thinking_sections(text: str) -> str:
     """
@@ -191,7 +191,7 @@ class RAGSystem:
         else:
             self._log(f"Unknown event type: {event_type}", level="warning")
 
-    async def process_query(self, query_text: str) -> Dict[str, Any]:
+    async def process_query(self, query_text: str, enable_comparison_detection: bool = True) -> Dict[str, Any]:
         """
         Process user query and return results
 
@@ -200,6 +200,7 @@ class RAGSystem:
 
         Args:
             query_text: User query text
+            enable_comparison_detection: Whether to enable comparison detection and processing
 
         Returns:
             Dict: Dictionary containing query results
@@ -208,58 +209,154 @@ class RAGSystem:
             self._log(f"Processing query: {query_text}")
             self._update_status("processing")
 
-            # Ensure cli_response_utils are initialized
+            # Ensure components are initialized
             if not self.components:
-                raise ValueError("System cli_response_utils not initialized")
+                raise ValueError("System components not initialized")
 
-            # Extract required cli_response_utils
-            query_parser = self.components["query_engine"]["query_parser"]
-            search_dispatcher = self.components["query_engine"]["search_dispatcher"]
-            query_analytics = self.components["query_engine"]["query_analytics"]
-            reranker = self.components["query_engine"]["reranker"]
+            # Extract required components
             llm_interface = self.components["response_generator"]["llm_interface"]
 
-            # Parse query
-            parsed_query = query_parser.parse_query(query_text)
-            self._log(f"Parse result: {parsed_query}")
+            # Detect if this is a comparison query (only if enabled)
+            if enable_comparison_detection:
+                is_comparison, retrieval_queries = await self._detect_comparison_query(query_text, llm_interface)
 
-            # Log query
-            query_analytics.log_query(self.user_id, query_text, parsed_query)
+                print(f"retrieval_queries: {retrieval_queries}")
 
-            self._update_status("searching")
+                if is_comparison and retrieval_queries:
+                    return await self._process_comparison_query(query_text, retrieval_queries, llm_interface)
 
-            # Dispatch query
-            search_results = await search_dispatcher.dispatch(
-                query=parsed_query.get("processed_query", query_text),
-                intent=parsed_query["intent"],
-                parameters=parsed_query["parameters"],
-                user_id=self.user_id
+            # If not a comparison query or comparison detection is disabled, process as a regular query
+            return await self._process_regular_query(query_text)
+
+        except Exception as e:
+            self._log(f"Query processing failed: {str(e)}", level="error")
+            self._update_status("error")
+            self._handle_error(e)
+
+            return {
+                "type": "error",
+                "query": query_text,
+                "error": str(e)
+            }
+
+    async def _process_comparison_query(self, query_text: str, retrieval_queries: List[str], llm_interface, max_output_counts: int = 4) -> Dict[
+        str, Any]:
+        """
+        Process a comparison query by handling multiple retrieval queries and generating a comparison response.
+
+        Args:
+            query_text: The original comparison query
+            retrieval_queries: List of retrieval queries to process
+            llm_interface: Interface to the LLM
+
+        Returns:
+            Dict: The comparison query result
+        """
+        self._log(f"Processing comparison query with {len(retrieval_queries)} retrieval queries")
+        self._update_status("processing_comparison")
+
+        # Process each retrieval query separately and collect results
+        comparison_results = []
+        for sub_query in retrieval_queries:
+            self._log(f"Processing sub-query: {sub_query}")
+            # Process the sub-query but skip LLM response generation
+            sub_result = await self._process_regular_query(sub_query, generate_llm_response=False, max_output_counts=(max_output_counts // len(retrieval_queries)))
+            comparison_results.append(sub_result)
+
+        # Once all retrieval queries are processed, generate a comparison response
+        self._update_status("generating_comparison")
+        comparison_response = await self._generate_comparison_response(
+            query_text, comparison_results, llm_interface
+        )
+
+        result = {
+            "type": "comparison_search",
+            "query": query_text,
+            "sub_queries": retrieval_queries,
+            "sub_results": comparison_results,
+            "final_response": comparison_response
+        }
+
+        self._update_status("completed")
+        self._handle_result(result)
+
+        print(f"result: {result['final_response']}")
+
+        return result
+
+    async def _process_regular_query(self, query_text: str, generate_llm_response: bool = True, max_output_counts: int = 3) -> Dict[str, Any]:
+        """
+        Process a regular (non-comparison) query.
+
+        Args:
+            query_text: The query text to process
+            generate_llm_response: Whether to generate an LLM response or just do retrieval/ranking
+
+        Returns:
+            Dict: The query result
+        """
+        # Extract required components
+        query_parser = self.components["query_engine"]["query_parser"]
+        search_dispatcher = self.components["query_engine"]["search_dispatcher"]
+        query_analytics = self.components["query_engine"]["query_analytics"]
+        reranker = self.components["query_engine"]["reranker"]
+        llm_interface = self.components["response_generator"]["llm_interface"]
+
+        # Parse query
+        parsed_query = query_parser.parse_query(query_text)
+        self._log(f"Parse result: {parsed_query}")
+
+        # Log query
+        query_analytics.log_query(self.user_id, query_text, parsed_query)
+
+        self._update_status("searching")
+
+        # Dispatch query
+        search_results = await search_dispatcher.dispatch(
+            query=parsed_query.get("processed_query", query_text),
+            intent=parsed_query["intent"],
+            parameters=parsed_query["parameters"],
+            user_id=self.user_id
+        )
+
+        # Process search results
+        self._update_status("processing_results")
+
+        if parsed_query["intent"] == "image_search":
+            # Image search processing
+            result = {
+                "type": "image_search",
+                "results": search_results,
+                "query": query_text,
+                "parsed_query": parsed_query
+            }
+        else:
+            # Regular search processing
+            reranked_results = self._process_search_results(
+                search_results, reranker, parsed_query, query_text, max_to_return=max_output_counts, rerank_threshold=0
             )
 
-            # Process search results
-            self._update_status("processing_results")
+            # Remove content field as it's not needed for display
+            reranked_results = self._remove_field(reranked_results, "content")
 
-            if parsed_query["intent"] == "image_search":
-                # Image search processing
-                result = {
-                    "type": "image_search",
-                    "results": search_results
-                }
-            else:
-                # Regular search processing
-                reranked_results = self._process_search_results(
-                    search_results, reranker, parsed_query, query_text, max_to_return=3, rerank_threshold=0
-                )
+            # Build results text
+            results_text = self._build_results_text(reranked_results)
 
-                # Remove content field as it's not needed for display
-                reranked_results = self._remove_field(reranked_results, "content")
+            # Initialize result structure
+            result = {
+                "type": "text_search" if generate_llm_response else "retrieval_only",
+                "query": query_text,
+                "parsed_query": parsed_query,
+                "search_results": reranked_results,
+                "results_text": results_text  # Include formatted results text
+            }
 
-                # Build results text
-                results_text = self._build_results_text(reranked_results)
-
+            # Generate LLM response if requested
+            if generate_llm_response:
                 # Build meta prompt
                 meta_prompt = self._build_meta_prompt(query_text, reranked_results, llm_interface)
                 print(f"Meta prompt: {meta_prompt}\n")
+                result["meta_prompt"] = meta_prompt
 
                 # Build system prompt
                 system_prompt = meta_prompt + "\n\n" + generate_report_prompt_extensions() + \
@@ -286,29 +383,234 @@ class RAGSystem:
                     content = str(final_response)
                     content = remove_thinking_sections(content)
 
-                result = {
-                    "type": "text_search",
-                    "query": query_text,
-                    "parsed_query": parsed_query,
-                    "search_results": reranked_results,
-                    "meta_prompt": meta_prompt,
-                    "final_response": content
-                }
+                result["final_response"] = content
+            else:
+                # Skip LLM response generation
+                result["final_response"] = ""
 
+        if generate_llm_response:
             self._update_status("completed")
             self._handle_result(result)
-            return result
 
+        return result
+
+    async def _detect_comparison_query(self, query_text: str, llm_interface) -> Tuple[bool, List[str]]:
+        """
+        Detect if a query is asking for a comparison and generate retrieval queries.
+
+        Args:
+            query_text: The original user query
+            llm_interface: Interface to the LLM
+
+        Returns:
+            Tuple[bool, List[str]]: (is_comparison, list_of_retrieval_queries)
+        """
+        system_prompt = (
+            "You are an expert AI assistant tasked with analyzing search queries. "
+            "Your task is to determine if a query is asking for a comparison between two or more entities, "
+            "and if so, to break it down into separate 'Find' retrieval queries."
+            "\n\n"
+            "Follow these steps:\n"
+            "1. Determine if the query is asking for a comparison (e.g., differences, similarities, contrasts).\n"
+            "2. If it IS a comparison query, identify the entities being compared.\n"
+            "3. For each entity, create a separate retrieval query that starts with 'Find' followed by the entity and its relevant attributes.\n"
+            "4. Keep the retrieval queries concise and focused on the specific entity.\n"
+            "5. If it is NOT a comparison query, return 'false' and an empty list.\n"
+            "\n"
+            "Format your response as a JSON object with two fields:\n"
+            "- 'is_comparison': true or false\n"
+            "- 'retrieval_queries': a list of strings, each being a separate 'Find' retrieval query"
+        )
+
+        user_prompt = f"Analyze this query: {query_text}"
+
+        response = llm_interface.generate_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.05,
+            max_tokens=3000
+        )
+
+        try:
+            # Parse the JSON response
+            if isinstance(response, dict) and 'content' in response:
+                content = response['content']
+            else:
+                content = str(response)
+
+            import json
+            import re
+
+            # Extract JSON from the response (it might be wrapped in markdown code blocks)
+            json_pattern = r'```json\s*(.*?)\s*```'
+            match = re.search(json_pattern, content, re.DOTALL)
+            if match:
+                json_str = match.group(1)
+            else:
+                # If not in code blocks, try to find the JSON directly
+                json_pattern = r'({.*})'
+                match = re.search(json_pattern, content, re.DOTALL)
+                if match:
+                    json_str = match.group(1)
+                else:
+                    json_str = content
+
+            result = json.loads(json_str)
+            return result.get('is_comparison', False), result.get('retrieval_queries', [])
         except Exception as e:
-            self._log(f"Query processing failed: {str(e)}", level="error")
-            self._update_status("error")
-            self._handle_error(e)
+            self._log(f"Error parsing comparison detection response: {str(e)}", level="error")
+            return False, []
 
-            return {
-                "type": "error",
-                "query": query_text,
-                "error": str(e)
-            }
+    async def _generate_comparison_response(self, original_query: str, comparison_results: List[Dict],
+                                            llm_interface) -> str:
+        """
+        Generate a comparison response based on multiple query results.
+
+        Args:
+            original_query: The original comparison query
+            comparison_results: List of results from individual retrieval queries
+            llm_interface: Interface to the LLM
+
+        Returns:
+            str: The generated comparison response
+        """
+        system_prompt = (
+            "You are a senior machine learning architect with expertise in creating clear technical comparisons. "
+            "Your task is to synthesize multiple search results into a comprehensive comparison "
+            "that addresses the user's original query."
+            "\n\n"
+            "### THINKING PROCESS REQUIREMENTS\n\n"
+            "Before constructing your comparison, engage in thorough analytical reasoning enclosed in <thinking></thinking> tags that demonstrates:\n"
+            "- Carefully analyzing the original query to identify what aspects need comparison\n"
+            "- Systematically evaluating all provided search results for each entity\n"
+            "- Identifying significant points of comparison across the entities\n"
+            "- Organizing comparison points by technical relevance and importance\n"
+            "- Distinguishing between explicit facts and implied conclusions\n"
+            "- Recognizing information gaps and acknowledging limitations\n"
+            "- Building progressively deeper insights about the compared entities\n"
+            "- Finding patterns and connections that might not be immediately obvious\n"
+            "- Considering alternative interpretations of the technical differences\n\n"
+
+            "Your thinking should flow naturally and organically, demonstrating genuine discovery and insight "
+            "rather than mechanical analysis. Start with basic observations, develop deeper connections gradually, "
+            "and show how your understanding evolves as you process the information. Use natural language phrases "
+            "like 'Hmm...', 'This is interesting because...', 'Wait, let me think about...', 'Actually...', "
+            "'Now that I look at it...', 'This reminds me of...', 'I wonder if...', etc."
+            "\n\n"
+
+            "### COMPARISON STRUCTURE REQUIREMENTS\n\n"
+            "After your comprehensive thinking process, structure your technical comparison to include:\n\n"
+
+            "1. **Overview of Comparison**\n"
+            "   - Brief context about the entities being compared\n"
+            "   - Why this comparison matters from a technical perspective\n"
+            "   - Key findings at a high level\n\n"
+
+            "2. **Systematic Feature Comparison**\n"
+            "   - Direct side-by-side comparison of key technical attributes\n"
+            "   - Quantitative differences when available\n"
+            "   - Qualitative assessments of differences\n\n"
+
+            "3. **Architectural Analysis**\n"
+            "   - Fundamental design differences\n"
+            "   - Technical trade-offs in each approach\n"
+            "   - Architectural strengths and limitations\n\n"
+
+            "4. **Performance Considerations**\n"
+            "   - Efficiency differences\n"
+            "   - Scalability comparisons\n"
+            "   - Resource requirements\n\n"
+
+            "5. **Use Case Suitability**\n"
+            "   - Scenarios where one approach excels over others\n"
+            "   - Optimal application contexts\n"
+            "   - Boundary conditions\n\n"
+
+            "6. **Technical Insights**\n"
+            "   - Deeper patterns or principles revealed by the comparison\n"
+            "   - Technical lessons that can be applied elsewhere\n"
+            "   - Unique engineering considerations\n\n"
+
+            "7. **Information Gaps & Uncertainties**\n"
+            "   - Explicit acknowledgment of missing critical information\n"
+            "   - Areas where further investigation would be valuable\n\n"
+
+            "Adapt this structure as appropriate to the specific query and available information, "
+            "expanding sections with substantial data and condensing or omitting those without sufficient support."
+            "\n\n"
+
+            "### STYLE AND FORMAT GUIDANCE\n\n"
+            "Present your comparison according to these principles:\n\n"
+
+            "**Technical Precision**\n"
+            "- Define technical terms upon first use\n"
+            "- Use precise, unambiguous language\n"
+            "- Maintain mathematical and statistical accuracy\n"
+            "- Present numerical data with appropriate units and precision\n\n"
+
+            "**Clarity and Accessibility**\n"
+            "- Structure information with clear headers and subheaders\n"
+            "- Use concise paragraphs focused on single main ideas\n"
+            "- Employ tables for structured parameter comparisons when appropriate\n"
+            "- Include visual descriptions when it enhances understanding\n\n"
+
+            "**Evidence-Based Analysis**\n"
+            "- Ground all comparisons in the data provided\n"
+            "- Differentiate between direct observations and derived insights\n"
+            "- Maintain transparent reasoning chains\n"
+            "- Note explicitly when making connections not stated in original sources\n\n"
+
+            "**Balance and Fairness**\n"
+            "- Present balanced analysis of strengths and limitations\n"
+            "- Avoid unwarranted preference for one approach\n"
+            "- Acknowledge uncertainty where appropriate\n"
+            "- Consider potential biases in the underlying data\n\n"
+
+            "Your response should read as if written by a senior ML architect with deep technical knowledge "
+            "and practical implementation experience, balancing theoretical understanding with "
+            "pragmatic engineering considerations."
+        )
+
+        # Build user prompt with original query and all results
+        user_prompt = f"Original comparison query: {original_query}\n\n"
+
+        for i, result in enumerate(comparison_results, 1):
+            user_prompt += f"=== RESULT SET #{i} ===\n"
+            user_prompt += f"Query: {result.get('query', 'N/A')}\n"
+
+            if result.get('type') == 'error':
+                user_prompt += f"ERROR: {result.get('error', 'Unknown error')}\n"
+                continue
+
+            # Use the results_text field if available, otherwise just note that results were found
+            if 'results_text' in result:
+                user_prompt += f"Search results:\n{result.get('results_text', 'N/A')}\n\n"
+            else:
+                user_prompt += f"Search results: Available but not shown in detail\n\n"
+
+        user_prompt += (
+            "Please synthesize these search results into a comprehensive comparison that addresses "
+            "the original query. Follow the thinking process and structure outlined in your instructions. "
+            "Focus on identifying meaningful similarities and differences between the entities being compared, "
+            "and organize your analysis in a way that provides clear technical insights."
+        )
+
+        response = llm_interface.generate_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.25,
+            max_tokens=32000
+        )
+
+        # Process result
+        if isinstance(response, dict) and 'content' in response:
+            content = response['content']
+            content = remove_thinking_sections(content)
+        else:
+            content = str(response)
+            content = remove_thinking_sections(content)
+
+        return content
 
     def execute_command(self, command: str) -> Dict[str, Any]:
         """

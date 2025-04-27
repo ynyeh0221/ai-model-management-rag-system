@@ -378,24 +378,6 @@ class QueryParser:
         if intent == QueryIntent.IMAGE_SEARCH:
             parameters.update(self._extract_image_parameters(query_text, valid_model_ids))
 
-        if intent == QueryIntent.COMPARISON and valid_model_ids is None or len(valid_model_ids) < 2:
-            # Detect “compare … between A and B” or “differences … of A and B”
-            pattern = re.compile(
-                r"(?P<prefix>.*?)(?:compare|differences?)\s+.*\s+(?:between|of)\s+"
-                r"(?P<cohortA>[\w\-\s]+?)\s+(?:and|vs\.?)\s+"
-                r"(?P<cohortB>[\w\-\s]+?)[\?\.]?\s*$",
-                re.IGNORECASE
-            )
-
-            m = pattern.match(query_text)
-            if m:
-                # extract
-                base_query = m.group("prefix").strip()  # everything before “between A and B”
-                cohortA = m.group("cohortA").strip()
-                cohortB = m.group("cohortB").strip()
-                parameters["cohorts"] = [cohortA, cohortB]
-                parameters["base_query"] = base_query
-
         return parameters
 
     def _extract_entities_with_llm(self, query_text: str, max_retries: int = 5) -> Dict[str, Any]:
@@ -861,7 +843,7 @@ class QueryParser:
                 )
 
                 if is_meaningful:
-                    # Add the lemmatized, lowercase form
+                    # Add the legitimatized, lowercase form
                     processed_tokens.append(token.lemma_.lower())
 
         # Combine all processed tokens into a single string

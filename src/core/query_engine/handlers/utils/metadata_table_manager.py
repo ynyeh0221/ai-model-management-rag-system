@@ -3,7 +3,26 @@ from typing import Dict
 
 
 class MetadataTableManager:
-    """Utility class for handling metadata table operations."""
+    """
+    Utility class for handling metadata table operations.
+
+    This class provides functionality for searching and retrieving data from metadata tables
+    stored in a Chroma vector database. It supports weighted searches across multiple tables,
+    filtering results based on query criteria, and access control mechanisms.
+
+    Attributes:
+        chroma_manager: An instance of a Chroma database manager that provides search and retrieval capabilities.
+        access_control_manager: Optional manager for handling access control permissions.
+        logger: Logger instance for error reporting and debugging.
+
+    Example:
+        >>> chroma_mgr = ChromaManager()
+        >>> access_ctrl = AccessControlManager()
+        >>> metadata_mgr = MetadataTableManager(chroma_mgr, access_ctrl)
+        >>> weights = metadata_mgr.get_metadata_table_weights()
+        >>> async def search_example():
+        ...     results = await metadata_mgr.search_metadata_table("model_descriptions", "transformer", {}, 10, 0.27)
+    """
 
     def __init__(self, chroma_manager, access_control_manager=None):
         self.chroma_manager = chroma_manager

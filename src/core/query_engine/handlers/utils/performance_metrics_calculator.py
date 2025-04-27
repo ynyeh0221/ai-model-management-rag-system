@@ -3,7 +3,43 @@ from typing import Dict, Any
 
 
 class PerformanceMetricsCalculator:
-    """Utility class for calculating and logging performance metrics."""
+    """
+    Utility class for calculating and logging performance metrics related to search operations.
+
+    This class provides functionality to measure and record various timing metrics
+    for search operations, as well as utilities to sanitize parameters for inclusion
+    in response metadata.
+
+    Attributes:
+        analytics: Optional analytics service for logging performance metrics.
+                   If provided, metrics will be logged through this service.
+
+    Examples:
+        Basic usage without analytics:
+        >>> calculator = PerformanceMetricsCalculator()
+        >>> start_time = time.time()
+        >>> # ... perform search operations ...
+        >>> metrics = calculator.calculate_text_search_performance(
+        ...     start_time=start_time,
+        ...     metadata_search_time=150.0,
+        ...     chunks_search_time=250.0,
+        ...     parameters={'query': 'example search'}
+        ... )
+        >>> print(metrics['total_search_time_ms'])
+        400.0
+
+        Usage with analytics service:
+        >>> analytics_service = AnalyticsService()
+        >>> calculator = PerformanceMetricsCalculator(analytics=analytics_service)
+        >>> # ... perform search with query_id ...
+        >>> metrics = calculator.calculate_text_search_performance(
+        ...     start_time=start_time,
+        ...     metadata_search_time=100.0,
+        ...     chunks_search_time=200.0,
+        ...     parameters={'query': 'example', 'query_id': 'abc123'}
+        ... )
+        # Performance metrics will be logged to analytics service
+    """
 
     def __init__(self, analytics=None):
         self.analytics = analytics

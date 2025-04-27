@@ -3,7 +3,29 @@ from typing import Dict, Any
 
 
 class FilterTranslator:
-    """Utility class for translating filters to Chroma format."""
+    """
+    Utility class for translating filter dictionaries to Chroma format.
+
+    This class provides methods to convert various filter formats to the specific
+    format expected by Chroma, which is a vector database designed for embeddings
+    and similarity search. It handles different types of input filters and
+    converts them to a consistent structure that Chroma can process.
+
+    Attributes:
+        logger: A logger instance for logging warnings and errors.
+
+    Examples:
+        >>> translator = FilterTranslator()
+        >>> filters = {"field": "value"}
+        >>> chroma_filters = translator.translate_to_chroma(filters)
+        >>> print(chroma_filters)
+        {'field': {'$eq': 'value'}}
+
+        >>> filters = {"field1": "value1", "field2": "value2"}
+        >>> chroma_filters = translator.translate_to_chroma(filters)
+        >>> print(chroma_filters)
+        {'$and': [{'field1': {'$eq': 'value1'}}, {'field2': {'$eq': 'value2'}}]}
+    """
 
     def __init__(self):
         self.logger = logging.getLogger(__name__)

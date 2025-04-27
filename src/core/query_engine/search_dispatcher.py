@@ -2,12 +2,10 @@ import logging
 import time
 from typing import Dict, Any, Optional, Union
 
-from src.core.query_engine.handlers.comparison_handler import ComparisonHandler
 from src.core.query_engine.handlers.fallback_search_handler import FallbackSearchHandler
 from src.core.query_engine.handlers.image_search_handler import ImageSearchHandler
 from src.core.query_engine.handlers.metadata_search_handler import MetadataSearchHandler
 from src.core.query_engine.handlers.notebook_request_handler import NotebookRequestHandler
-from src.core.query_engine.handlers.utils.comparison_generator import ComparisonGenerator
 from src.core.query_engine.handlers.utils.distance_normalizer import DistanceNormalizer
 from src.core.query_engine.handlers.utils.filter_translator import FilterTranslator
 from src.core.query_engine.handlers.utils.metadata_table_manager import MetadataTableManager
@@ -47,12 +45,10 @@ class SearchDispatcher:
         self.filter_translator = FilterTranslator()
         self.model_data_fetcher = ModelDataFetcher(chroma_manager, access_control_manager)
         self.performance_metrics = PerformanceMetricsCalculator(analytics)
-        self.comparison_generator = ComparisonGenerator()
         self.metadata_table_manager = MetadataTableManager(chroma_manager, access_control_manager)
 
         # Initialize handlers
         self.metadata_search_manager = MetadataSearchHandler(self.chroma_manager, self.filter_translator, self.distance_normalizer, self.access_control_manager)
-        self.comparison_manager = ComparisonHandler(self.metadata_table_manager, self.metadata_search_manager, self.access_control_manager, self.filter_translator, self.chroma_manager, self.distance_normalizer)
         self.image_search_manager = image_search_manager or ImageSearchHandler(
             chroma_manager=chroma_manager,
             image_embedder=image_embedder,
@@ -70,7 +66,6 @@ class SearchDispatcher:
         # Define handlers mapping for dispatching
         self.handlers = {
             QueryIntent.RETRIEVAL: self.metadata_search_manager.handle_metadata_search,
-            QueryIntent.COMPARISON: self.comparison_manager.handle_comparison,
             QueryIntent.NOTEBOOK: self.notebook_manager.handle_notebook_request,  # Updated line
             QueryIntent.IMAGE_SEARCH: self.image_search_manager.handle_image_search,
             QueryIntent.METADATA: self.metadata_search_manager.handle_metadata_search,

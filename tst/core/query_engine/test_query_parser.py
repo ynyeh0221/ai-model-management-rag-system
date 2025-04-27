@@ -75,29 +75,6 @@ class TestQueryParser(unittest.TestCase):
         intent, reason = self.parser.classify_intent(query)
         self.assertEqual(intent.value, "retrieval")
 
-    def test_classify_intent_with_langchain(self):
-        """Test intent classification using LangChain."""
-        # First need to add the intent_chain attribute and enable langchain
-        mock_intent_chain = MagicMock()
-        mock_intent_chain.invoke.return_value = '{"intent": "comparison", "reason": "Test reason"}'
-
-        # Set the attributes directly instead of using patch.object
-        self.parser.use_langchain = True
-        self.parser.intent_chain = mock_intent_chain
-
-        try:
-            query = "Compare GPT-3 vs GPT-4"
-            intent, reason = self.parser.classify_intent(query)
-            self.assertEqual(intent.value, "comparison")
-            self.assertEqual(reason, "Test reason")
-
-            # Verify LangChain was called
-            mock_intent_chain.invoke.assert_called_with({"query": query})
-        finally:
-            # Clean up
-            self.parser.use_langchain = False
-            delattr(self.parser, 'intent_chain')
-
     def test_classify_intent_langchain_error(self):
         """Test intent classification when LangChain fails."""
         # First need to add the intent_chain attribute and enable langchain
@@ -135,19 +112,6 @@ class TestQueryParser(unittest.TestCase):
             self.assertIn("filters", params)
             self.assertIn("model_id", params["filters"])
             self.assertEqual(params["filters"]["model_id"], "ABC123")
-
-        # Test with multiple model IDs
-        query = "Compare model id ABC123 and model id XYZ789"
-
-        with patch.object(self.parser, '_extract_model_id_mentions', return_value=["ABC123", "XYZ789"]):
-            params = self.parser.extract_parameters(query, QueryIntent.COMPARISON)
-
-            # Check multiple model IDs were extracted
-            self.assertIn("filters", params)
-            self.assertIn("model_id", params["filters"])
-            self.assertEqual(len(params["filters"]["model_id"]), 2)
-            self.assertIn("ABC123", params["filters"]["model_id"])
-            self.assertIn("XYZ789", params["filters"]["model_id"])
 
     def test_extract_parameters_limit_and_sort(self):
         """Test extraction of limit and sort parameters."""

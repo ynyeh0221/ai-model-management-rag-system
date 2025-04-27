@@ -4,7 +4,30 @@ from typing import Dict, Any
 
 
 class DistanceNormalizer:
-    """Utility class for normalizing and calculating distances."""
+    """"
+    Utility class for normalizing and calculating distances between vectors or points.
+
+    This class provides methods to normalize distance values using an inverted exponential
+    kernel transformation and to extract distance values from search result structures.
+
+    The normalization process scales raw distance values to a range [0,1] using the formula:
+        normalized = 1 - exp(-α * d_norm)
+    where d_norm is the linearly scaled distance and α is a sharpness parameter (default: 5.0).
+
+    Attributes:
+        logger: A logging.Logger instance for debug output.
+
+    Examples:
+        >>> normalizer = DistanceNormalizer()
+        >>> stats = {'min': 0.0, 'max': 1.0}
+        >>> normalizer.normalize_distance(0.5, stats)
+        0.9179
+
+        >>> result = {'distances': [0.1, 0.2, 0.3]}
+        >>> item = {'metadata': {'model_id': 'model1'}}
+        >>> normalizer.extract_search_distance(result, 1, item)
+        0.2
+    """
 
     def __init__(self):
         self.logger = logging.getLogger(__name__)
