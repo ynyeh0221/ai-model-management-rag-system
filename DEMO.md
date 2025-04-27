@@ -16,13 +16,17 @@ The system supports model retrieval based on the following attributes:
 - **Time ranges**: Filter by creation or modification date
 - **Specific applications**: Such as game AI (2048 game)
 
+The query system supports both inclusion and exclusion logic, meaning users can use keywords like "not" and "without" to refine searches effectively.
+
 **Example queries:**
 ```
 Which models use Unet architectures?
-Please find models created in March 2025 and using CNN.
 Please find models created in April and using CelebA.
 List all seq2seq models that use attention mechanisms.
 Show me models trained on the MNIST dataset using autoencoder.
+Show me models using autoencoder but not trained on MNIST dataset.
+Please find models created in March 2025 and using RNN.
+Please find models not using RNN, created in March 2025.
 ```
 
 ### 2. Specific Model Details Retrieval
