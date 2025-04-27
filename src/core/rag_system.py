@@ -248,7 +248,7 @@ class RAGSystem:
             else:
                 # Regular search processing
                 reranked_results = self._process_search_results(
-                    search_results, reranker, parsed_query, query_text, max_to_return=3
+                    search_results, reranker, parsed_query, query_text, max_to_return=3, rerank_threshold=0
                 )
 
                 # Remove content field as it's not needed for display
@@ -371,7 +371,7 @@ class RAGSystem:
     # The following are private methods migrated from the QueryProcessor class
 
     def _process_search_results(self, search_results, reranker, parsed_query, query_text,
-                                max_to_return=10, rerank_threshold=0.108):
+                                max_to_return=10, rerank_threshold=0.1):
         """Process and rerank search results"""
         if not isinstance(search_results, dict) or 'items' not in search_results:
             return []
