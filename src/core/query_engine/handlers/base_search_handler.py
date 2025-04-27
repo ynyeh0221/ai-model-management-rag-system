@@ -161,9 +161,7 @@ class BaseSearchHandler:
             Dictionary of search results
         """
         # Initialize result dictionary
-        all_results = {}
         all_tables = list(table_weights.keys())
-        tables_to_search = all_tables.copy()
 
         # For debugging
         self.logger.info(f"Raw NER filters: {ner_filters}")
@@ -616,8 +614,9 @@ class BaseSearchHandler:
 
         return all_results
 
+    @staticmethod
     def _initialize_entity_type_tracking(
-            self, has_positive_entities: bool, entity_type_tables: Dict[str, set]
+            has_positive_entities: bool, entity_type_tables: Dict[str, set]
     ) -> Dict[str, set]:
         """Initialize tracking for models by entity type.
 
@@ -635,8 +634,9 @@ class BaseSearchHandler:
                 models_by_entity_type[entity_type] = set()
         return models_by_entity_type
 
+    @staticmethod
     def _find_matching_entity_type(
-            self, table_name: str, entity_type_tables: Dict[str, set]
+            table_name: str, entity_type_tables: Dict[str, set]
     ) -> Optional[str]:
         """Find the entity type that matches the given table.
 
@@ -668,8 +668,9 @@ class BaseSearchHandler:
             return self.access_control_manager.check_access({'metadata': metadata}, user_id, "view")
         return True
 
+    @staticmethod
     def _track_model_for_entity_type(
-            self, has_positive_entities: bool, matching_entity_type: Optional[str],
+            has_positive_entities: bool, matching_entity_type: Optional[str],
             models_by_entity_type: Dict[str, set], model_id: str,
             entity_type_tables: Dict[str, set]
     ) -> None:
@@ -686,8 +687,9 @@ class BaseSearchHandler:
             if matching_entity_type in models_by_entity_type:  # Safety check
                 models_by_entity_type[matching_entity_type].add(model_id)
 
+    @staticmethod
     def _should_filter_by_negative_entities(
-            self, model_id: str, negative_results: Dict[str, List[Dict[str, Any]]]
+            model_id: str, negative_results: Dict[str, List[Dict[str, Any]]]
     ) -> Tuple[bool, str]:
         """Check if a model should be filtered out based on negative entities.
 
@@ -728,8 +730,9 @@ class BaseSearchHandler:
 
         return skip_result, filter_reason
 
+    @staticmethod
     def _add_result_to_all_results(
-            self, all_results: Dict[str, Dict[str, Any]], model_id: str,
+            all_results: Dict[str, Dict[str, Any]], model_id: str,
             table_name: str, distance: float, has_positive_entities: bool,
             has_negative_entities: bool
     ) -> None:
@@ -853,7 +856,7 @@ class BaseSearchHandler:
         return all_results
 
     async def _process_model_descriptions_text_search(self, query: str, all_results: Dict[str, Any],
-                                                      search_limit: int = 12) -> Dict[str, Any]:
+                                                      search_limit: int = 10) -> Dict[str, Any]:
         """Process model descriptions using chunks.
 
         Args:
@@ -868,7 +871,7 @@ class BaseSearchHandler:
         most similar records to calculate the distance.
         """
         # Define the max number of chunks to use for distance calculation
-        top_chunks_for_distance = 6
+        top_chunks_for_distance = 5
         for model_id, model_data in all_results.items():
             try:
                 if not model_id or model_id == 'unknown':
@@ -970,7 +973,8 @@ class BaseSearchHandler:
 
         return all_results
 
-    def _sort_and_merge_descriptions_by_offset(self, chunks: list[dict]) -> tuple[list[str], str]:
+    @staticmethod
+    def _sort_and_merge_descriptions_by_offset(chunks: list[dict]) -> tuple[list[str], str]:
         """Sorts chunk descriptions by their offset and merges them into a single string.
 
         Args:
@@ -1073,7 +1077,8 @@ class BaseSearchHandler:
 
         return all_results
 
-    def _sort_and_limit_search_results(self, all_results: Dict[str, Any], requested_limit: int) -> List[
+    @staticmethod
+    def _sort_and_limit_search_results(all_results: Dict[str, Any], requested_limit: int) -> List[
         Dict[str, Any]]:
         """Convert to list, sort by distance, and limit to requested number of results."""
         # Convert to list
@@ -1085,7 +1090,8 @@ class BaseSearchHandler:
         # Limit to requested number of results
         return output_list[:requested_limit]
 
-    def _prepare_text_search_items(self, output_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    @staticmethod
+    def _prepare_text_search_items(output_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Prepare final result items."""
         items = []
         for rank, model in enumerate(output_list):

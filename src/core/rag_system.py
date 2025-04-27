@@ -8,126 +8,7 @@ All core functionality is exposed through the RAGSystem class, which can be call
 import asyncio
 import logging
 from typing import Dict, Any, Callable, List, Tuple
-
-def remove_thinking_sections(text: str) -> str:
-    """
-    Remove all <thinking>...</thinking> sections from the input text.
-
-    Args:
-        text: The input string containing zero or more <thinking> sections.
-
-    Returns:
-        A new string with all <thinking> sections and their content removed.
-    """
-    import re
-    # Regex to match <thinking>...</thinking> including multiline content (non-greedy)
-    pattern = re.compile(r'<thinking>.*?</thinking>', re.DOTALL)
-    # Replace matched sections with an empty string
-    return pattern.sub('', text)
-
-def generate_report_prompt_extensions():
-    thinking_process_requirements = (
-        "### THINKING PROCESS REQUIREMENTS\n\n"
-        "Before constructing each report, engage in thorough analytical reasoning enclosed in <thinking></thinking> tags that demonstrates:\n"
-        "- Carefully analyzes the user's query to identify core information needs and technical context\n"
-        "- Systematically evaluates all provided search results from most to least relevant\n"
-        "- Identifies connections, patterns, and relationships between different data points\n"
-        "- Considers multiple possible interpretations of the technical data\n"
-        "- Distinguishes between explicit facts and implied conclusions\n"
-        "- Recognizes information gaps and acknowledges limitations in the available data\n"
-        "- Prioritizes information based on relevance to the specific ML engineering context\n"
-        "- Builds a coherent mental model of the ML system being described\n"
-        "- Formulates insights that would be valuable for implementation or reproduction\n\n"
-        "Your thinking should progress from initial observations to deeper technical understanding, "
-        "questioning assumptions and validating conclusions as you proceed. Document this process "
-        "transparently, showing how your understanding evolves based on the evidence provided."
-    )
-
-    report_structure_requirements = (
-        "### REPORT STRUCTURE REQUIREMENTS\n\n"
-        "Structure your technical ML report with the following cli_response_utils in a logical flow:\n\n"
-        "1. **Executive Summary**\n"
-        "   - Brief overview of the ML system or component being described\n"
-        "   - Key technical characteristics and distinguishing features\n"
-        "   - Primary findings derived from the search results\n\n"
-
-        "2. **Technical Specifications**\n"
-        "   - Detailed breakdown of architecture, cli_response_utils, and configurations\n"
-        "   - Clear presentation of relevant parameters, hyperparameters, or settings\n"
-        "   - Explicit citation of data sources for each technical specification\n\n"
-
-        "3. **Implementation Details**\n"
-        "   - Critical procedures, methodologies, or algorithms employed\n"
-        "   - Technical workflows with step-by-step breakdowns where appropriate\n"
-        "   - Environment or infrastructure requirements if specified\n\n"
-
-        "4. **Performance Analysis**\n"
-        "   - Quantitative metrics and evaluation results\n"
-        "   - Comparative analysis or benchmarking if available\n"
-        "   - Critical assessment of strengths and limitations\n\n"
-
-        "5. **Technical Insights**\n"
-        "   - Synthesis of key technical findings across search results\n"
-        "   - Identification of design principles or patterns in the implementation\n"
-        "   - Analysis of trade-offs or engineering decisions\n\n"
-
-        "6. **Reproduction Guidance**\n"
-        "   - Essential information for ML engineers to reproduce the system\n"
-        "   - Potential challenges or considerations for implementation\n"
-        "   - Extension or optimization opportunities if apparent\n\n"
-
-        "7. **Information Gaps**\n"
-        "   - Explicit acknowledgment of missing critical information\n"
-        "   - Identification of areas that would benefit from additional data\n\n"
-
-        "Adapt this structure as appropriate to the specific query and available information, "
-        "expanding sections with substantial data and condensing or omitting those without sufficient support."
-    )
-
-    style_and_format_guidance = (
-        "### STYLE AND FORMAT GUIDANCE\n\n"
-        "Format your ML technical report according to these principles:\n\n"
-
-        "**Technical Precision**\n"
-        "- Define ALL technical terms upon first use\n"
-        "- Use precise, unambiguous technical language\n"
-        "- Maintain mathematical and statistical accuracy\n"
-        "- Present numerical data with appropriate units and precision\n"
-        "- Use consistent technical terminology throughout\n\n"
-
-        "**Clarity and Accessibility**\n"
-        "- Structure information with clear headers and subheaders\n"
-        "- Use concise paragraphs with single main ideas\n"
-        "- Employ bullet points for lists of features, parameters, or specifications\n"
-        "- Use tables for structured parameter comparisons when appropriate\n"
-        "- Include visual representations or pseudocode when it enhances understanding\n\n"
-
-        "**Citation and Evidence**\n"
-        "- Cite specific search results for all technical claims\n"
-        "- Differentiate between direct citations and derived insights\n"
-        "- Maintain transparent reasoning chains from evidence to conclusions\n"
-        "- Clearly indicate when information spans multiple sources\n"
-        "- Note explicitly when making comparisons or connections not stated in original sources\n\n"
-
-        "**Objectivity and Completeness**\n"
-        "- Present balanced analysis of strengths and limitations\n"
-        "- Avoid excessive technical jargon without explanation\n"
-        "- Acknowledge uncertainty where appropriate\n"
-        "- Ensure no critical conceptual gaps in explanations\n"
-        "- Bridge between theoretical concepts and practical implementation\n\n"
-
-        "The report should read as if written by a senior ML architect with deep technical knowledge "
-        "and practical implementation experience, balancing theoretical understanding with "
-        "pragmatic engineering considerations."
-    )
-
-    combined_meta_prompt_extensions = (
-        f"{thinking_process_requirements}\n\n"
-        f"{report_structure_requirements}\n\n"
-        f"{style_and_format_guidance}\n\n"
-    )
-
-    return combined_meta_prompt_extensions
+from src.core.prompt_manager.query_path_prompt_manager import QueryPathPromptManager
 
 class RAGSystem:
     """
@@ -353,14 +234,8 @@ class RAGSystem:
 
             # Generate LLM response if requested
             if generate_llm_response:
-                # Build meta prompt
-                meta_prompt = self._build_meta_prompt(query_text, reranked_results, llm_interface)
-                print(f"Meta prompt: {meta_prompt}\n")
-                result["meta_prompt"] = meta_prompt
-
-                # Build system prompt
-                system_prompt = meta_prompt + "\n\n" + generate_report_prompt_extensions() + \
-                                f"You are provided user query and its searched results.\n"
+                system_prompt = QueryPathPromptManager.get_system_prompt_for_regular_response()
+                result["meta_prompt"] = system_prompt
 
                 # Build user prompt
                 user_prompt = f"\nUser query:\n{query_text}\n"
@@ -378,10 +253,10 @@ class RAGSystem:
                 # Process result
                 if isinstance(final_response, dict) and 'content' in final_response:
                     content = final_response['content']
-                    content = remove_thinking_sections(content)
+                    content = self.remove_thinking_sections(content)
                 else:
                     content = str(final_response)
-                    content = remove_thinking_sections(content)
+                    content = self.remove_thinking_sections(content)
 
                 result["final_response"] = content
             else:
@@ -405,23 +280,7 @@ class RAGSystem:
         Returns:
             Tuple[bool, List[str]]: (is_comparison, list_of_retrieval_queries)
         """
-        system_prompt = (
-            "You are an expert AI assistant tasked with analyzing search queries. "
-            "Your task is to determine if a query is asking for a comparison between two or more entities, "
-            "and if so, to break it down into separate 'Find' retrieval queries."
-            "\n\n"
-            "Follow these steps:\n"
-            "1. Determine if the query is asking for a comparison (e.g., differences, similarities, contrasts).\n"
-            "2. If it IS a comparison query, identify the entities being compared.\n"
-            "3. For each entity, create a separate retrieval query that starts with 'Find' followed by the entity and its relevant attributes.\n"
-            "4. Keep the retrieval queries concise and focused on the specific entity.\n"
-            "5. If it is NOT a comparison query, return 'false' and an empty list.\n"
-            "\n"
-            "Format your response as a JSON object with two fields:\n"
-            "- 'is_comparison': true or false\n"
-            "- 'retrieval_queries': a list of strings, each being a separate 'Find' retrieval query"
-        )
-
+        system_prompt = QueryPathPromptManager.get_system_prompt_for_comparison_query()
         user_prompt = f"Analyze this query: {query_text}"
 
         response = llm_interface.generate_structured_response(
@@ -441,7 +300,7 @@ class RAGSystem:
             import json
             import re
 
-            # Extract JSON from the response (it might be wrapped in markdown code blocks)
+            # Extract JSON from the response (it might be wrapped in Markdown code blocks)
             json_pattern = r'```json\s*(.*?)\s*```'
             match = re.search(json_pattern, content, re.DOTALL)
             if match:
@@ -474,104 +333,7 @@ class RAGSystem:
         Returns:
             str: The generated comparison response
         """
-        system_prompt = (
-            "You are a senior machine learning architect with expertise in creating clear technical comparisons. "
-            "Your task is to synthesize multiple search results into a comprehensive comparison "
-            "that addresses the user's original query."
-            "\n\n"
-            "### THINKING PROCESS REQUIREMENTS\n\n"
-            "Before constructing your comparison, engage in thorough analytical reasoning enclosed in <thinking></thinking> tags that demonstrates:\n"
-            "- Carefully analyzing the original query to identify what aspects need comparison\n"
-            "- Systematically evaluating all provided search results for each entity\n"
-            "- Identifying significant points of comparison across the entities\n"
-            "- Organizing comparison points by technical relevance and importance\n"
-            "- Distinguishing between explicit facts and implied conclusions\n"
-            "- Recognizing information gaps and acknowledging limitations\n"
-            "- Building progressively deeper insights about the compared entities\n"
-            "- Finding patterns and connections that might not be immediately obvious\n"
-            "- Considering alternative interpretations of the technical differences\n\n"
-
-            "Your thinking should flow naturally and organically, demonstrating genuine discovery and insight "
-            "rather than mechanical analysis. Start with basic observations, develop deeper connections gradually, "
-            "and show how your understanding evolves as you process the information. Use natural language phrases "
-            "like 'Hmm...', 'This is interesting because...', 'Wait, let me think about...', 'Actually...', "
-            "'Now that I look at it...', 'This reminds me of...', 'I wonder if...', etc."
-            "\n\n"
-
-            "### COMPARISON STRUCTURE REQUIREMENTS\n\n"
-            "After your comprehensive thinking process, structure your technical comparison to include:\n\n"
-
-            "1. **Overview of Comparison**\n"
-            "   - Brief context about the entities being compared\n"
-            "   - Why this comparison matters from a technical perspective\n"
-            "   - Key findings at a high level\n\n"
-
-            "2. **Systematic Feature Comparison**\n"
-            "   - Direct side-by-side comparison of key technical attributes\n"
-            "   - Quantitative differences when available\n"
-            "   - Qualitative assessments of differences\n\n"
-
-            "3. **Architectural Analysis**\n"
-            "   - Fundamental design differences\n"
-            "   - Technical trade-offs in each approach\n"
-            "   - Architectural strengths and limitations\n\n"
-
-            "4. **Performance Considerations**\n"
-            "   - Efficiency differences\n"
-            "   - Scalability comparisons\n"
-            "   - Resource requirements\n\n"
-
-            "5. **Use Case Suitability**\n"
-            "   - Scenarios where one approach excels over others\n"
-            "   - Optimal application contexts\n"
-            "   - Boundary conditions\n\n"
-
-            "6. **Technical Insights**\n"
-            "   - Deeper patterns or principles revealed by the comparison\n"
-            "   - Technical lessons that can be applied elsewhere\n"
-            "   - Unique engineering considerations\n\n"
-
-            "7. **Information Gaps & Uncertainties**\n"
-            "   - Explicit acknowledgment of missing critical information\n"
-            "   - Areas where further investigation would be valuable\n\n"
-
-            "Adapt this structure as appropriate to the specific query and available information, "
-            "expanding sections with substantial data and condensing or omitting those without sufficient support."
-            "\n\n"
-
-            "### STYLE AND FORMAT GUIDANCE\n\n"
-            "Present your comparison according to these principles:\n\n"
-
-            "**Technical Precision**\n"
-            "- Define technical terms upon first use\n"
-            "- Use precise, unambiguous language\n"
-            "- Maintain mathematical and statistical accuracy\n"
-            "- Present numerical data with appropriate units and precision\n\n"
-
-            "**Clarity and Accessibility**\n"
-            "- Structure information with clear headers and subheaders\n"
-            "- Use concise paragraphs focused on single main ideas\n"
-            "- Employ tables for structured parameter comparisons when appropriate\n"
-            "- Include visual descriptions when it enhances understanding\n\n"
-
-            "**Evidence-Based Analysis**\n"
-            "- Ground all comparisons in the data provided\n"
-            "- Differentiate between direct observations and derived insights\n"
-            "- Maintain transparent reasoning chains\n"
-            "- Note explicitly when making connections not stated in original sources\n\n"
-
-            "**Balance and Fairness**\n"
-            "- Present balanced analysis of strengths and limitations\n"
-            "- Avoid unwarranted preference for one approach\n"
-            "- Acknowledge uncertainty where appropriate\n"
-            "- Consider potential biases in the underlying data\n\n"
-
-            "Your response should read as if written by a senior ML architect with deep technical knowledge "
-            "and practical implementation experience, balancing theoretical understanding with "
-            "pragmatic engineering considerations."
-        )
-
-        # Build user prompt with original query and all results
+        system_prompt = QueryPathPromptManager.generate_system_prompt_for_comparison_response()
         user_prompt = f"Original comparison query: {original_query}\n\n"
 
         for i, result in enumerate(comparison_results, 1):
@@ -605,10 +367,10 @@ class RAGSystem:
         # Process result
         if isinstance(response, dict) and 'content' in response:
             content = response['content']
-            content = remove_thinking_sections(content)
+            content = self.remove_thinking_sections(content)
         else:
             content = str(response)
-            content = remove_thinking_sections(content)
+            content = self.remove_thinking_sections(content)
 
         return content
 
@@ -670,8 +432,6 @@ class RAGSystem:
                 "error": str(e)
             }
 
-    # The following are private methods migrated from the QueryProcessor class
-
     def _process_search_results(self, search_results, reranker, parsed_query, query_text,
                                 max_to_return=10, rerank_threshold=0.1):
         """Process and rerank search results"""
@@ -683,11 +443,10 @@ class RAGSystem:
 
         # Loop through each item and add content field
         for item in items_to_rerank:
-            item['content'] = ("Model description: " + item.get('merged_description', '') +
-                               ", created year: " + item.get('created_year', '') +
-                               ", created month: " + item.get('created_month', '') +
-                               ", last modified year: " + item.get('last_modified_year', '') +
-                               ", last modified month: " + item.get('last_modified_month', ''))
+            item['content'] = ("Model description: " + item.get('merged_description', '') + "\n" +
+                               "architecture is: " + item.get('metadata', {}).get('architecture', '') + "\n" +
+                               "dataset is: " + item.get('metadata', {}).get('dataset', {})
+                               )
 
         if reranker and items_to_rerank:
             self._log(f"Sending {len(items_to_rerank)} items to reranker")
@@ -700,13 +459,15 @@ class RAGSystem:
         else:
             return items_to_rerank
 
-    def _remove_field(self, dict_list, field_to_remove):
+    @staticmethod
+    def _remove_field(dict_list, field_to_remove):
         """Remove a field from all dictionaries in a list"""
         if not dict_list:
             return []
         return [{k: v for k, v in item.items() if k != field_to_remove} for item in dict_list]
 
-    def _build_results_text(self, reranked_results):
+    @staticmethod
+    def _build_results_text(reranked_results):
         """Build structured text of search results"""
         import json
 
@@ -756,96 +517,6 @@ class RAGSystem:
 
         return results_text
 
-    def _build_meta_prompt(self, query_text, reranked_results, llm_interface):
-        """Build meta prompt for the LLM"""
-        result_schema = "Model ID, File Size, Created On, Last Modified, Framework, Architecture, Dataset, Training Configuration, Description"
-
-        # Construct prompt builder logic
-        system_prompt = (
-            "### META-PROMPT GENERATOR ROLE AND PURPOSE\n\n"
-            "You are a senior machine-learning architect with expertise in creating clear technical documentation. Your task is to craft concise yet comprehensive meta-prompts that will generate high-quality ML system reports for engineers to learn, understand, reproduce, and extend machine learning systems.\n\n"
-
-            "### THINKING PROCESS REQUIREMENTS\n\n"
-            "Before constructing each meta-prompt, engage in thorough analytical reasoning enclosed in <thinking></thinking> tags that demonstrates:\n"
-            "- Analysis of the user's specific request and technical context\n"
-            "- Identification of key information requirements for the target ML engineers\n"
-            "- Consideration of potential knowledge gaps that need addressing\n"
-            "- Assessment of required technical depth and breadth\n"
-            "- Strategy for ensuring factual accuracy while providing meaningful insights\n\n"
-
-            "### META-PROMPT STRUCTURE REQUIREMENTS\n\n"
-            "Construct a single, high-level meta-prompt that includes the following elements in a logical flow:\n\n"
-
-            "1. **Request Contextualization**\n"
-            "   - Clearly restate the user's original request to establish focus\n"
-            "   - Frame the specific ML engineering context the response should address\n\n"
-
-            "2. **Data Source Guidelines**\n"
-            "   - Explicitly instruct to use ONLY the provided search results and runtime data\n"
-            "   - Prohibit any form of hallucination, fabrication, or invented details\n"
-            "   - Require transparency when information is incomplete or unavailable\n\n"
-
-            "3. **Analytical Framework**\n"
-            "   - Direct the LLM to explain how the search results specifically answer the user query\n"
-            "   - Require analysis to be derived solely from the provided data\n"
-            "   - Instruct to synthesize insights across multiple results when applicable\n\n"
-
-            "4. **Information Awareness**\n"
-            "   - Inform that there are {result_count} search results available\n"
-            "   - Note that results are sorted by similarity in decreasing order\n"
-            "   - Instruct to prioritize higher-ranked results while considering all relevant information\n\n"
-
-            "5. **Technical Communication Standards**\n"
-            "   - Establish the role as a senior ML architect writing for technical ML engineers\n"
-            "   - Require clear definitions for all technical terms without exception\n"
-            "   - Mandate systematic explanation that leaves no conceptual gaps\n"
-            "   - Instruct to use appropriate technical precision while remaining accessible\n\n"
-
-            "6. **Response Quality Requirements**\n"
-            "   - Require meaningful, substantive responses rather than restatements or generalities\n"
-            "   - Mandate explicit \"No data found\" statements when search results lack relevant information\n"
-            "   - Instruct to highlight limitations in the available data when present\n\n"
-
-            "### STYLE AND FORMAT GUIDANCE\n\n"
-            "- The meta-prompt should be concise yet complete (typically 150-250 words)\n"
-            "- Avoid any references to other LLM identifiers or systems\n"
-            "- Focus entirely on the user's intent and technical requirements\n"
-            "- Use precise technical language appropriate for ML engineering contexts\n"
-            "- Structure instructions in a natural, logical progression\n\n"
-
-            "### REMINDERS\n\n"
-            "- DO NOT answer the user's query yourself - return only the meta-prompt text\n"
-            "- Include NO actual data in your response - the meta-prompt is a template for future use\n"
-            "- Ensure your thinking process demonstrates genuine technical reasoning rather than mechanical steps\n"
-            "- The ideal meta-prompt balances technical precision with clarity and completeness"
-        )
-
-        user_prompt = (
-            f"User query: {query_text}\n"
-            f"Result schema: {result_schema}\n"
-            f"Number of results: {len(reranked_results)}\n"
-            "DO NOT answer the user's query yourself - return only the meta-prompt text\n"
-        )
-
-        builder_response = llm_interface.generate_structured_response(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            temperature=0.05,
-            max_tokens=32000
-        )
-
-        # Safely extract constructed prompt text
-        if isinstance(builder_response, dict):
-            constructed_prompt = (
-                    builder_response.get('content')
-                    or builder_response.get('text')
-                    or (builder_response.get('message') or {}).get('content')
-                    or str(builder_response))
-        else:
-            constructed_prompt = str(builder_response)
-
-        return remove_thinking_sections(constructed_prompt.strip()).strip()
-
     # Internal helper methods
 
     def _log(self, message: str, level: str = "info") -> None:
@@ -871,3 +542,20 @@ class RAGSystem:
     def _handle_error(self, error: Exception) -> None:
         """Handle error"""
         self.callbacks["on_error"](error)
+
+    @staticmethod
+    def remove_thinking_sections(text: str) -> str:
+        """
+        Remove all <thinking>...</thinking> sections from the input text.
+
+        Args:
+            text: The input string containing zero or more <thinking> sections.
+
+        Returns:
+            A new string with all <thinking> sections and their content removed.
+        """
+        import re
+        # Regex to match <thinking>...</thinking> including multiline content (non-greedy)
+        pattern = re.compile(r'<thinking>.*?</thinking>', re.DOTALL)
+        # Replace matched sections with an empty string
+        return pattern.sub('', text)
