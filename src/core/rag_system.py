@@ -97,6 +97,30 @@ class RAGSystem:
             # Extract required components
             llm_interface = self.components["response_generator"]["llm_interface"]
 
+
+            # Check query clarity
+            clarity_result = await self._check_query_clarity(query_text, llm_interface)
+
+            # If query is not clear, return a special result for the interface to handle
+            if not clarity_result['is_clear']:
+                self._log(f"Query needs clarification: {clarity_result['reason']}")
+                self._update_status("needs_clarification")
+
+                result = {
+                    "type": "needs_clarification",
+                    "query": query_text,
+                    "clarity_result": clarity_result
+                }
+
+                self._handle_result(result)
+                return result
+
+            # If we have an improved query, use it
+            if clarity_result['improved_query'] != query_text:
+                self._log(f"Query improved from: '{query_text}' to: '{clarity_result['improved_query']}'")
+                query_text = clarity_result['improved_query']
+
+
             # Detect if this is a comparison query (only if enabled)
             if enable_comparison_detection:
                 is_comparison, retrieval_queries = await self._detect_comparison_query(query_text, llm_interface)
@@ -118,6 +142,68 @@ class RAGSystem:
                 "type": "error",
                 "query": query_text,
                 "error": str(e)
+            }
+
+    async def _check_query_clarity(self, query_text: str, llm_interface) -> Dict[str, Any]:
+        """
+        Check query clarity and suggest improvements if needed.
+
+        Args:
+            query_text: The original user query
+            llm_interface: Interface to the LLM
+
+        Returns:
+            Dict: Dictionary containing clarity assessment
+        """
+        system_prompt = QueryPathPromptManager.get_system_prompt_for_query_clarity()
+        user_prompt = f"Analyze this query: {query_text}"
+
+        self._log(f"Checking clarity of query: {query_text}")
+
+        response = llm_interface.generate_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.05,
+            max_tokens=10000
+        )
+
+        if isinstance(response, dict) and 'content' in response:
+            content = response['content']
+        else:
+            content = str(response)
+
+        import json
+        import re
+
+        # Try to extract JSON from content
+        json_pattern = r'```json\s*(.*?)\s*```'
+        match = re.search(json_pattern, content, re.DOTALL)
+        if match:
+            json_str = match.group(1)
+        else:
+            json_pattern = r'({.*})'
+            match = re.search(json_pattern, content, re.DOTALL)
+            if match:
+                json_str = match.group(1)
+            else:
+                json_str = content
+
+        try:
+            result = json.loads(json_str)
+            self._log(f"Query clarity result: {result}")
+            return {
+                'is_clear': result.get('is_clear', True),
+                'improved_query': result.get('improved_query', query_text),
+                'suggestions': result.get('suggestions', []),
+                'reason': result.get('reason', "")
+            }
+        except Exception as e:
+            self._log(f"Error parsing query clarity response: {str(e)}", level="error")
+            return {
+                'is_clear': True,  # Default to assuming query is clear on error
+                'improved_query': query_text,
+                'suggestions': [],
+                'reason': f"Error analyzing query clarity: {str(e)}"
             }
 
     async def _process_comparison_query(self, query_text: str, retrieval_queries: List[str], llm_interface, max_output_counts: int = 4) -> Dict[

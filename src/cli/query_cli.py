@@ -186,6 +186,51 @@ class CLIInterface:
                 # Simple string result
                 print(result.get("result", ""))
 
+        elif result.get("type") == "needs_clarification":
+            # Handle query that needs clarification
+            query = result.get("query", "")
+            clarity_result = result.get("clarity_result", {})
+
+            print("\nYour query could be clearer:")
+            print(f"Reason: {clarity_result.get('reason', 'No reason provided')}")
+
+            improved_query = clarity_result.get('improved_query', query)
+            suggestions = clarity_result.get('suggestions', [])
+
+            print("\nSuggestions:")
+            print(f"0. Improved query: {improved_query}")
+
+            for i, suggestion in enumerate(suggestions, 1):
+                print(f"{i}. {suggestion}")
+
+            print(f"{len(suggestions) + 1}. Use original query: {query}")
+            print(f"{len(suggestions) + 2}. Enter a new query")
+
+            while True:
+                try:
+                    choice = input("Select an option (number): ")
+                    choice_num = int(choice)
+
+                    if choice_num == 0:
+                        new_query = improved_query
+                        break
+                    elif 1 <= choice_num <= len(suggestions):
+                        new_query = suggestions[choice_num - 1]
+                        break
+                    elif choice_num == len(suggestions) + 1:
+                        new_query = query
+                        break
+                    elif choice_num == len(suggestions) + 2:
+                        new_query = input("Enter your new query: ")
+                        break
+                    else:
+                        print("Invalid selection. Please try again.")
+                except ValueError:
+                    print("Please enter a number.")
+
+            # Process the new query
+            asyncio.run(self.rag_system.process_query(new_query))
+
     def _handle_error(self, error):
         """Handle error callback"""
         print(f"\nERROR: {str(error)}")
