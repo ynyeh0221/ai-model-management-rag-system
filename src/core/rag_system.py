@@ -72,7 +72,7 @@ class RAGSystem:
         else:
             self._log(f"Unknown event type: {event_type}", level="warning")
 
-    async def process_query(self, query_text: str, enable_comparison_detection: bool = True) -> Dict[str, Any]:
+    async def process_query(self, query_text: str, enable_clarity_check: bool = False, enable_comparison_detection: bool = True) -> Dict[str, Any]:
         """
         Process user query and return results
 
@@ -85,6 +85,9 @@ class RAGSystem:
 
         Returns:
             Dict: Dictionary containing query results
+            :param query_text:
+            :param enable_comparison_detection:
+            :param enable_clarity_check:
         """
         try:
             self._log(f"Processing query: {query_text}")
@@ -97,28 +100,28 @@ class RAGSystem:
             # Extract required components
             llm_interface = self.components["response_generator"]["llm_interface"]
 
+            # Check query clarity if enabled
+            if enable_clarity_check:
+                clarity_result = await self._check_query_clarity(query_text, llm_interface)
 
-            # Check query clarity
-            clarity_result = await self._check_query_clarity(query_text, llm_interface)
+                # If query is not clear, return a special result for the interface to handle
+                if not clarity_result['is_clear']:
+                    self._log(f"Query needs clarification: {clarity_result['reason']}")
+                    self._update_status("needs_clarification")
 
-            # If query is not clear, return a special result for the interface to handle
-            if not clarity_result['is_clear']:
-                self._log(f"Query needs clarification: {clarity_result['reason']}")
-                self._update_status("needs_clarification")
+                    result = {
+                        "type": "needs_clarification",
+                        "query": query_text,
+                        "clarity_result": clarity_result
+                    }
 
-                result = {
-                    "type": "needs_clarification",
-                    "query": query_text,
-                    "clarity_result": clarity_result
-                }
+                    self._handle_result(result)
+                    return result
 
-                self._handle_result(result)
-                return result
-
-            # If we have an improved query, use it
-            if clarity_result['improved_query'] != query_text:
-                self._log(f"Query improved from: '{query_text}' to: '{clarity_result['improved_query']}'")
-                query_text = clarity_result['improved_query']
+                # If we have an improved query, use it
+                if clarity_result['improved_query'] != query_text:
+                    self._log(f"Query improved from: '{query_text}' to: '{clarity_result['improved_query']}'")
+                    query_text = clarity_result['improved_query']
 
 
             # Detect if this is a comparison query (only if enabled)
