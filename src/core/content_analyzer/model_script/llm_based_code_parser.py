@@ -503,7 +503,7 @@ class LLMBasedCodeParser:
         self.ast_summary_generator.analyze_and_visualize_model(file_path,diagram_path)
         final['diagram_path'] = str(diagram_path.resolve())
 
-        # STEP 7: Remove unneeded fields
+        # STEP 8: Remove unneeded fields
         final.pop("_trace", None)
 
         print(f"Final metadata (from AST summary): {final}")
