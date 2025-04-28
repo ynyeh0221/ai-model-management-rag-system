@@ -1,0 +1,8 @@
+[server]
+# hide watchdog warning (you already had this)
+disableWatchdogWarning = false
+
+# add ONE of these to turn off watching entirely:
+fileWatcherType = "none"
+# – or –
+watchFileSystem = false
