@@ -183,8 +183,7 @@ When a user submits a query through the CLI interface (`UIRunner`), the system f
 | Category          | Tools / Libraries |
 |-------------------|------------------|
 | Language          | Python 3.9+, JavaScript (React) |
-| Backend           | FastAPI / Flask |
-| Frontend          | React, Tailwind CSS, Zustand |
+| Backend/Frontend  | Streamlit |
 | Vector Search     | ChromaDB, FAISS, SQLite |
 | Embeddings        | SentenceTransformers, BGE-M3, OpenCLIP |
 | LLM Integration   | LangChain, LLaMA, Deepseek-r1 |
