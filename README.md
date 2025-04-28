@@ -275,7 +275,10 @@ src/
 │   ├── cli_response_utils/     # Helpers for formatting LLM output for CLI display
 │   ├── ingest_images.py        # CLI to ingest and embed image files
 │   ├── ingest_model_scripts.py # CLI to process and ingest model code files
-│   └── query_cli.py            # CLI interface for submitting queries
+│   └── query_cli.py            # CLI interface for submitting queries and list all models/images
+|
+├── streamlit/                  # Streamlit interface for querying
+│   └── query_streamlit.py      # Streamlit interface for submitting queries and list all models/images
 │
 ├── core/                       # Core system logic and orchestration
 │   ├── colab_generator/        # Modules to generate and manage Google Colab notebooks
