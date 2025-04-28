@@ -175,7 +175,7 @@
         },
         "required": ["id", "content", "metadata"]
       },
-      "description": "Schema for model datasets information",
+      "description": "Schema for model images folder information",
       "updated_date": "2025-04-22T00:00:00"
     },
     {
@@ -407,6 +407,35 @@
       },
       "description": "Schema for generated images with enhanced metadata",
       "updated_date": "2025-04-20T00:00:00"
+    },
+    {
+      "schema_id": "model_diagram_path_schema",
+      "schema_version": "1.0.0",
+      "schema_definition": {
+        "type": "object",
+        "properties": {
+          "id": {"type": "string"},
+          "content": {"type": "string"},
+          "metadata": {
+            "type": "object",
+            "properties": {
+              "model_id": {"type": "string"},
+              "diagram_path": {
+                "path": "object",
+                "properties": {
+                  "name": {"type": ["string", "null"]}
+                },
+                "required": ["name"]
+              },
+              "access_control": {"type": "object"}
+            },
+            "required": ["model_id", "diagram_path"]
+          }
+        },
+        "required": ["id", "content", "metadata"]
+      },
+      "description": "Schema for model diagram path information",
+      "updated_date": "2025-04-28T00:00:00"
     }
   ]
 }

@@ -4,9 +4,9 @@ import glob
 import logging
 import os
 from datetime import datetime
-from pathlib import Path
 
 from src.core.content_analyzer.model_script.llm_based_code_parser import split_code_chunks_via_ast
+from src.core.content_analyzer.utils.model_id_utils import ModelIdUtils
 
 
 def _clean_iso_timestamp(ts: str) -> str:
@@ -221,6 +221,15 @@ def _create_metadata_content_for_type(doc_type, document):
             """
         }
 
+    elif doc_type == "model_diagram_path":
+        diagram_path = metadata.get("diagram_path", {})
+        return {
+            "title": f"Diagram path information for {model_id}",
+            "description": f"""
+                Diagram path: {diagram_path.get('path', 'N/A')}.
+            """
+        }
+
     # Default case
     return {
         "title": model_id,
@@ -244,7 +253,8 @@ def _extract_llm_fields(parse_result):
         "dataset": parse_result.get("dataset", {}),
         "training_config": parse_result.get("training_config", {}),
         "ast_summary": parse_result.get("ast_summary", {}),
-        "images_folder": parse_result.get("images_folder", {})
+        "images_folder": parse_result.get("images_folder", {}),
+        "diagram_path": parse_result.get("diagram_path", {})
     }
 
     # Ensure all fields are the correct type
@@ -260,6 +270,8 @@ def _extract_llm_fields(parse_result):
         llm_fields["ast_summary"] = {"ast_summary": llm_fields["ast_summary"]}
     if isinstance(llm_fields["images_folder"], str):
         llm_fields["images_folder"] = {"name": llm_fields["images_folder"]}
+    if isinstance(llm_fields["diagram_path"], str):
+        llm_fields["diagram_path"] = {"name": llm_fields["diagram_path"]}
 
     return llm_fields
 
@@ -268,7 +280,7 @@ def _validate_and_store_metadata_documents(schema_validator, metadata_documents,
                                            chroma_manager, access_control):
     """Validate and store metadata documents in different tables."""
     critical_failure = False
-    critical_collections = ["model_file", "model_architectures", "model_frameworks", "model_descriptions", "model_ast_summaries", "model_images_folder"]
+    critical_collections = ["model_file", "model_architectures", "model_frameworks", "model_descriptions", "model_ast_summaries", "model_images_folder", "model_diagram_path"]
 
     for key, value in metadata_documents.items():
         documents = value if isinstance(value, list) else [value]
@@ -340,10 +352,7 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
     metadata = metadata_extractor.extract_metadata(file_path)
 
     # Prepare model ID
-    file_path_obj = Path(file_path)
-    folder_name = file_path_obj.parent.name
-    file_stem = file_path_obj.stem
-    model_id = f"{folder_name}_{file_stem}"
+    model_id = ModelIdUtils.get_model_id(file_path)
 
     # Format dates
     creation_date_raw = _clean_iso_timestamp(metadata.get("file", {}).get("creation_date", "N/A"))
@@ -455,7 +464,7 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
             }
         },
 
-        # 10. Model image_processing path information
+        # 10. Model images folder information
         "model_images_folder": {
             "id": f"model_images_folder_{model_id}",
             "$schema_version": "1.0.0",
@@ -463,6 +472,17 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
             "metadata": {
                 "model_id": model_id,
                 "images_folder": llm_fields["images_folder"]
+            }
+        },
+
+        # 11. Model diagram path information
+        "model_diagram_path": {
+            "id": f"model_diagram_path_{model_id}",
+            "$schema_version": "1.0.0",
+            "content": f"Model diagram path: {model_id}",
+            "metadata": {
+                "model_id": model_id,
+                "diagram_path": llm_fields["diagram_path"]
             }
         },
     }

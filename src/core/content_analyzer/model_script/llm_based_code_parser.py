@@ -7,6 +7,7 @@ from typing import List, Tuple
 
 from git import Repo
 
+from src.core.content_analyzer.utils.model_id_utils import ModelIdUtils
 from src.core.content_analyzer.model_script.ast_summary_generator import ASTSummaryGenerator
 from src.core.prompt_manager.ingestion_path_prompt_manager import IngestionPathPromptManager
 
@@ -382,8 +383,6 @@ class LLMBasedCodeParser:
         with open(file_path, "r", encoding="utf-8") as f:
             file_content = f.read()
 
-        self.llm_metadata_cache = self.extract_metadata_by_llm(file_content, file_path, max_retries=15)
-
         model_info = {
             "creation_date": get_creation_date(file_path),
             "last_modified_date": get_last_modified_date(file_path)
@@ -391,6 +390,8 @@ class LLMBasedCodeParser:
 
         extracted_info = self.extract_model_info(file_content, file_path)
         model_info.update(extracted_info)
+
+        self.llm_metadata_cache = self.extract_metadata_by_llm(file_content, file_path, max_retries=15)
 
         # Safely parse framework
         framework = self.llm_metadata_cache.get("framework", {})
@@ -447,6 +448,8 @@ class LLMBasedCodeParser:
 
         model_info["ast_summary"] = self.llm_metadata_cache.get("ast_summary")
 
+        model_info["diagram_path"] = self.llm_metadata_cache.get("diagram_path")
+
         model_info["is_model_script"] = True
         model_info["content"] = file_content
 
@@ -471,8 +474,6 @@ class LLMBasedCodeParser:
         ast_digest = clean_empty_lines(self.ast_summary_generator.generate_summary(code_str=code_str, file_path=file_path))
         # print(f"Total AST digest: {ast_digest}")
 
-        self.ast_summary_generator.analyze_and_visualize_model(file_path, "./model_diagram/" + self.extract_filename_and_directory(file_path) + ".png")
-
         # STEP 2: Extract natural-language summary for each digest chunk
         summary = self.extract_natural_language_summary(
             chunk_text=ast_digest,
@@ -494,6 +495,12 @@ class LLMBasedCodeParser:
 
         # STEP 6: Add image_processing folder. Tried to use LLM for parsing, but finally moved back to manual parse way since this field needs exact value
         final['images_folder'] = {'name': get_images_folder(ast_digest)}
+
+        # STEP 7: Create component diagram for the AST digest
+        model_id = ModelIdUtils.get_model_id(file_path)
+        diagram_path = f"./model_diagram/{model_id}.png"
+        self.ast_summary_generator.analyze_and_visualize_model(file_path,diagram_path)
+        final['diagram_path'] = str(diagram_path.resolve())
 
         # STEP 7: Remove unneeded fields
         final.pop("_trace", None)

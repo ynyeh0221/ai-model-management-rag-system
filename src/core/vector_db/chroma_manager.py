@@ -192,6 +192,22 @@ class ChromaManager:
                         "model_id": "string",
                         "ast_summary": "string"
                     }
+                },
+                "model_images_folder": {
+                    "description": "Collection for images folder information",
+                    "embedding_function": self.text_embedding_function,
+                    "metadata_schema": {
+                        "model_id": "string",
+                        "images_folder": "string"
+                    }
+                },
+                "model_diagram_path": {
+                    "description": "Collection for model diagram path information",
+                    "embedding_function": self.text_embedding_function,
+                    "metadata_schema": {
+                        "model_id": "string",
+                        "diagram_path": "string"
+                    }
                 }
             }
 
