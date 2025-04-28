@@ -128,7 +128,9 @@ The system provides several formatted outputs:
 
 ## Sameple Inputs/Outputs
 
-### Model - Deepseek-llm 7b
+### CLI
+
+#### Model - Deepseek-llm 7b
 
 Sample 1: [What diffusion models have been trained on the Oxford Flower dataset?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-llm/sample_input_output_1.md)
 
@@ -144,7 +146,7 @@ Sample 6: [Please find models created in April 2025 and using CelebA.](https://g
 
 Sample 7: [Show me models trained on the MNIST dataset using autoencoder.](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-llm/sample_input_output_7.md)
 
-### Model - Deepseek-r1 7b
+#### Model - Deepseek-r1 7b
 
 Sample 1: [What diffusion models have been trained on the Oxford Flower dataset?](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-r1/sample_input_output_1.md)
 
@@ -165,3 +167,9 @@ Sample 8: [Show me models using autoencoder but not trained on MNIST dataset](ht
 Sample 9: [Please find models created in March 2025 and using RNN.](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-r1/sample_input_output_9.md)
 
 Sample 10: [Please find models not using RNN, created in March 2025.](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/deepseek-r1/sample_input_output_10.md)
+
+### Streamlit
+
+#### Model - Deepseek-r1 7b
+
+
