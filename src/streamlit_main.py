@@ -4,7 +4,7 @@ parent = os.path.dirname(os.path.abspath(__file__))
 project = os.path.dirname(parent)
 sys.path.append(project)
 
-# 2) (optional) patch asyncio so nested runs don’t crash
+# 2) patch asyncio so nested runs don’t crash
 import nest_asyncio
 nest_asyncio.apply()
 
@@ -14,12 +14,10 @@ from src.main import initialize_components
 
 set_streamlit_page_config()
 
-LLM = "deepseek-r1:7b"
-
 @st.cache_resource
 def get_components():
     st.info("Initializing RAG components…")
-    comps = initialize_components(llm_model_name=LLM)
+    comps = initialize_components(llm_model_name="deepseek-r1:7b")
     st.success("Component initialization ready")
     return comps
 
