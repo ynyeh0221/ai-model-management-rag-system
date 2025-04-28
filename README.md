@@ -276,7 +276,7 @@ src/
 │   ├── ingest_images.py        # CLI to ingest and embed image files
 │   ├── ingest_model_scripts.py # CLI to process and ingest model code files
 │   └── query_cli.py            # CLI interface for submitting queries and list all models/images
-|
+│ 
 ├── streamlit/                  # Streamlit interface for querying
 │   └── query_streamlit.py      # Streamlit interface for submitting queries and list all models/images
 │
