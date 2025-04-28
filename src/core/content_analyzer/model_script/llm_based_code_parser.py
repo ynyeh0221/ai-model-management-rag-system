@@ -3,12 +3,13 @@ import datetime
 import json
 import os
 import re
+from pathlib import Path
 from typing import List, Tuple
 
 from git import Repo
 
-from src.core.content_analyzer.utils.model_id_utils import ModelIdUtils
 from src.core.content_analyzer.model_script.ast_summary_generator import ASTSummaryGenerator
+from src.core.content_analyzer.utils.model_id_utils import ModelIdUtils
 from src.core.prompt_manager.ingestion_path_prompt_manager import IngestionPathPromptManager
 
 
@@ -498,7 +499,7 @@ class LLMBasedCodeParser:
 
         # STEP 7: Create component diagram for the AST digest
         model_id = ModelIdUtils.get_model_id(file_path)
-        diagram_path = f"./model_diagram/{model_id}.png"
+        diagram_path = Path(f"./model_diagram/{model_id}.png")
         self.ast_summary_generator.analyze_and_visualize_model(file_path,diagram_path)
         final['diagram_path'] = str(diagram_path.resolve())
 
