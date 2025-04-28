@@ -1,115 +1,129 @@
 import ast
+from typing import Set, Union
 
 
 class DatasetVisitor(ast.NodeVisitor):
-    def __init__(self):
-        self.datasets = set()
-        # Common dataset names and libraries
-        self.dataset_keywords = {
-            "mnist", "cifar", "imagenet", "coco", "kitti", "voc", "pascal",
-            "celeba", "clevr", "shapenet", "kinetics", "audio", "audioset",
-            "librispeech", "voxceleb", "lfw", "ucf101", "hmdb51", "mini-imagenet",
-            "omniglot", "wikitext", "squad", "glue", "snli", "conll", "penn",
-            "ptb", "sst", "imdb", "yelp", "amazon", "20newsgroups", "enwik8"
-        }
+    """
+    AST visitor that collects references to well-known datasets
+    across variable names, imports, calls, class definitions, and strings.
+    """
+    DATASET_KEYWORDS = {
+        "mnist", "cifar", "imagenet", "coco", "kitti", "voc", "pascal",
+        "celeba", "clevr", "shapenet", "kinetics", "audio", "audioset",
+        "librispeech", "voxceleb", "lfw", "ucf101", "hmdb51", "mini-imagenet",
+        "omniglot", "wikitext", "squad", "glue", "snli", "conll", "penn",
+        "ptb", "sst", "imdb", "yelp", "amazon", "20newsgroups", "enwik8"
+    }
 
-    def visit_Name(self, node):
-        # Check for variable names that indicate datasets
-        if any(keyword in node.id.lower() for keyword in self.dataset_keywords):
-            # Extract the dataset name from the variable
-            for keyword in self.dataset_keywords:
-                if keyword in node.id.lower():
-                    self.datasets.add(keyword.upper())
+    def __init__(self) -> None:
+        super().__init__()
+        self.datasets: Set[str] = set()
+
+    def visit_Name(self, node: ast.Name) -> None:
+        """
+        Detect dataset keywords in variable names.
+        """
+        name_lower = node.id.lower()
+        for kw in self._keywords_in_text(name_lower):
+            self.datasets.add(kw.upper())
         self.generic_visit(node)
 
-    def visit_ImportFrom(self, node):
-        # Check for imports from dataset modules
-        if node.module and any(keyword in node.module.lower() for keyword in self.dataset_keywords):
-            for keyword in self.dataset_keywords:
-                if node.module and keyword in node.module.lower():
-                    self.datasets.add(keyword.upper())
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        """
+        Detect imports from dataset modules and torchvision/tensorflow dataset imports.
+        """
+        module = node.module.lower() if node.module else ''
 
-        # Check torchvision.datasets or tensorflow.keras.datasets imports
-        if node.module and ("torchvision.datasets" in node.module or
-                            "tensorflow.keras.datasets" in node.module or
-                            "tensorflow_datasets" in node.module):
+        # Imports from modules matching dataset keywords
+        for kw in self._keywords_in_text(module):
+            self.datasets.add(kw.upper())
+
+        # Explicit torchvision or tensorflow dataset imports
+        if any(pkg in module for pkg in ("torchvision.datasets", "tensorflow.keras.datasets", "tensorflow_datasets")):
             for alias in node.names:
-                if alias.name.lower() in self.dataset_keywords:
-                    self.datasets.add(alias.name.upper())
+                alias_name = alias.name.lower()
+                if alias_name in self.DATASET_KEYWORDS:
+                    self.datasets.add(alias_name.upper())
+
         self.generic_visit(node)
 
-    def visit_Call(self, node):
-        # Check for dataset loading calls like "load_dataset", "CIFAR10" etc.
+    def visit_Call(self, node: ast.Call) -> None:
+        """
+        Detect dataset loading calls and string arguments referring to datasets.
+        """
+        # Function name cases
         if isinstance(node.func, ast.Name):
-            if "dataset" in node.func.id.lower() or any(
-                    keyword in node.func.id.lower() for keyword in self.dataset_keywords):
-                for keyword in self.dataset_keywords:
-                    if keyword in node.func.id.lower():
-                        self.datasets.add(keyword.upper())
+            func_lower = node.func.id.lower()
+            for kw in self._keywords_in_text(func_lower):
+                self.datasets.add(kw.upper())
 
-        # Check for calls like torchvision.datasets.MNIST()
         elif isinstance(node.func, ast.Attribute):
-            attr_name = node.func.attr.lower()
-            if any(keyword in attr_name for keyword in self.dataset_keywords):
-                for keyword in self.dataset_keywords:
-                    if keyword in attr_name:
-                        self.datasets.add(keyword.upper())
+            attr_lower = node.func.attr.lower()
+            for kw in self._keywords_in_text(attr_lower):
+                self.datasets.add(kw.upper())
 
-            # Check string arguments to functions like load_dataset("mnist")
-            for arg in node.args:
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                    str_val = arg.value.lower()
-                    for keyword in self.dataset_keywords:
-                        if keyword in str_val:
-                            self.datasets.add(keyword.upper())
+        # String arguments like load_dataset("mnist")
+        for arg in node.args:
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                for kw in self._keywords_in_text(arg.value.lower(), require_context=True):
+                    self.datasets.add(kw.upper())
 
         self.generic_visit(node)
 
-    def visit_ClassDef(self, node):
-        # Check for custom dataset classes
-        if "dataset" in node.name.lower() or any(
-                keyword in node.name.lower() for keyword in self.dataset_keywords):
-            for keyword in self.dataset_keywords:
-                if keyword in node.name.lower():
-                    self.datasets.add(keyword.upper())
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        """
+        Detect custom dataset classes via class name, docstring, or base classes.
+        """
+        name_lower = node.name.lower()
 
-        # Look for specific dataset name in docstrings
+        # Class name contains keyword or 'dataset'
+        for kw in self._keywords_in_text(name_lower):
+            self.datasets.add(kw.upper())
+
+        # Docstring analysis
         doc = ast.get_docstring(node)
         if doc:
-            for keyword in self.dataset_keywords:
-                if keyword.lower() in doc.lower():
-                    self.datasets.add(keyword.upper())
+            for kw in self._keywords_in_text(doc.lower()):
+                self.datasets.add(kw.upper())
 
-        # Check for dataset-related base classes
+        # Base classes with 'dataset'
         for base in node.bases:
-            if isinstance(base, ast.Name) and "dataset" in base.id.lower():
-                # This is likely a dataset class
-                if "dataset" not in node.name.lower():  # Avoid double-counting
-                    # Try to infer the dataset from the class name
-                    class_name = node.name.lower()
-                    for keyword in self.dataset_keywords:
-                        if keyword in class_name:
-                            self.datasets.add(keyword.upper())
+            if isinstance(base, ast.Name) and 'dataset' in base.id.lower():
+                if 'dataset' not in name_lower:
+                    for kw in self._keywords_in_text(name_lower):
+                        self.datasets.add(kw.upper())
 
         self.generic_visit(node)
 
-    def visit_Str(self, node):
-        # Check for dataset names in string literals
-        for keyword in self.dataset_keywords:
-            if keyword in node.s.lower():
-                # Only add if it looks like a dataset reference, not just any mention
-                context = node.s.lower()
-                if ("dataset" in context or "data" in context or
-                        "load" in context or "download" in context):
-                    self.datasets.add(keyword.upper())
+    def visit_Str(self, node: ast.Str) -> None:
+        """
+        (Python <3.8) Detect dataset references in string literals.
+        """
+        self._handle_literal(node.s)
 
-    def visit_Constant(self, node):
-        # For Python 3.8+ compatibility
+    def visit_Constant(self, node: ast.Constant) -> None:
+        """
+        (Python >=3.8) Detect dataset references in constant strings.
+        """
         if isinstance(node.value, str):
-            for keyword in self.dataset_keywords:
-                if keyword in node.value.lower():
-                    # Only add if it looks like a dataset reference
-                    context = node.value.lower()
-                    if ("dataset" in context or "data" in context or
-                            "load" in context or "download" in context):
-                        self.datasets.add(keyword.upper())
+            self._handle_literal(node.value)
+
+    def _handle_literal(self, text: str) -> None:
+        """
+        Check a string for dataset keywords when context suggests a dataset.
+        """
+        for kw in self._keywords_in_text(text.lower(), require_context=True):
+            self.datasets.add(kw.upper())
+
+    def _keywords_in_text(self, text: str, require_context: bool = False) -> Set[str]:
+        """
+        Return dataset keywords found in text.
+        If require_context is True, only matches when text also contains
+        context words like 'dataset', 'data', 'load', or 'download'.
+        """
+        found = {kw for kw in self.DATASET_KEYWORDS if kw in text}
+        if require_context:
+            contexts = ('dataset', 'data', 'load', 'download')
+            if not any(ctx in text for ctx in contexts):
+                return set()
+        return found
