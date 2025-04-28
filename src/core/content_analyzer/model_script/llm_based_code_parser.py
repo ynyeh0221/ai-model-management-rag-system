@@ -500,7 +500,7 @@ class LLMBasedCodeParser:
         # STEP 7: Create component diagram for the AST digest
         model_id = ModelIdUtils.get_model_id(file_path)
         diagram_path = Path(f"./model_diagram/{model_id}.png")
-        self.ast_summary_generator.analyze_and_visualize_model(file_path,diagram_path)
+        self.ast_summary_generator.analyze_and_visualize_model(file_path, str(diagram_path))
         final['diagram_path'] = str(diagram_path.resolve())
 
         # STEP 8: Remove unneeded fields
