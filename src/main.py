@@ -27,11 +27,10 @@ def initialize_components(config_path="./config", llm_model_name: str = "llm"):
     """Initialize all components of the RAG system."""
 
     llm_interface = LLMInterface(model_name=llm_model_name, timeout=60000)
-    llm_interface_nl = LLMInterface(model_name="deepseek-llm:7b", timeout=60000)
 
     # Initialize document cli_runner components
     schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
-    code_parser = LLMBasedCodeParser(schema_validator=schema_validator, llm_interface=llm_interface, llm_interface_nl=llm_interface_nl)
+    code_parser = LLMBasedCodeParser(schema_validator=schema_validator, llm_interface=llm_interface)
     metadata_extractor = MetadataExtractor()
     image_processor = ImageProcessor(schema_validator)
     
@@ -74,7 +73,6 @@ def initialize_components(config_path="./config", llm_model_name: str = "llm"):
         },
         "response_generator": {
             "llm_interface": llm_interface,
-            "llm_interface_nl": llm_interface_nl,
         },
         "colab_generator": {
             "code_generator": code_generator,

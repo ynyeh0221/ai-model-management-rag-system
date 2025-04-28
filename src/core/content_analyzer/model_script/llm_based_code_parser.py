@@ -13,7 +13,7 @@ from src.core.prompt_manager.ingestion_path_prompt_manager import IngestionPathP
 
 def filter_ast_summary_for_metadata(summary: str) -> str:
     """
-    Given a AST digest summary, return only the lines that
+    Given an AST digest summary, return only the lines that
     contain:
       - Import / From   (framework & dataset)
       - Variable        (batch_size, lr, optimizer, epochs, device)
@@ -332,7 +332,7 @@ class LLMBasedCodeParser:
         Comprehensive parser for supported Python files (.py, .ipynb). Extracts metadata and info.
 
     extract_metadata_by_llm(code_str, file_path, max_retries=15):
-        Orchestrates the multi-step process of extracting metadata using AST and LLM analysis.
+        Orchestrates the multistep process of extracting metadata using AST and LLM analysis.
 
     extract_natural_language_summary(chunk_text, chunk_offset=0, max_retries=3):
         Generates a comprehensive natural language description of code functionality.
@@ -366,10 +366,9 @@ class LLMBasedCodeParser:
     validate_llm_metadata_structure : Function for validating metadata structure.
     """
 
-    def __init__(self, schema_validator=None, llm_interface=None, llm_interface_nl=None):
+    def __init__(self, schema_validator=None, llm_interface=None):
         self.schema_validator = schema_validator
         self.llm_interface = llm_interface
-        self.llm_interface_nl = llm_interface_nl
         self.llm_metadata_cache = {}
         self.ast_summary_generator = ASTSummaryGenerator()
 
@@ -580,7 +579,7 @@ class LLMBasedCodeParser:
 
                 Extract the metadata JSON as specified above.
                 """
-                response = self.llm_interface_nl.generate_structured_response(
+                response = self.llm_interface.generate_structured_response(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0,

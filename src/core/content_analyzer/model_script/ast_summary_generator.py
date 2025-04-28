@@ -3,6 +3,8 @@ import os
 import re
 from typing import Any, Optional, List, Dict, Set
 
+from src.core.content_analyzer.model_script.visitor.code_summary_visitor import CodeSummaryVisitor
+from src.core.content_analyzer.model_script.visitor.dataset_visitor import DatasetVisitor
 from src.core.content_analyzer.model_script.model_diagram_generator import draw_model_architecture
 
 
@@ -18,7 +20,7 @@ class ASTSummaryGenerator:
         self.class_hierarchy = {}  # Map of class name to its parent classes
         self.function_calls = {}  # Track function calls and their arguments
         self.literal_vars = {}
-        self.class_vars: Dict[str, Dict[str, Any]] = {}  # ← vars per component
+        self.class_vars: Dict[str, Dict[str, Any]] = {}  # vars per component
 
         # Settings for diagram-ready output
         self.important_layer_types = {
@@ -26,52 +28,6 @@ class ASTSummaryGenerator:
             "MultiheadAttention", "Embedding", "Sequential", "Attention", "AdaptiveAvgPool2d"
         }
         self.max_dims_to_show = 2  # Max number of dimensions to show
-
-    def _get_ordered_layers(self, class_layer_names):
-        """Get layers in order of definition, avoiding duplicates."""
-        # Track processed layers to avoid duplicates
-        ordered_layers = []
-        processed_layers = set()
-
-        # First try to use layer_order
-        for layer_name in self.layer_order:
-            if layer_name in class_layer_names and layer_name not in processed_layers:
-                ordered_layers.append(layer_name)
-                processed_layers.add(layer_name)
-
-        # Add any remaining layers not in layer_order
-        for layer_name in class_layer_names:
-            if layer_name not in processed_layers:
-                ordered_layers.append(layer_name)
-                processed_layers.add(layer_name)
-
-        return ordered_layers
-
-    def _add_component_layers(self, lines, ordered_layers, class_name):
-        """Add layers from a component to the output lines."""
-        # Track processed layers to avoid duplicates
-        processed_layers = set()
-
-        for layer_name in ordered_layers:
-            if layer_name in processed_layers:
-                continue
-
-            processed_layers.add(layer_name)
-
-            # Find the layer definition
-            layer = next((l for l in self.model_layers if l["name"] == layer_name), None)
-            if layer:
-                layer_type = layer.get("layer_type", "Unknown")
-
-                # Only show important layers or layers that reference other components
-                if any(important in layer_type for important in
-                       self.important_layer_types) or layer_type in self.class_layers:
-                    # Format arguments focusing on dimensions
-                    dimensions = self._extract_important_dimensions(layer)
-                    if dimensions:
-                        lines.append(f"  {layer_name}: {layer_type}({dimensions})")
-                    else:
-                        lines.append(f"  {layer_name}: {layer_type}")
 
     def generate_summary(self, code_str: str, file_path: str = "<unknown>") -> str:
         """Parse code using AST and generate a human-readable digest."""
@@ -160,6 +116,52 @@ class ASTSummaryGenerator:
                 lines.append(f"{class_name} depends on: {', '.join(dependencies)}")
 
         return '\n'.join(lines)
+
+    def _get_ordered_layers(self, class_layer_names):
+        """Get layers in order of definition, avoiding duplicates."""
+        # Track processed layers to avoid duplicates
+        ordered_layers = []
+        processed_layers = set()
+
+        # First try to use layer_order
+        for layer_name in self.layer_order:
+            if layer_name in class_layer_names and layer_name not in processed_layers:
+                ordered_layers.append(layer_name)
+                processed_layers.add(layer_name)
+
+        # Add any remaining layers not in layer_order
+        for layer_name in class_layer_names:
+            if layer_name not in processed_layers:
+                ordered_layers.append(layer_name)
+                processed_layers.add(layer_name)
+
+        return ordered_layers
+
+    def _add_component_layers(self, lines, ordered_layers, class_name):
+        """Add layers from a component to the output lines."""
+        # Track processed layers to avoid duplicates
+        processed_layers = set()
+
+        for layer_name in ordered_layers:
+            if layer_name in processed_layers:
+                continue
+
+            processed_layers.add(layer_name)
+
+            # Find the layer definition
+            layer = next((l for l in self.model_layers if l["name"] == layer_name), None)
+            if layer:
+                layer_type = layer.get("layer_type", "Unknown")
+
+                # Only show important layers or layers that reference other components
+                if any(important in layer_type for important in
+                       self.important_layer_types) or layer_type in self.class_layers:
+                    # Format arguments focusing on dimensions
+                    dimensions = self._extract_important_dimensions(layer)
+                    if dimensions:
+                        lines.append(f"  {layer_name}: {layer_type}({dimensions})")
+                    else:
+                        lines.append(f"  {layer_name}: {layer_type}")
 
     def _identify_used_components(self):
         """
@@ -257,7 +259,7 @@ class ASTSummaryGenerator:
             ctype = layer["layer_type"]
             cls = layer["class"]
 
-            # 1) if the layer_type is itself a registered component, it's a sub-component
+            # 1) if the layer_type is itself a registered component, it's a subcomponent
             if ctype in tree:
                 tree[cls].append(ctype)
                 # Add dependency relationship
@@ -286,7 +288,7 @@ class ASTSummaryGenerator:
                 if dep not in tree[comp]:
                     tree[comp].append(dep)
 
-        # find the "root" model class by heuristic (e.g. the one never used as a sub-component)
+        # find the "root" model class by heuristic (e.g. the one never used as a subcomponent)
         all_comps = set(tree)
         children = {c for subs in tree.values() for c in subs if c in all_comps}
         roots = list(all_comps - children)
@@ -380,120 +382,6 @@ class ASTSummaryGenerator:
 
     def _create_dataset_visitor(self):
         """Create an AST visitor that looks for dataset usage."""
-
-        class DatasetVisitor(ast.NodeVisitor):
-            def __init__(self):
-                self.datasets = set()
-                # Common dataset names and libraries
-                self.dataset_keywords = {
-                    "mnist", "cifar", "imagenet", "coco", "kitti", "voc", "pascal",
-                    "celeba", "clevr", "shapenet", "kinetics", "audio", "audioset",
-                    "librispeech", "voxceleb", "lfw", "ucf101", "hmdb51", "mini-imagenet",
-                    "omniglot", "wikitext", "squad", "glue", "snli", "conll", "penn",
-                    "ptb", "sst", "imdb", "yelp", "amazon", "20newsgroups", "enwik8"
-                }
-
-            def visit_Name(self, node):
-                # Check for variable names that indicate datasets
-                if any(keyword in node.id.lower() for keyword in self.dataset_keywords):
-                    # Extract the dataset name from the variable
-                    for keyword in self.dataset_keywords:
-                        if keyword in node.id.lower():
-                            self.datasets.add(keyword.upper())
-                self.generic_visit(node)
-
-            def visit_ImportFrom(self, node):
-                # Check for imports from dataset modules
-                if node.module and any(keyword in node.module.lower() for keyword in self.dataset_keywords):
-                    for keyword in self.dataset_keywords:
-                        if node.module and keyword in node.module.lower():
-                            self.datasets.add(keyword.upper())
-
-                # Check torchvision.datasets or tensorflow.keras.datasets imports
-                if node.module and ("torchvision.datasets" in node.module or
-                                    "tensorflow.keras.datasets" in node.module or
-                                    "tensorflow_datasets" in node.module):
-                    for alias in node.names:
-                        if alias.name.lower() in self.dataset_keywords:
-                            self.datasets.add(alias.name.upper())
-                self.generic_visit(node)
-
-            def visit_Call(self, node):
-                # Check for dataset loading calls like "load_dataset", "CIFAR10" etc.
-                if isinstance(node.func, ast.Name):
-                    if "dataset" in node.func.id.lower() or any(
-                            keyword in node.func.id.lower() for keyword in self.dataset_keywords):
-                        for keyword in self.dataset_keywords:
-                            if keyword in node.func.id.lower():
-                                self.datasets.add(keyword.upper())
-
-                # Check for calls like torchvision.datasets.MNIST()
-                elif isinstance(node.func, ast.Attribute):
-                    attr_name = node.func.attr.lower()
-                    if any(keyword in attr_name for keyword in self.dataset_keywords):
-                        for keyword in self.dataset_keywords:
-                            if keyword in attr_name:
-                                self.datasets.add(keyword.upper())
-
-                    # Check string arguments to functions like load_dataset("mnist")
-                    for arg in node.args:
-                        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                            str_val = arg.value.lower()
-                            for keyword in self.dataset_keywords:
-                                if keyword in str_val:
-                                    self.datasets.add(keyword.upper())
-
-                self.generic_visit(node)
-
-            def visit_ClassDef(self, node):
-                # Check for custom dataset classes
-                if "dataset" in node.name.lower() or any(
-                        keyword in node.name.lower() for keyword in self.dataset_keywords):
-                    for keyword in self.dataset_keywords:
-                        if keyword in node.name.lower():
-                            self.datasets.add(keyword.upper())
-
-                # Look for specific dataset name in docstrings
-                doc = ast.get_docstring(node)
-                if doc:
-                    for keyword in self.dataset_keywords:
-                        if keyword.lower() in doc.lower():
-                            self.datasets.add(keyword.upper())
-
-                # Check for dataset-related base classes
-                for base in node.bases:
-                    if isinstance(base, ast.Name) and "dataset" in base.id.lower():
-                        # This is likely a dataset class
-                        if "dataset" not in node.name.lower():  # Avoid double-counting
-                            # Try to infer the dataset from the class name
-                            class_name = node.name.lower()
-                            for keyword in self.dataset_keywords:
-                                if keyword in class_name:
-                                    self.datasets.add(keyword.upper())
-
-                self.generic_visit(node)
-
-            def visit_Str(self, node):
-                # Check for dataset names in string literals
-                for keyword in self.dataset_keywords:
-                    if keyword in node.s.lower():
-                        # Only add if it looks like a dataset reference, not just any mention
-                        context = node.s.lower()
-                        if ("dataset" in context or "data" in context or
-                                "load" in context or "download" in context):
-                            self.datasets.add(keyword.upper())
-
-            def visit_Constant(self, node):
-                # For Python 3.8+ compatibility
-                if isinstance(node.value, str):
-                    for keyword in self.dataset_keywords:
-                        if keyword in node.value.lower():
-                            # Only add if it looks like a dataset reference
-                            context = node.value.lower()
-                            if ("dataset" in context or "data" in context or
-                                    "load" in context or "download" in context):
-                                self.datasets.add(keyword.upper())
-
         return DatasetVisitor()
 
     def _extract_important_dimensions(self, layer: Dict) -> str:
@@ -609,449 +497,7 @@ class ASTSummaryGenerator:
 
     def _create_code_summary_visitor(self, lines: list, literal_vars: dict,
                                      image_folders: set, default_paths: set) -> ast.NodeVisitor:
-        parent_generator = self
-
-        class CodeSummaryVisitor(ast.NodeVisitor):
-            def __init__(self):
-                # Dictionary to track function calls and their arguments
-                self.call_counter = {}  # Counter for generating unique call IDs
-
-                # Track forward method references to components
-                self.current_function = None
-                self.function_references = {}
-
-            def visit_Import(self, node):
-                names = [alias.name for alias in node.names]
-                lines.append(f"Import: {', '.join(names)}")
-
-            def visit_ImportFrom(self, node):
-                module = node.module or ""
-                names = [alias.name for alias in node.names]
-                lines.append(f"From {module} import {', '.join(names)}")
-
-            def visit_ClassDef(self, node):
-                # Extract base classes
-                bases = [getattr(b, 'id', getattr(b, 'attr', 'object')) for b in node.bases]
-                lines.append(f"\nClass: {node.name} (inherits from {', '.join(bases)})")
-                doc = ast.get_docstring(node)
-                if doc:
-                    lines.append(f"  Docstring: {doc.strip()}")
-
-                # Store class hierarchy information
-                parent_generator.class_hierarchy[node.name] = bases
-
-                # Process class body for model architecture
-                if 'nn.Module' in ' '.join(bases) or 'Module' in ' '.join(bases):
-                    # This is likely a neural network module
-                    lines.append(f"  Neural Network Module detected")
-
-                # Save previous class and set current class
-                previous_class = parent_generator.current_class
-                parent_generator.current_class = node.name
-
-                # Initialize class layers if not exist
-                if node.name not in parent_generator.class_layers:
-                    parent_generator.class_layers[node.name] = []
-
-                # Visit the class body
-                self.generic_visit(node)
-
-                # Restore previous class context
-                parent_generator.current_class = previous_class
-
-            def visit_FunctionDef(self, node):
-                # Save previous function and set current function
-                previous_function = self.current_function
-                self.current_function = node.name
-
-                # Initialize function references tracking
-                if node.name not in self.function_references:
-                    self.function_references[node.name] = set()
-
-                # Create mapping of parameter names to their default values
-                param_defaults = {}
-                params = []
-
-                if node.args.args:
-                    params = [arg.arg for arg in node.args.args]
-
-                # Store default values if they exist
-                if node.args.defaults:
-                    default_offset = len(params) - len(node.args.defaults)
-                    for i, default_node in enumerate(node.args.defaults):
-                        param_idx = default_offset + i
-                        param_name = params[param_idx]
-                        default_value = parent_generator._eval_constant(default_node)
-                        param_defaults[param_name] = default_value
-
-                # Store function signature information in the parent's function_calls dict
-                parent_generator.function_calls[node.name] = {
-                    'params': params,
-                    'defaults': param_defaults
-                }
-
-                # Format args for display (without showing default values)
-                lines.append(f"\nFunction: {node.name}({', '.join(params)})")
-
-                # Check for default paths in arguments
-                if node.args.defaults:
-                    for name_node, default_node in zip(params[-len(node.args.defaults):], node.args.defaults):
-                        if isinstance(name_node, str):
-                            lname = name_node.lower()
-                        else:
-                            lname = name_node.lower() if hasattr(name_node, 'lower') else str(name_node).lower()
-
-                        if any(k in lname for k in ('save_dir', 'results_dir', 'save_path', 'output_dir')):
-                            val = parent_generator._eval_constant(default_node)
-                            if isinstance(val, str):
-                                default_paths.add(parent_generator._determine_folder(val, parent_generator.base_dir))
-
-                # Check if this is forward() method to understand connections and track component usage
-                if node.name == 'forward':
-                    # Store the class context for this forward method
-                    if parent_generator.current_class:
-                        if 'class' not in parent_generator.function_calls[node.name]:
-                            parent_generator.function_calls[node.name]['class'] = parent_generator.current_class
-
-                    # Traditional forward method analysis
-                    self._analyze_forward_method(node)
-
-                    # Add the component that contains this forward method to used components
-                    if parent_generator.current_class:
-                        parent_generator.used_components.add(parent_generator.current_class)
-
-                doc = ast.get_docstring(node)
-                if doc:
-                    lines.append(f"  Docstring: {doc.strip()}")
-
-                # Visit the function body
-                self.generic_visit(node)
-
-                # Restore previous function context
-                self.current_function = previous_function
-
-            def _analyze_forward_method(self, node):
-                """Extract model flow from forward method and track component references"""
-                references = set()
-                connections = {}
-
-                prev_output_var = None
-
-                # Process each statement in the forward method
-                for stmt in node.body:
-                    # Handle x = self.layer(x) pattern
-                    if isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Call):
-                        call_node = stmt.value
-                        if isinstance(call_node.func, ast.Attribute) and \
-                                isinstance(call_node.func.value, ast.Name) and \
-                                call_node.func.value.id == 'self':
-                            # This is a call to self.layer
-                            layer_name = call_node.func.attr
-
-                            # Track connections for future
-                            if isinstance(stmt.targets[0], ast.Name):
-                                output_var = stmt.targets[0].id
-
-                                # Track connection from previous layer if available
-                                if prev_output_var:
-                                    connections[prev_output_var] = layer_name
-
-                                prev_output_var = output_var
-
-                            # Check if this layer corresponds to a component
-                            for layer in parent_generator.model_layers:
-                                if layer['name'] == layer_name and layer['class'] == parent_generator.current_class:
-                                    layer_type = layer['layer_type']
-                                    if layer_type in parent_generator.class_layers:
-                                        # This layer is a component instance
-                                        references.add(layer_type)
-                                        parent_generator.used_components.add(layer_type)
-
-                    # Also look for return statements that use components
-                    elif isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Call):
-                        self._process_call_for_references(stmt.value, references)
-
-                # Store the references found in the forward method
-                if references:
-                    if 'references' not in parent_generator.function_calls[self.current_function]:
-                        parent_generator.function_calls[self.current_function]['references'] = set()
-                    parent_generator.function_calls[self.current_function]['references'].update(references)
-
-                # Store the connections for model flow visualization
-                if connections:
-                    parent_generator.model_connections[parent_generator.current_class] = connections
-
-            def _process_call_for_references(self, call_node, references):
-                """Process a call node to find component references"""
-                if isinstance(call_node.func, ast.Attribute) and \
-                        isinstance(call_node.func.value, ast.Name) and \
-                        call_node.func.value.id == 'self':
-                    # This is a call to self.layer
-                    layer_name = call_node.func.attr
-
-                    # Check if this layer corresponds to a component
-                    for layer in parent_generator.model_layers:
-                        if layer['name'] == layer_name and layer['class'] == parent_generator.current_class:
-                            layer_type = layer['layer_type']
-                            if layer_type in parent_generator.class_layers:
-                                # This layer is a component instance
-                                references.add(layer_type)
-                                parent_generator.used_components.add(layer_type)
-
-                # Process arguments recursively
-                for arg in call_node.args:
-                    if isinstance(arg, ast.Call):
-                        self._process_call_for_references(arg, references)
-
-                for keyword in call_node.keywords:
-                    if isinstance(keyword.value, ast.Call):
-                        self._process_call_for_references(keyword.value, references)
-
-            def visit_Call(self, node):
-                """Track function calls, extract args, and also pull out keyword literals."""
-                # Determine function name
-                func_name = None
-                if isinstance(node.func, ast.Name):
-                    func_name = node.func.id
-                elif isinstance(node.func, ast.Attribute):
-                    func_name = node.func.attr
-
-                # If we're tracking this function, capture the call
-                if func_name and func_name in parent_generator.function_calls:
-                    func_info = parent_generator.function_calls[func_name]
-                    # Unique ID
-                    self.call_counter.setdefault(func_name, 0)
-                    self.call_counter[func_name] += 1
-                    call_id = f"{func_name}_call_{self.call_counter[func_name]}"
-
-                    # Positional args
-                    actual_args = {}
-                    provided = set()
-                    for i, arg in enumerate(node.args):
-                        if i < len(func_info['params']):
-                            p = func_info['params'][i]
-                            provided.add(p)
-                            val = parent_generator._eval_constant(arg)
-                            if val is not None:
-                                actual_args[p] = val
-
-                    # Keyword args
-                    for kw in node.keywords:
-                        if kw.arg:
-                            provided.add(kw.arg)
-                            val = parent_generator._eval_constant(kw.value)
-                            if val is not None:
-                                actual_args[kw.arg] = val
-                                # *** NEW: record this as a literal var ***
-                                literal_vars[kw.arg] = val
-
-                    # Which defaults were actually used?
-                    omitted = [
-                        p for p in func_info.get('params', [])
-                        if p not in provided and p in func_info.get('defaults', {})
-                    ]
-
-                    parent_generator.function_calls[call_id] = {
-                        'function': func_name,
-                        'args': actual_args,
-                        'omitted_args': omitted
-                    }
-
-                    # If this function call is within another function, track the relationship
-                    if self.current_function:
-                        if 'called_by' not in parent_generator.function_calls[func_name]:
-                            parent_generator.function_calls[func_name]['called_by'] = set()
-                        parent_generator.function_calls[func_name]['called_by'].add(self.current_function)
-
-                # Check for component instantiations
-                class_name = None
-
-                if isinstance(node.func, ast.Name):
-                    class_name = node.func.id
-                elif isinstance(node.func, ast.Attribute):
-                    class_name = node.func.attr
-
-                # If this is a class we're tracking, mark it as instantiated
-                if class_name and class_name in parent_generator.class_layers:
-                    parent_generator.used_components.add(class_name)
-
-                    # If we're in a function context, track that this component is used by the function
-                    if self.current_function:
-                        if self.current_function not in self.function_references:
-                            self.function_references[self.current_function] = set()
-                        self.function_references[self.current_function].add(class_name)
-
-                        # If we're in a class context, mark that the component is used by this class
-                        if parent_generator.current_class:
-                            # This class uses another component
-                            parent_generator.used_components.add(parent_generator.current_class)
-
-                # Always continue walking
-                self.generic_visit(node)
-
-            def visit_Assign(self, node):
-                # Handle simple variables
-                val = parent_generator._eval_constant(node.value)
-                for tgt in node.targets:
-                    if isinstance(tgt, ast.Name):
-                        name = tgt.id
-                        key = name.lower()
-                        if val is not None:
-                            if any(k in key for k in ('dir', 'path', 'folder')):
-                                literal_vars[name] = val
-                            if any(k in key for k in ('batch', 'lr', 'epoch', 'device', 'seed')):
-                                literal_vars[name] = val
-
-                # Extract model layers (self.xxx = Layer(args))
-                if isinstance(node.value, ast.Call):
-                    call_func = node.value.func
-
-                    for tgt in node.targets:
-                        if isinstance(tgt, ast.Attribute) and \
-                                isinstance(tgt.value, ast.Name) and \
-                                tgt.value.id == "self":
-                            # It's a model layer assignment
-                            layer_name = tgt.attr
-
-                            # Track layer order
-                            if layer_name not in parent_generator.layer_order:
-                                parent_generator.layer_order.append(layer_name)
-
-                            # Get layer type
-                            layer_type = None
-                            try:
-                                if isinstance(call_func, ast.Name):
-                                    layer_type = call_func.id
-                                elif isinstance(call_func, ast.Attribute):
-                                    # Handle cases like nn.Linear, torch.nn.Linear
-                                    layer_type = call_func.attr
-                                else:
-                                    layer_type = ast.unparse(call_func).split('.')[-1]
-                            except:
-                                layer_type = "Unknown"
-
-                            # Extract arguments
-                            args_list = []
-                            for arg in node.value.args:
-                                try:
-                                    # Better argument extraction
-                                    if isinstance(arg, ast.Constant):
-                                        args_list.append(arg.value)
-                                    elif isinstance(arg, ast.Name):
-                                        args_list.append(arg.id)  # Variable name
-                                    else:
-                                        # More complex expressions
-                                        args_list.append(ast.unparse(arg))
-                                except:
-                                    args_list.append("?")
-
-                            # Handle keyword arguments too
-                            kwargs = {}
-                            for kwarg in node.value.keywords:
-                                try:
-                                    kwargs[kwarg.arg] = ast.unparse(kwarg.value)
-                                except:
-                                    kwargs[kwarg.arg] = "?"
-
-                            # Store the layer info
-                            layer_info = {
-                                "name": layer_name,
-                                "layer_type": layer_type,
-                                "args": args_list,
-                                "kwargs": kwargs,
-                                "class": parent_generator.current_class
-                            }
-                            parent_generator.model_layers.append(layer_info)
-
-                            # Add to class-specific layer list
-                            if parent_generator.current_class:
-                                if parent_generator.current_class not in parent_generator.class_layers:
-                                    parent_generator.class_layers[parent_generator.current_class] = []
-                                if layer_name not in parent_generator.class_layers[parent_generator.current_class]:
-                                    parent_generator.class_layers[parent_generator.current_class].append(layer_name)
-
-                            # Check if the layer type is a component we're tracking
-                            if layer_type in parent_generator.class_layers:
-                                # This indicates that the component is being used
-                                parent_generator.used_components.add(layer_type)
-                                # The class containing this layer also gets marked as used
-                                if parent_generator.current_class:
-                                    parent_generator.used_components.add(parent_generator.current_class)
-
-                # Look for Sequential container definitions
-                if isinstance(node.value, ast.Call) and \
-                        ((isinstance(node.value.func, ast.Name) and node.value.func.id == 'Sequential') or \
-                         (isinstance(node.value.func, ast.Attribute) and node.value.func.attr == 'Sequential')):
-                    for tgt in node.targets:
-                        if isinstance(tgt, ast.Attribute) and \
-                                isinstance(tgt.value, ast.Name) and \
-                                tgt.value.id == "self":
-                            # It's a Sequential container
-                            seq_name = tgt.attr
-
-                            # Track layer order
-                            if seq_name not in parent_generator.layer_order:
-                                parent_generator.layer_order.append(seq_name)
-
-                            # Extract Sequential contents
-                            seq_layers = []
-                            for arg in node.value.args:
-                                if isinstance(arg, ast.List) or isinstance(arg, ast.Tuple):
-                                    for elt in arg.elts:
-                                        seq_layer_str = ast.unparse(elt)
-                                        seq_layers.append(seq_layer_str)
-
-                                        # Check if any sequential element is a component
-                                        for comp_name in parent_generator.class_layers:
-                                            if comp_name in seq_layer_str:
-                                                # This component is used in a Sequential
-                                                parent_generator.used_components.add(comp_name)
-                                                # The class containing this Sequential is also used
-                                                if parent_generator.current_class:
-                                                    parent_generator.used_components.add(parent_generator.current_class)
-
-                            # Store the layer info
-                            layer_info = {
-                                "name": seq_name,
-                                "layer_type": "Sequential",
-                                "args": seq_layers,
-                                "kwargs": {},
-                                "class": parent_generator.current_class
-                            }
-                            parent_generator.model_layers.append(layer_info)
-
-                            # Add to class-specific layer list
-                            if parent_generator.current_class:
-                                if parent_generator.current_class not in parent_generator.class_layers:
-                                    parent_generator.class_layers[parent_generator.current_class] = []
-                                if seq_name not in parent_generator.class_layers[parent_generator.current_class]:
-                                    parent_generator.class_layers[parent_generator.current_class].append(seq_name)
-
-                try:
-                    expr = ast.unparse(node.value) if hasattr(ast, 'unparse') else '<expr>'
-                    for tgt in node.targets:
-                        if isinstance(tgt, ast.Name) and any(k in tgt.id.lower() for k in
-                                                             ('optimizer', 'model', 'train')):
-                            lines.append(f"Variable: {tgt.id} = {expr}")
-
-                            # Check if this is a model instantiation
-                            if isinstance(node.value, ast.Call):
-                                class_name = None
-                                if isinstance(node.value.func, ast.Name):
-                                    class_name = node.value.func.id
-                                elif isinstance(node.value.func, ast.Attribute):
-                                    class_name = node.value.func.attr
-
-                                # If this is a tracked component class, mark as used
-                                if class_name and class_name in parent_generator.class_layers:
-                                    parent_generator.used_components.add(class_name)
-                                    print(f"Found top-level model instantiation: {tgt.id} = {class_name}")
-                except Exception:
-                    pass
-
-                self.generic_visit(node)
-
-        return CodeSummaryVisitor()
+        return CodeSummaryVisitor(self, lines, literal_vars, image_folders, default_paths)
 
     @staticmethod
     def analyze_and_visualize_model(python_file_path, output_diagram_path="model_architecture.png",
