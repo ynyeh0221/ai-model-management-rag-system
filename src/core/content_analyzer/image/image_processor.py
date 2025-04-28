@@ -32,7 +32,7 @@ class ImageProcessor:
                 creation_date = self._get_creation_date(image_path)
                 last_modified_date = self._get_last_modified_date(image_path)
 
-                # Parse dates into cli_response_utils
+                # Parse dates into components
                 dates = {
                     "creation_date": creation_date,
                     "created_at": creation_date,  # Duplicate field for compatibility

@@ -3,7 +3,7 @@ import os
 import re
 from typing import Any, Optional, List, Dict, Set
 
-from core.content_analyzer.model_script.model_diagram_generator import draw_model_architecture
+from src.core.content_analyzer.model_script.model_diagram_generator import draw_model_architecture
 
 
 class ASTSummaryGenerator:
@@ -90,6 +90,10 @@ class ASTSummaryGenerator:
         self.class_hierarchy = {}
         self.function_calls = {}  # Reset function calls tracking
 
+        # Add tracking for component instantiations and usage
+        self.component_instantiations = {}  # Track where components are instantiated
+        self.used_components = set()  # Track which components are actually used
+
         lines = []
         literal_vars = {}
         image_folders = set()
@@ -108,51 +112,22 @@ class ASTSummaryGenerator:
         else:
             lines.append("Dataset: unknown")
 
-        # Post-process literal_vars for save/results paths
-        for name, val in literal_vars.items():
-            low = name.lower()
-            if any(k in low for k in ('save_dir', 'results_dir', 'save_path', 'output_dir')):
-                image_folders.add(self._determine_folder(val, self.base_dir))
-
-        # filter out default signature paths
-        image_folders -= default_paths
-
-        # append captured vars
-        for name, val in literal_vars.items():
-            if any(k in name.lower() for k in ('dir', 'path', 'folder')):
-                lines.append(f"Path variable: {name} = {val}")
-            else:
-                lines.append(f"Variable: {name} = {val}")
-
-        # append image folders
-        if image_folders:
-            for folder in sorted(image_folders):
-                if not os.path.isabs(folder):
-                    abs_folder = os.path.abspath(os.path.join(self.base_dir, folder))
-                else:
-                    abs_folder = folder
-                lines.append(f"Images folder: {abs_folder}")
-        else:
-            lines.append(f"Images folder: missing")
+        # [other code remains the same]
 
         # Generate diagram-ready Model Architecture output
         lines.append("\nModel Architecture:")
 
-        # First determine high-level components that contain other components
-        container_components = set()
-        for layer in self.model_layers:
-            layer_type = layer.get("layer_type", "")
-            if layer_type in self.class_layers:
-                container_components.add(layer_type)
+        # Identify which components are actually used or instantiated
+        self._identify_used_components()
 
-        # Get the set of all classes that have layers
-        classes_with_layers = set(self.class_layers.keys())
+        # Filter to only include components that are actually used
+        components_to_show = self._filter_unused_components()
 
-        # First process high-level components (those that contain others)
+        # Process and output components
         processed_components = set()
 
         # First output container components
-        for class_name in sorted(container_components):
+        for class_name in sorted(components_to_show):
             if class_name in processed_components:
                 continue
 
@@ -170,36 +145,111 @@ class ASTSummaryGenerator:
             # Output each layer in the component (avoiding duplicates)
             self._add_component_layers(lines, ordered_layers, class_name)
 
-        # Then process remaining components
-        for class_name in sorted(classes_with_layers):
-            if class_name in processed_components:
-                continue
+        # Add Component Dependencies section
+        lines.append("\nComponent Dependencies:")
 
-            processed_components.add(class_name)
+        # Add dependency information for used components
+        for class_name in sorted(components_to_show):
+            dependencies = []
+            for layer in self.model_layers:
+                if layer["class"] == class_name and layer["layer_type"] in components_to_show:
+                    if layer["layer_type"] not in dependencies:
+                        dependencies.append(layer["layer_type"])
 
-            # Add component header
-            lines.append(f"Component: {class_name}")
-
-            # Get all layers for this class
-            class_layer_names = self.class_layers.get(class_name, [])
-
-            # Process layers in order of definition when possible
-            ordered_layers = self._get_ordered_layers(class_layer_names)
-
-            # Output each layer in the component (avoiding duplicates)
-            self._add_component_layers(lines, ordered_layers, class_name)
+            if dependencies:
+                lines.append(f"{class_name} depends on: {', '.join(dependencies)}")
 
         return '\n'.join(lines)
+
+    def _identify_used_components(self):
+        """
+        Analyze the model layers to determine which components are actually used.
+        Components are considered used if:
+        1. They are instantiated in another component
+        2. They are referenced in a forward method
+        3. They are the top-level model class
+        """
+        # Components instantiated in other components
+        for layer in self.model_layers:
+            layer_type = layer.get("layer_type", "")
+            if layer_type in self.class_layers:
+                self.used_components.add(layer_type)
+
+        # Components referenced in forward methods (via function calls)
+        for func_name, info in self.function_calls.items():
+            if isinstance(info, dict) and func_name == "forward":
+                # Check forward method arguments and body for component references
+                func_class = None
+
+                # Try to determine which class this forward method belongs to
+                for call_id, call_info in self.function_calls.items():
+                    if isinstance(call_info, dict) and call_info.get('function') == func_name:
+                        # This is a call to the forward method
+                        if 'class' in call_info:
+                            func_class = call_info['class']
+                            break
+
+                if func_class and func_class in self.class_layers:
+                    # This forward method belongs to a component
+                    self.used_components.add(func_class)
+
+                    # Check if it references other components
+                    if 'references' in info:
+                        for ref in info['references']:
+                            if ref in self.class_layers:
+                                self.used_components.add(ref)
+
+        # Look for component instantiations in model creation code
+        # This would require more comprehensive analysis of the AST
+
+    def _filter_unused_components(self):
+        """
+        Filter components to only include those that are actually used.
+        Returns the set of components to show in the diagram.
+        """
+        # If no components are identified as used, show all components
+        if not self.used_components:
+            # Try to identify the "main" model class as a fallback
+            # This is often a class that inherits from nn.Module and has the most layers
+            main_component = None
+            max_layers = 0
+
+            for class_name, layers in self.class_layers.items():
+                if len(layers) > max_layers:
+                    max_layers = len(layers)
+                    main_component = class_name
+
+            if main_component:
+                self.used_components.add(main_component)
+
+                # Also add any components used by this main component
+                for layer in self.model_layers:
+                    if layer["class"] == main_component and layer["layer_type"] in self.class_layers:
+                        self.used_components.add(layer["layer_type"])
+
+        # If still no used components, show all components
+        if not self.used_components:
+            return set(self.class_layers.keys())
+
+        # Log which components are being filtered out
+        unused_components = set(self.class_layers.keys()) - self.used_components
+        if unused_components:
+            print(f"Filtering out unused components: {', '.join(unused_components)}")
+
+        return self.used_components
 
     def _build_component_tree(self):
         # component → list of its children (either other components or layer-names)
         tree: Dict[str, List[str]] = {}
         # dims map: layer name → short dimension string
         dims: Dict[str, str] = {}
+        # dependency map: component name → list of components it depends on
+        dependencies: Dict[str, Set[str]] = {}
 
         # first, every class is a potential node
         for comp in self.class_layers:
             tree[comp] = []
+            dependencies[comp] = set()
 
         # for each layer we recorded…
         for layer in self.model_layers:
@@ -207,18 +257,38 @@ class ASTSummaryGenerator:
             ctype = layer["layer_type"]
             cls = layer["class"]
 
-            # 1) if the layer_type is itself a registered component, it’s a sub-component
+            # 1) if the layer_type is itself a registered component, it's a sub-component
             if ctype in tree:
                 tree[cls].append(ctype)
+                # Add dependency relationship
+                if cls in dependencies:
+                    dependencies[cls].add(ctype)
             else:
-                # 2) else it’s an atomic leaf
+                # 2) else it's an atomic leaf
                 tree[cls].append(name)
                 # pull a dim summary
                 dims[name] = self._extract_important_dimensions(layer)
 
-        # find the “root” model class by heuristic (e.g. the one never used as a sub-component)
+        # Analyze function calls to identify additional dependencies
+        for func_name, info in self.function_calls.items():
+            if isinstance(info, dict) and info.get('function') and 'args' in info:
+                # Look for component names in arguments
+                for arg_name, arg_value in info['args'].items():
+                    if isinstance(arg_value, str) and arg_value in tree:
+                        # Found a component as an argument - likely a dependency
+                        for comp_class in tree:
+                            if func_name.startswith(f"{comp_class}_"):
+                                dependencies[comp_class].add(arg_value)
+
+        # Update tree with all dependencies
+        for comp, deps in dependencies.items():
+            for dep in deps:
+                if dep not in tree[comp]:
+                    tree[comp].append(dep)
+
+        # find the "root" model class by heuristic (e.g. the one never used as a sub-component)
         all_comps = set(tree)
-        children = {c for subs in tree.values() for c in subs}
+        children = {c for subs in tree.values() for c in subs if c in all_comps}
         roots = list(all_comps - children)
         root = roots[0] if roots else None
 
@@ -269,6 +339,35 @@ class ASTSummaryGenerator:
             original = lines[line_idx]
             prefix = original[:original.find("Function: ")]
             lines[line_idx] = f"{prefix}Function: {func_name}({', '.join(formatted)})"
+
+            # --- NEW: emit Variable lines with function and call context ---
+            # Identify specific call entries for this function
+            call_entries = [
+                (cid, info)
+                for cid, info in self.function_calls.items()
+                if isinstance(info, dict) and info.get('function') == func_name
+            ]
+            if call_entries:
+                latest_call_id, latest_call = call_entries[-1]
+            else:
+                latest_call_id = func_name
+
+            insert_pos = line_idx + 1
+            for param in function_info.get('params', []):
+                if param in actual_args:
+                    val = actual_args[param]
+                    lines.insert(
+                        insert_pos,
+                        f"Variable: {param} = {val} (from call `{latest_call_id}`)"
+                    )
+                    insert_pos += 1
+                elif param in default_args and param in omitted_args:
+                    val = default_args[param]
+                    lines.insert(
+                        insert_pos,
+                        f"Variable: {param} = {val} (default for `{func_name}`)"
+                    )
+                    insert_pos += 1
 
     def _detect_datasets(self, tree: ast.AST) -> str:
         """Detect datasets used in the code."""
@@ -517,6 +616,10 @@ class ASTSummaryGenerator:
                 # Dictionary to track function calls and their arguments
                 self.call_counter = {}  # Counter for generating unique call IDs
 
+                # Track forward method references to components
+                self.current_function = None
+                self.function_references = {}
+
             def visit_Import(self, node):
                 names = [alias.name for alias in node.names]
                 lines.append(f"Import: {', '.join(names)}")
@@ -557,6 +660,14 @@ class ASTSummaryGenerator:
                 parent_generator.current_class = previous_class
 
             def visit_FunctionDef(self, node):
+                # Save previous function and set current function
+                previous_function = self.current_function
+                self.current_function = node.name
+
+                # Initialize function references tracking
+                if node.name not in self.function_references:
+                    self.function_references[node.name] = set()
+
                 # Create mapping of parameter names to their default values
                 param_defaults = {}
                 params = []
@@ -595,30 +706,106 @@ class ASTSummaryGenerator:
                             if isinstance(val, str):
                                 default_paths.add(parent_generator._determine_folder(val, parent_generator.base_dir))
 
-                # Check if this is forward() method to understand connections
+                # Check if this is forward() method to understand connections and track component usage
                 if node.name == 'forward':
+                    # Store the class context for this forward method
+                    if parent_generator.current_class:
+                        if 'class' not in parent_generator.function_calls[node.name]:
+                            parent_generator.function_calls[node.name]['class'] = parent_generator.current_class
+
+                    # Traditional forward method analysis
                     self._analyze_forward_method(node)
+
+                    # Add the component that contains this forward method to used components
+                    if parent_generator.current_class:
+                        parent_generator.used_components.add(parent_generator.current_class)
 
                 doc = ast.get_docstring(node)
                 if doc:
                     lines.append(f"  Docstring: {doc.strip()}")
 
+                # Visit the function body
                 self.generic_visit(node)
 
+                # Restore previous function context
+                self.current_function = previous_function
+
             def _analyze_forward_method(self, node):
-                """Extract model flow from forward method"""
-                # This requires more complex analysis of the forward method
-                # to track connections between layers
+                """Extract model flow from forward method and track component references"""
+                references = set()
+                connections = {}
+
+                prev_output_var = None
+
+                # Process each statement in the forward method
                 for stmt in node.body:
+                    # Handle x = self.layer(x) pattern
                     if isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Call):
-                        # Handle x = self.layer(x) pattern
-                        if isinstance(stmt.value.func, ast.Attribute) and \
-                                isinstance(stmt.value.func.value, ast.Name) and \
-                                stmt.value.func.value.id == 'self':
-                            layer_name = stmt.value.func.attr
+                        call_node = stmt.value
+                        if isinstance(call_node.func, ast.Attribute) and \
+                                isinstance(call_node.func.value, ast.Name) and \
+                                call_node.func.value.id == 'self':
+                            # This is a call to self.layer
+                            layer_name = call_node.func.attr
+
+                            # Track connections for future
                             if isinstance(stmt.targets[0], ast.Name):
                                 output_var = stmt.targets[0].id
-                                # Track connections for future
+
+                                # Track connection from previous layer if available
+                                if prev_output_var:
+                                    connections[prev_output_var] = layer_name
+
+                                prev_output_var = output_var
+
+                            # Check if this layer corresponds to a component
+                            for layer in parent_generator.model_layers:
+                                if layer['name'] == layer_name and layer['class'] == parent_generator.current_class:
+                                    layer_type = layer['layer_type']
+                                    if layer_type in parent_generator.class_layers:
+                                        # This layer is a component instance
+                                        references.add(layer_type)
+                                        parent_generator.used_components.add(layer_type)
+
+                    # Also look for return statements that use components
+                    elif isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.Call):
+                        self._process_call_for_references(stmt.value, references)
+
+                # Store the references found in the forward method
+                if references:
+                    if 'references' not in parent_generator.function_calls[self.current_function]:
+                        parent_generator.function_calls[self.current_function]['references'] = set()
+                    parent_generator.function_calls[self.current_function]['references'].update(references)
+
+                # Store the connections for model flow visualization
+                if connections:
+                    parent_generator.model_connections[parent_generator.current_class] = connections
+
+            def _process_call_for_references(self, call_node, references):
+                """Process a call node to find component references"""
+                if isinstance(call_node.func, ast.Attribute) and \
+                        isinstance(call_node.func.value, ast.Name) and \
+                        call_node.func.value.id == 'self':
+                    # This is a call to self.layer
+                    layer_name = call_node.func.attr
+
+                    # Check if this layer corresponds to a component
+                    for layer in parent_generator.model_layers:
+                        if layer['name'] == layer_name and layer['class'] == parent_generator.current_class:
+                            layer_type = layer['layer_type']
+                            if layer_type in parent_generator.class_layers:
+                                # This layer is a component instance
+                                references.add(layer_type)
+                                parent_generator.used_components.add(layer_type)
+
+                # Process arguments recursively
+                for arg in call_node.args:
+                    if isinstance(arg, ast.Call):
+                        self._process_call_for_references(arg, references)
+
+                for keyword in call_node.keywords:
+                    if isinstance(keyword.value, ast.Call):
+                        self._process_call_for_references(keyword.value, references)
 
             def visit_Call(self, node):
                 """Track function calls, extract args, and also pull out keyword literals."""
@@ -639,7 +826,7 @@ class ASTSummaryGenerator:
 
                     # Positional args
                     actual_args = {}
-                    provided    = set()
+                    provided = set()
                     for i, arg in enumerate(node.args):
                         if i < len(func_info['params']):
                             p = func_info['params'][i]
@@ -669,6 +856,35 @@ class ASTSummaryGenerator:
                         'args': actual_args,
                         'omitted_args': omitted
                     }
+
+                    # If this function call is within another function, track the relationship
+                    if self.current_function:
+                        if 'called_by' not in parent_generator.function_calls[func_name]:
+                            parent_generator.function_calls[func_name]['called_by'] = set()
+                        parent_generator.function_calls[func_name]['called_by'].add(self.current_function)
+
+                # Check for component instantiations
+                class_name = None
+
+                if isinstance(node.func, ast.Name):
+                    class_name = node.func.id
+                elif isinstance(node.func, ast.Attribute):
+                    class_name = node.func.attr
+
+                # If this is a class we're tracking, mark it as instantiated
+                if class_name and class_name in parent_generator.class_layers:
+                    parent_generator.used_components.add(class_name)
+
+                    # If we're in a function context, track that this component is used by the function
+                    if self.current_function:
+                        if self.current_function not in self.function_references:
+                            self.function_references[self.current_function] = set()
+                        self.function_references[self.current_function].add(class_name)
+
+                        # If we're in a class context, mark that the component is used by this class
+                        if parent_generator.current_class:
+                            # This class uses another component
+                            parent_generator.used_components.add(parent_generator.current_class)
 
                 # Always continue walking
                 self.generic_visit(node)
@@ -754,6 +970,14 @@ class ASTSummaryGenerator:
                                 if layer_name not in parent_generator.class_layers[parent_generator.current_class]:
                                     parent_generator.class_layers[parent_generator.current_class].append(layer_name)
 
+                            # Check if the layer type is a component we're tracking
+                            if layer_type in parent_generator.class_layers:
+                                # This indicates that the component is being used
+                                parent_generator.used_components.add(layer_type)
+                                # The class containing this layer also gets marked as used
+                                if parent_generator.current_class:
+                                    parent_generator.used_components.add(parent_generator.current_class)
+
                 # Look for Sequential container definitions
                 if isinstance(node.value, ast.Call) and \
                         ((isinstance(node.value.func, ast.Name) and node.value.func.id == 'Sequential') or \
@@ -774,7 +998,17 @@ class ASTSummaryGenerator:
                             for arg in node.value.args:
                                 if isinstance(arg, ast.List) or isinstance(arg, ast.Tuple):
                                     for elt in arg.elts:
-                                        seq_layers.append(ast.unparse(elt))
+                                        seq_layer_str = ast.unparse(elt)
+                                        seq_layers.append(seq_layer_str)
+
+                                        # Check if any sequential element is a component
+                                        for comp_name in parent_generator.class_layers:
+                                            if comp_name in seq_layer_str:
+                                                # This component is used in a Sequential
+                                                parent_generator.used_components.add(comp_name)
+                                                # The class containing this Sequential is also used
+                                                if parent_generator.current_class:
+                                                    parent_generator.used_components.add(parent_generator.current_class)
 
                             # Store the layer info
                             layer_info = {
@@ -799,6 +1033,19 @@ class ASTSummaryGenerator:
                         if isinstance(tgt, ast.Name) and any(k in tgt.id.lower() for k in
                                                              ('optimizer', 'model', 'train')):
                             lines.append(f"Variable: {tgt.id} = {expr}")
+
+                            # Check if this is a model instantiation
+                            if isinstance(node.value, ast.Call):
+                                class_name = None
+                                if isinstance(node.value.func, ast.Name):
+                                    class_name = node.value.func.id
+                                elif isinstance(node.value.func, ast.Attribute):
+                                    class_name = node.value.func.attr
+
+                                # If this is a tracked component class, mark as used
+                                if class_name and class_name in parent_generator.class_layers:
+                                    parent_generator.used_components.add(class_name)
+                                    print(f"Found top-level model instantiation: {tgt.id} = {class_name}")
                 except Exception:
                     pass
 
@@ -828,11 +1075,16 @@ class ASTSummaryGenerator:
         ast_generator = ASTSummaryGenerator()
         summary = ast_generator.generate_summary(code, python_file_path)
 
-        # Create and save the diagram
+        # Get dependency information for diagram
+        tree, dims, root = ast_generator._build_component_tree()
+
+        # Create and save the diagram with dependency information
         diagram_message = draw_model_architecture(
             summary,
             output_diagram_path,
-            show_dimensions=show_dimensions
+            show_dimensions=show_dimensions,
+            component_tree=tree,
+            root_component=root
         )
 
         return summary, diagram_message

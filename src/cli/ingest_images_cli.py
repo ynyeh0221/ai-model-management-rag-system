@@ -24,7 +24,7 @@ class ImageProcessorRunner:
         embeddings, and stores them in the vector database.
 
         Args:
-            components: Dictionary containing initialized system cli_response_utils
+            components: Dictionary containing initialized system components
             directory_path: Path to directory containing image_processing
             model_id: Optional model ID to associate with all image_processing in this directory
             extract_epoch: Whether to attempt to extract epoch information from filenames or paths
@@ -144,7 +144,7 @@ class ImageProcessorRunner:
 
         Args:
             file_path: Path to the image file
-            components: Dictionary containing initialized system cli_response_utils
+            components: Dictionary containing initialized system components
             model_id: Optional model ID to associate with this image
             extract_epoch: Whether to attempt to extract epoch information from filename or path
             logger: Logger instance
@@ -152,7 +152,7 @@ class ImageProcessorRunner:
         Returns:
             Tuple of (document_id, success) if processed, None if skipped
         """
-        # Extract required cli_response_utils
+        # Extract required components
         image_processor = components["content_analyzer"]["image_processor"]
         schema_validator = components["content_analyzer"]["schema_validator"]
         image_embedder = components["vector_db"]["image_embedder"]
@@ -356,7 +356,7 @@ class ImageProcessorRunner:
         This is useful for updating metadata when the schema or processing logic changes.
 
         Args:
-            components: Dictionary containing initialized system cli_response_utils
+            components: Dictionary containing initialized system components
             directory_path: Path to directory containing image_processing
             model_id: Optional model ID to associate with all image_processing in this directory
             force_update: Whether to update all image_processing or only those with missing required fields
@@ -493,7 +493,7 @@ class ImageProcessorRunner:
         """Process multiple directories of image_processing in batch.
 
         Args:
-            components: Dictionary containing initialized system cli_response_utils
+            components: Dictionary containing initialized system components
             batch_config: Dictionary with batch processing configuration
                 Example: {
                     "directories": [

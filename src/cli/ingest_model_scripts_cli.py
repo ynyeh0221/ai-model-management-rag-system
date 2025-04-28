@@ -548,14 +548,14 @@ class ScriptProcessorRunner:
         """Process a single model model_script file.
 
         Args:
-            components: Dictionary containing initialized system cli_response_utils
+            components: Dictionary containing initialized system components
             file_path: Path to the model model_script file
             logger: Logger instance
 
         Returns:
             Tuple of (model_id, success) if processed, None if skipped
         """
-        # Extract required cli_response_utils
+        # Extract required components
         code_parser = components["content_analyzer"]["code_parser"]
         metadata_extractor = components["content_analyzer"]["metadata_extractor"]
         schema_validator = components["content_analyzer"]["schema_validator"]

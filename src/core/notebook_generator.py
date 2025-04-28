@@ -15,7 +15,7 @@ class NotebookGenerator:
         Generate a Colab notebook for model analysis using full model_script reconstruction.
 
         Args:
-            components (dict): Dictionary containing initialized system cli_response_utils.
+            components (dict): Dictionary containing initialized system components.
             model_id (str): ID of the model to generate a notebook for.
             output_path (str): Path where the generated notebook will be saved.
 
@@ -24,7 +24,7 @@ class NotebookGenerator:
         """
         print(f"Generating notebook for model {model_id}...")
 
-        # Extract cli_response_utils
+        # Extract components
         code_generator = components["colab_generator"]["code_generator"]
         reproducibility_manager = components["colab_generator"]["reproducibility_manager"]
         chroma_manager = components["vector_db"]["chroma_manager"]

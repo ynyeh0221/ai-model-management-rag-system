@@ -24,7 +24,7 @@ def filter_ast_summary_for_metadata(summary: str) -> str:
     in_model_architecture = False
 
     # what prefixes we always keep
-    keep_prefixes = ("Import:", "From ", "Images folder:")
+    keep_prefixes = ("Dataset:", "Images folder:")
     # which variable names to keep
     var_keys = ("batch", "lr", "epoch", "optimizer", "device")
 
@@ -32,7 +32,7 @@ def filter_ast_summary_for_metadata(summary: str) -> str:
         stripped = line.strip()
 
         # Check if we've reached the Model Architecture section
-        if stripped.startswith("Model Architecture:"):
+        if stripped.startswith("Model Architecture:") or stripped.startswith("Component Dependencies:"):
             in_model_architecture = True
             filtered.append(stripped)
             continue
@@ -306,7 +306,7 @@ class LLMBasedCodeParser:
 
     Processing Pipeline:
     -------------------
-    1. AST Digest Generation: Creates a structured digest of code cli_response_utils using Python's AST module
+    1. AST Digest Generation: Creates a structured digest of code components using Python's AST module
     2. Filtered Metadata Extraction: Identifies key imports, classes, docstrings, and variables
     3. LLM-Based Analysis: Leverages LLM capabilities to interpret code structures semantically
     4. Natural Language Summarization: Generates human-readable descriptions of code functionality
@@ -520,7 +520,7 @@ class LLMBasedCodeParser:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0,
-                    max_tokens=30000
+                    max_tokens=4096
                 )
                 summary = response.get("content", "").strip()
 

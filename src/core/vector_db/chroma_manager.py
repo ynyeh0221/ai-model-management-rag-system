@@ -554,7 +554,7 @@ class ChromaManager:
             # Flatten metadata
             flat_metadata = self._flatten_metadata(metadata)
 
-            # Collect document cli_response_utils
+            # Collect document components
             ids.append(doc_id)
             contents.append(content)
             metadatas.append(flat_metadata)
@@ -817,7 +817,7 @@ class ChromaManager:
                 self.logger.warning(f"Document {doc_id} not found or user {user_id} does not have access")
                 return False
             
-            # Extract document cli_response_utils
+            # Extract document components
             content = document.get("content", "")
             metadata = document.get("metadata", {})
             

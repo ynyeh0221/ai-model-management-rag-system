@@ -46,7 +46,7 @@ class QueryParser:
 
     def __init__(self, nlp_model: str = "en_core_web_sm", llm_model_name: str = "deepseek-r1:7b"):
         """
-        Initialize the QueryParser with necessary NLP cli_response_utils.
+        Initialize the QueryParser with necessary NLP components.
 
         Args:
             nlp_model: The spaCy model to use for NLP tasks
@@ -55,7 +55,7 @@ class QueryParser:
         # Set up logging
         self.logger = logging.getLogger(__name__)
 
-        # Initialize NLP cli_response_utils
+        # Initialize NLP components
         try:
             self.nlp = spacy.load(nlp_model)
             self.logger.info(f"Loaded spaCy model: {nlp_model}")
@@ -116,7 +116,7 @@ class QueryParser:
         - modelid: my_model
         - modelid : my_model
 
-        The pattern cli_response_utils:
+        The pattern components:
         1. \b(?:model[-\s_]*id|modelid) - Matches different forms of "model id"
            - model id, model-id, model_id, model--id, model  id, etc.
            - Also matches modelid as a special case
@@ -543,7 +543,7 @@ class QueryParser:
                 params["colors"] = [color.strip() for color in colors if color.strip()]
         elif re.search(r"date\s*[=:]\s*|created\s+(on|in)\s+", query_lower):
             params["search_type"] = "date"
-            # Extract date cli_response_utils
+            # Extract date components
             date_filter = {}
 
             # Look for year
@@ -562,7 +562,7 @@ class QueryParser:
             params["date_filter"] = date_filter
         elif re.search(r"content\s*[=:]\s*|subject\s*[=:]\s*|scene\s*[=:]\s*", query_lower):
             params["search_type"] = "content"
-            # Extract content filter cli_response_utils
+            # Extract content filter components
             content_filter = {}
 
             # Subject type

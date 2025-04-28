@@ -1,5 +1,5 @@
 """
-Refactored implementation of the AI Model Management RAG system UI cli_response_utils.
+Refactored implementation of the AI Model Management RAG system UI components.
 This refactoring separates concerns into multiple classes for better maintainability.
 """
 

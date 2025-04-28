@@ -15,7 +15,7 @@ class RAGSystem:
     RAG System Core Class - Encapsulating all core functionality into callable functions
 
     This class provides all core functionality of the RAG system, including:
-    - Initializing system cli_response_utils
+    - Initializing system components
     - Processing user queries
     - Generating responses
     - Handling model and image display
@@ -24,7 +24,7 @@ class RAGSystem:
     """
 
     def __init__(self):
-        """Initialize RAG system core cli_response_utils"""
+        """Initialize RAG system core components"""
         self.components = None
         self.user_id = "anonymous"
         self.callbacks = {
@@ -36,10 +36,10 @@ class RAGSystem:
 
     def initialize(self, components: Dict[str, Any], user_id: str = "anonymous") -> bool:
         """
-        Initialize RAG system cli_response_utils
+        Initialize RAG system components
 
         Args:
-            components: Dictionary containing initialized system cli_response_utils
+            components: Dictionary containing initialized system components
             user_id: User ID, default is "anonymous"
 
         Returns:

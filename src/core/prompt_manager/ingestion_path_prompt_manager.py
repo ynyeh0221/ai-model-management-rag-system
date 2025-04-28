@@ -8,19 +8,17 @@ class IngestionPathPromptManager:
 
             "### INPUT FORMAT SPECIFICATION\n\n"
             "The input you will receive is an Abstract Syntax Tree (AST) digest summary of a Python ML training model_script. This AST summary contains structured information about:\n"
-            "- Imported libraries and modules\n"
-            "- Class and function definitions\n"
-            "- Model architecture cli_response_utils and parameters\n"
+            "- Model architecture and variables\n"
+            "- Model components' dependencies\n"
             "- Data loading and preprocessing configurations\n"
             "- Training loop and optimization settings\n"
-            "- Evaluation procedures and metrics\n"
             "- Output and logging mechanisms\n\n"
             "The AST digest represents the model_script's structure and logic without including the full source code. Your task is to transform this technical summary into comprehensive, human-readable English documentation.\n\n"
 
             "### THINKING PROCESS REQUIREMENTS\n\n"
             "Before drafting your documentation, engage in thorough analytical reasoning that demonstrates:\n"
             "- Systematic analysis of every node and relationship in the provided AST summary\n"
-            "- Identification of all model cli_response_utils, hyperparameters, and data transformations\n"
+            "- Identification of all model components, hyperparameters, and data transformations\n"
             "- Recognition of architectural patterns and design principles in the implementation\n"
             "- Consideration of how each component contributes to the overall training pipeline\n"
             "- Mapping of code structures to ML concepts that junior engineers need to understand\n"
@@ -83,7 +81,7 @@ class IngestionPathPromptManager:
             "   - Explain any custom evaluation logic or specialized testing\n\n"
 
             "6. **Visualization and Output Artifacts**\n"
-            "   - Document all visualization cli_response_utils and logging mechanisms:\n"
+            "   - Document all visualization components and logging mechanisms:\n"
             "     * Training progress visualization (loss curves, metric tracking)\n"
             "     * Model performance visualization (confusion matrices, predictions)\n"
             "     * Feature or embedding visualizations\n"
@@ -142,7 +140,7 @@ class IngestionPathPromptManager:
 
     @staticmethod
     def get_system_prompt_for_metadata_from_ast_summary_parsing():
-        prompt = (
+        system_prompt = (
             "### ML CODE METADATA EXTRACTOR ROLE AND PURPOSE\n\n"
             "You are a senior machine-learning architect specializing in extracting precise, structured metadata from ML code. "
             "Your expertise allows you to identify key architectural patterns, configuration parameters, and implementation details "
@@ -183,16 +181,15 @@ class IngestionPathPromptManager:
             "- Look beyond individual layer or class names to identify the overarching architectural paradigm\n"
             "- Analyze component combinations, layer sequences, and functional patterns\n"
             "- Consider distinctive implementation signatures (e.g., encoder-decoder pairs, attention mechanisms, GAN generators/discriminators)\n"
+            "- When parsing architecture, check all components in the model structure and component dependencies to identify the best architecture to represent the model, and write it to the JSON\n"
             "- Format as: { \"type\": \"<InferredArchitecture>\", \"reason\": \"<concise justification citing multiple specific AST evidence points>\" }\n"
             "- Examples of valid architecture types: \"Transformer\", \"UNet\", \"ResNet\", \"Variational Autoencoder\", \"GAN\", \"LSTM\", etc.\n"
-            "- The reason must cite specific cli_response_utils and patterns from the AST (e.g., \"Contains encoder/decoder modules with reparameterization function, characteristic of VAE architecture\")\n\n"
+            "- The reason must cite specific components and patterns from the AST (e.g., \"Contains encoder/decoder modules with reparameterization function, characteristic of VAE architecture\")\n\n"
 
             "**dataset**\n"
             "- Systematically scan for dataset definitions, imports, and loader instantiations\n"
-            "- Look for standard dataset classes (e.g., torchvision.datasets.MNIST, tensorflow.keras.datasets.cifar10)\n"
+            "- Look for dataset (e.g., MNIST, cifar10)\n"
             "- Identify custom Dataset subclass implementations and their data sources\n"
-            "- Check for DataLoader instantiations and their source parameters\n"
-            "- Examine file paths, directory patterns, and data loading logic\n"
             "- Format as: { \"name\": \"<DatasetName>\", \"reason\": \"<concise reason citing the exact AST evidence>\" }\n"
             "- If no clear dataset is found, use { \"name\": \"unknown\", \"reason\": \"No dataset references found in AST\" }\n\n"
 
@@ -243,4 +240,4 @@ class IngestionPathPromptManager:
             "- Maintain the exact field names and nesting structure as specified\n"
             "- Do not include any text before or after the JSON object\n"
         )
-        return prompt
+        return system_prompt

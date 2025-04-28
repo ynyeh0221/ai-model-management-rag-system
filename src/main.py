@@ -24,30 +24,30 @@ from src.core.vector_db.text_embedder import TextEmbedder
 
 
 def initialize_components(config_path="./config", llm_model_name: str = "llm"):
-    """Initialize all cli_response_utils of the RAG system."""
+    """Initialize all components of the RAG system."""
 
     llm_interface = LLMInterface(model_name=llm_model_name, timeout=60000)
     llm_interface_nl = LLMInterface(model_name="deepseek-llm:7b", timeout=60000)
 
-    # Initialize document cli_runner cli_response_utils
+    # Initialize document cli_runner components
     schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
     code_parser = LLMBasedCodeParser(schema_validator=schema_validator, llm_interface=llm_interface, llm_interface_nl=llm_interface_nl)
     metadata_extractor = MetadataExtractor()
     image_processor = ImageProcessor(schema_validator)
     
-    # Initialize vector database cli_response_utils
+    # Initialize vector database components
     text_embedder = TextEmbedder(device="mps")
     image_embedder = ImageEmbedder()
     chroma_manager = ChromaManager(text_embedder, image_embedder, "./chroma_db")
     access_control = AccessControlManager(chroma_manager)
     
-    # Initialize query engine cli_response_utils
+    # Initialize query engine components
     query_parser = QueryParser()
     search_dispatcher = SearchDispatcher(chroma_manager, text_embedder, image_embedder)
     query_analytics = QueryAnalytics()
     result_reranker = CrossEncoderReranker(device="mps")
     
-    # Initialize Colab notebook generator cli_response_utils
+    # Initialize Colab notebook generator components
     code_generator = CodeGenerator()
     colab_api_client = ColabAPIClient()
     reproducibility_manager = ReproducibilityManager()
@@ -122,7 +122,7 @@ def main():
         script_processor_runner.process_model_scripts(components, args.directory)
     elif args.command == "process-single-script":
         # Use deepseek-llm for speed and token length consideration
-        components = initialize_components(llm_model_name="deepseek-r1:7b")
+        components = initialize_components(llm_model_name="deepseek-llm:7b")
         script_processor_runner.process_single_script(components, args.file_path)
     elif args.command == "process-image_processing":
         # Use deepseek-llm for speed and token length consideration

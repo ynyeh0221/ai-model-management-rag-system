@@ -36,7 +36,7 @@ class CLIInterface:
         self.notebook_generator = None
         self.llm_response_processor = None
 
-        # CommandHandler will be initialized after UI cli_response_utils
+        # CommandHandler will be initialized after UI components
         self.command_handler = None
 
     def start_cli(self, components: Dict[str, Any], host: str = "localhost", port: int = 8000):
@@ -44,13 +44,13 @@ class CLIInterface:
         Start the command line interface
 
         Args:
-            components: Dictionary containing initialized system cli_response_utils
+            components: Dictionary containing initialized system components
             host: Hostname, kept for API compatibility, not used in CLI mode
             port: Port number, kept for API compatibility, not used in CLI mode
         """
         print(f"Starting command line interface (Web UI will be developed later)...")
 
-        # Store cli_response_utils reference
+        # Store components reference
         self.components = components
 
         # Display welcome message
@@ -68,10 +68,10 @@ class CLIInterface:
         # Register callbacks
         self._register_callbacks()
 
-        # Initialize UI cli_response_utils
+        # Initialize UI components
         self._initialize_components()
 
-        # Initialize command handler after UI cli_response_utils
+        # Initialize command handler after UI components
         self.command_handler = CommandHandler(self)
 
         # Run main command loop
@@ -79,7 +79,7 @@ class CLIInterface:
 
     def _initialize_components(self):
         """Initialize component classes needed by the UI"""
-        # Import necessary cli_response_utils
+        # Import necessary components
         from cli.cli_response_utils.model_display_manager import ModelDisplayManager
         from cli.cli_response_utils.image_display_manager import ImageDisplayManager
         from core.notebook_generator import NotebookGenerator
@@ -252,7 +252,7 @@ class CLIInterface:
         print(f"Status: {message}")
 
 class CommandHandler:
-    """Handles command processing and delegation to appropriate cli_response_utils."""
+    """Handles command processing and delegation to appropriate components."""
 
     def __init__(self, cli_interface):
         """

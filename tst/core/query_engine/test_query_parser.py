@@ -343,7 +343,7 @@ class TestQueryParser(unittest.TestCase):
 
     def test_parse_query(self):
         """Test the full parse_query method."""
-        # Mock necessary cli_response_utils
+        # Mock necessary components
         with patch.object(self.parser, 'preprocess_query', return_value="processed query"), \
                 patch.object(self.parser, 'classify_intent', return_value=(QueryIntent.RETRIEVAL, "Test reason")), \
                 patch.object(self.parser, 'extract_parameters', return_value={"test_param": "test_value"}):

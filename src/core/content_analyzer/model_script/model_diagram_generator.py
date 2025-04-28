@@ -1,5 +1,5 @@
 import re
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set
 
 from graphviz import Digraph
 
@@ -19,6 +19,8 @@ class ModelDiagramGenerator:
         self.format = format
         self.components = []
         self.component_layers = {}
+        self.dependencies = {}  # Track component dependencies
+        self.root_components = []  # Track root components
 
     def _create_diagram(self) -> Digraph:
         """Create a Graphviz diagram of the model architecture."""
@@ -49,6 +51,10 @@ class ModelDiagramGenerator:
                 with dot.subgraph(name=f'cluster_{component}') as c:
                     c.attr(label=component, style='filled', color='lightgrey', fontname='Arial', fontsize='12')
 
+                    # If it's a root component, highlight it
+                    if component in self.root_components:
+                        c.attr(color='darkgreen', penwidth='2.0')
+
                     # Add layers as nodes within the component
                     for layer_name, layer_type, dimensions in self.component_layers[component]:
                         node_id = f"{component}_{layer_name}"
@@ -62,11 +68,6 @@ class ModelDiagramGenerator:
                         print(f"  Adding node: {node_id} with label: {label}")
                         c.node(node_id, label=label)
                         nodes.add(node_id)
-
-                        # If the layer_type matches a component name, add an edge
-                        if layer_type.strip() in self.components:
-                            print(f"  Adding component reference edge: {node_id} -> cluster_{layer_type.strip()}")
-                            dot.edge(node_id, f"cluster_{layer_type.strip()}", style='dashed', color='red')
             except Exception as e:
                 print(f"ERROR creating subgraph for {component}: {e}")
 
@@ -81,12 +82,40 @@ class ModelDiagramGenerator:
                 next_layer = layers[i + 1]
 
                 # Only connect layers that look like they should be connected
+                """
                 if self._should_connect_layers(current_layer, next_layer):
                     src = f"{component}_{current_layer[0]}"
                     dst = f"{component}_{next_layer[0]}"
                     print(f"  Adding edge: {src} -> {dst}")
                     dot.edge(src, dst)
                     edge_count += 1
+                """
+
+            # Add component dependency edges
+            if component in self.dependencies:
+                for dep_component in self.dependencies[component]:
+                    if dep_component in self.components:
+                        # Connect this component to its dependency
+                        print(f"  Adding dependency edge: cluster_{component} -> cluster_{dep_component}")
+                        # Find representative nodes in each component
+                        if self.component_layers[component] and self.component_layers[dep_component]:
+                            src = f"{component}_{self.component_layers[component][0][0]}"  # First layer of source
+                            dst = f"{dep_component}_{self.component_layers[dep_component][0][0]}"  # First layer of target
+                            dot.edge(src, dst, style='dashed', color='blue', label='uses')
+                            edge_count += 1
+
+        # Add edges for layer type references to components
+        for component in self.components:
+            for layer_name, layer_type, _ in self.component_layers[component]:
+                # If the layer_type matches a component name, add an edge
+                if layer_type.strip() in self.components:
+                    src = f"{component}_{layer_name}"
+                    # Find first layer of target component
+                    if self.component_layers[layer_type.strip()]:
+                        dst = f"{layer_type.strip()}_{self.component_layers[layer_type.strip()][0][0]}"
+                        print(f"  Adding layer-component reference: {src} -> {dst}")
+                        dot.edge(src, dst, style='dashed', color='red', label='instance')
+                        edge_count += 1
 
         print(f"Created diagram with {len(nodes)} nodes and approximately {edge_count} edges")
 
@@ -131,8 +160,7 @@ class ModelDiagramGenerator:
                 component_count += 1
                 print(f"Found component: {current_component}")
             elif current_component is not None and ":" in line:
-                # This matches lines like "  avg_pool: AdaptiveAvgPool2d(1)"
-                # More flexible than the previous regex
+                # Layer line
                 parts = line.split(":", 1)
                 if len(parts) == 2:
                     layer_name = parts[0].strip()
@@ -149,7 +177,25 @@ class ModelDiagramGenerator:
                         print(f"  Extracted layer: {layer_name}: {layer_type}({dimensions})")
 
         print(f"Parsing complete: {component_count} components, {layer_count} layers")
+
         return components, component_layers
+
+    def _infer_dependencies(self):
+        """Infer component dependencies based on layer types."""
+        dependencies = {}
+        for component in self.components:
+            dependencies[component] = set()
+            for _, layer_type, _ in self.component_layers[component]:
+                if layer_type.strip() in self.components:
+                    dependencies[component].add(layer_type.strip())
+        self.dependencies = dependencies
+
+    def _infer_root_components(self):
+        """Identify root components (those not used by any other component)."""
+        used_components = set()
+        for deps in self.dependencies.values():
+            used_components.update(deps)
+        self.root_components = [c for c in self.components if c not in used_components]
 
     def _should_connect_layers(self, layer1: Tuple[str, str, str], layer2: Tuple[str, str, str]) -> bool:
         """
@@ -160,7 +206,7 @@ class ModelDiagramGenerator:
         sequential_patterns = [
             # Encoder/Decoder patterns
             {'pattern': ["initial_conv", "down1", "down2", "down3", "down4", "fc_mu", "fc_logvar"]},
-            {'pattern': ["fc", "up4", "up3", "up2", "up1", "final_conv"]},
+            {'pattern': ["res1", "res2", "res3", "res4", "fc", "up4", "up3", "up2", "up1", "final_conv"]},
 
             # Conv/Linear patterns
             {'pattern': ["conv1", "conv2", "conv3", "fc1", "fc2"]},
@@ -169,7 +215,11 @@ class ModelDiagramGenerator:
             {'pattern': ["enc1", "enc2", "bottleneck", "dec1", "dec2"]},
 
             # Transformer patterns
-            {'pattern': ["embedding", "encoder", "decoder", "output"]}
+            {'pattern': ["embedding", "encoder", "decoder", "output"]},
+
+            # Common layer sequences
+            {'pattern': ["lin1", "act", "lin2"]},
+            {'pattern': ["initial_conv", "down1", "res1"]}
         ]
 
         name1, type1, _ = layer1
@@ -201,7 +251,14 @@ class ModelDiagramGenerator:
             ("time_embedding", "class_embedding"),
             ("project_in", "enc1"),
             ("bottleneck", "dec1"),
-            ("dec2", "project_out")
+            ("dec2", "project_out"),
+            ("conv1", "ln1"),
+            ("ln1", "swish"),
+            ("swish", "conv2"),
+            ("conv2", "ln2"),
+            ("ln2", "ca"),
+            ("ca", "sa"),
+            ("qkv", "proj")
         ]
 
         if (name1, name2) in special_pairs:
@@ -231,6 +288,15 @@ class ModelDiagramGenerator:
 
         # Parse the architecture into components and layers
         self.components, self.component_layers = self._parse_architecture(architecture_section)
+
+        # Only infer dependencies if they weren't explicitly provided
+        if not self.dependencies:
+            self._infer_dependencies()
+
+        # Only infer root components if they weren't explicitly provided
+        if not self.root_components:
+            self._infer_root_components()
+
         print(
             f"Found {len(self.components)} components with {sum(len(layers) for layers in self.component_layers.values())} total layers")
 
@@ -239,6 +305,12 @@ class ModelDiagramGenerator:
             print(f"Component: {comp} - {len(self.component_layers.get(comp, []))} layers")
             for layer in self.component_layers.get(comp, [])[:3]:  # Show first 3 layers
                 print(f"  - {layer[0]}: {layer[1]}({layer[2]})")
+
+        # Debug dependencies
+        print("Component dependencies:")
+        for comp, deps in self.dependencies.items():
+            if deps:
+                print(f"  {comp} depends on: {', '.join(deps)}")
 
         # Create and render the diagram
         dot = self._create_diagram()
@@ -257,7 +329,7 @@ class ModelDiagramGenerator:
 
 # Helper function for easy use
 def draw_model_architecture(ast_summary: str, output_path: str = "model_diagram.png",
-                            show_dimensions: bool = True) -> str:
+                            show_dimensions: bool = True, component_tree=None, root_component=None) -> str:
     """
     User-friendly wrapper to generate and save a model architecture diagram.
 
@@ -265,6 +337,8 @@ def draw_model_architecture(ast_summary: str, output_path: str = "model_diagram.
         ast_summary: The AST summary text containing the model architecture
         output_path: Where to save the diagram (should end with .png, .pdf, or .svg)
         show_dimensions: Whether to show dimension information in the diagram
+        component_tree: Optional dictionary mapping components to their dependencies
+        root_component: Optional name of the root component in the architecture
 
     Returns:
         Path to the saved diagram or error message
@@ -278,6 +352,22 @@ def draw_model_architecture(ast_summary: str, output_path: str = "model_diagram.
 
     # Generate the diagram
     generator = ModelDiagramGenerator(show_dimensions=show_dimensions, format=format)
+
+    # If component_tree and root_component are provided, use them
+    if component_tree is not None:
+        # Convert component tree to the format expected by ModelDiagramGenerator
+        dependencies = {}
+        for comp, deps in component_tree.items():
+            # Filter for component dependencies (vs. layer dependencies)
+            dependencies[comp] = set([d for d in deps if d in component_tree])
+
+        # Set the dependencies directly
+        generator.dependencies = dependencies
+
+    if root_component is not None:
+        # Set the root component
+        generator.root_components = [root_component] if isinstance(root_component, str) else list(root_component)
+
     result = generator.generate_diagram(ast_summary, output_file)
 
     if result:

@@ -310,7 +310,7 @@ class TestDenseReranker(unittest.TestCase):
     def test_rerank_success(self):
         """Test successful reranking with DenseReranker."""
         # Arrange
-        # Create mocks for all required cli_response_utils
+        # Create mocks for all required components
         mock_sentence_transformer = MagicMock()
         mock_st_instance = MagicMock()
 
