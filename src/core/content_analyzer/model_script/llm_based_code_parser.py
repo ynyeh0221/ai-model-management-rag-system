@@ -509,6 +509,7 @@ class LLMBasedCodeParser:
 
         # Reduce input size of LLM
         chunk_text = filter_ast_summary_for_metadata(chunk_text)
+        print(f"chunk_text: {chunk_text}")
 
         system_prompt = IngestionPathPromptManager.get_system_prompt_natural_language_summary_creation()
 
