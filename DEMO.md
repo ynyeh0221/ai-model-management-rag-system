@@ -172,4 +172,15 @@ Sample 10: [Please find models not using RNN, created in March 2025.](https://gi
 
 #### Model - Deepseek-r1 7b
 
+##### Query
+
+![](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/screenshot/streamlit%20query%201.png)
+![](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/screenshot/streamlit%20query%202.png)
+![](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/screenshot/streamlit%20query%203.png)
+
+##### List-models
+![](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/screenshot/streamlit%20list-models.png)
+
+##### Help
+![](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/screenshot/streamlit%20help.png)
 
