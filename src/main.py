@@ -27,10 +27,11 @@ def initialize_components(config_path="./config", llm_model_name: str = "llm"):
     """Initialize all cli_response_utils of the RAG system."""
 
     llm_interface = LLMInterface(model_name=llm_model_name, timeout=60000)
+    llm_interface_nl = LLMInterface(model_name="deepseek-llm:7b", timeout=60000)
 
     # Initialize document cli_runner cli_response_utils
     schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
-    code_parser = LLMBasedCodeParser(schema_validator=schema_validator, llm_interface=llm_interface)
+    code_parser = LLMBasedCodeParser(schema_validator=schema_validator, llm_interface=llm_interface, llm_interface_nl=llm_interface_nl)
     metadata_extractor = MetadataExtractor()
     image_processor = ImageProcessor(schema_validator)
     
@@ -73,6 +74,7 @@ def initialize_components(config_path="./config", llm_model_name: str = "llm"):
         },
         "response_generator": {
             "llm_interface": llm_interface,
+            "llm_interface_nl": llm_interface_nl,
         },
         "colab_generator": {
             "code_generator": code_generator,
@@ -107,7 +109,7 @@ def main():
     process_single_image_parser.add_argument("file_path", help="Absolute path to target image")
 
     # Start UI command
-    ui_parser = subparsers.add_parser("start-user_interface", help="Start the user interface")
+    ui_parser = subparsers.add_parser("start-cli", help="Start the user interface")
     ui_parser.add_argument("--host", default="localhost", help="Host to bind the UI to")
     ui_parser.add_argument("--port", type=int, default=8000, help="Port to bind the UI to")
 
@@ -120,7 +122,7 @@ def main():
         script_processor_runner.process_model_scripts(components, args.directory)
     elif args.command == "process-single-script":
         # Use deepseek-llm for speed and token length consideration
-        components = initialize_components(llm_model_name="deepseek-llm:7b")
+        components = initialize_components(llm_model_name="deepseek-r1:7b")
         script_processor_runner.process_single_script(components, args.file_path)
     elif args.command == "process-image_processing":
         # Use deepseek-llm for speed and token length consideration
@@ -130,7 +132,7 @@ def main():
         # Use deepseek-llm for speed and token length consideration
         components = initialize_components(llm_model_name="deepseek-llm:7b")
         image_processor_runner.process_single_image(components, args.file_path)
-    elif args.command == "start-user_interface":
+    elif args.command == "start-cli":
         # Use deepseek-r1 to better show thinking steps
         components = initialize_components(llm_model_name="deepseek-r1:7b")
         cli_interface.start_cli(components, args.host, args.port)

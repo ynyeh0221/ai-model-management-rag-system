@@ -7,34 +7,42 @@ from typing import List, Tuple
 
 from git import Repo
 
-from src.core.prompt_manager.ingestion_path_prompt_manager import IngestionPathPromptManager
 from src.core.content_analyzer.model_script.ast_summary_generator import ASTSummaryGenerator
+from src.core.prompt_manager.ingestion_path_prompt_manager import IngestionPathPromptManager
 
 
 def filter_ast_summary_for_metadata(summary: str) -> str:
     """
     Given a AST digest summary, return only the lines that
     contain:
-      - Docstrings      (model description)
       - Import / From   (framework & dataset)
-      - Class           (architecture type)
-      - Layer           (component + dims)
       - Variable        (batch_size, lr, optimizer, epochs, device)
+      - Model Architecture and all subsequent lines
     """
     lines = summary.splitlines()
     filtered: List[str] = []
-    if len(summary) <= 9000:
-        # what prefixes we always keep
-        keep_prefixes = ("Docstring:", "Import:", "From ", "Class:", "Layer:", "Images folder:")
-        # which variable names to keep
-        var_keys = ("batch", "lr", "epoch", "optimizer", "device")
-    else: # For long summary, skip some information to trade off LLM's input size
-        keep_prefixes = ("Docstring:", "Class:", "Layer:", "Images folder:")
-        var_keys = ("batch", "lr", "optimizer", "device")
+    in_model_architecture = False
+
+    # what prefixes we always keep
+    keep_prefixes = ("Import:", "From ", "Images folder:")
+    # which variable names to keep
+    var_keys = ("batch", "lr", "epoch", "optimizer", "device")
 
     for line in lines:
         stripped = line.strip()
-        # always keep these kinds of lines
+
+        # Check if we've reached the Model Architecture section
+        if stripped.startswith("Model Architecture:"):
+            in_model_architecture = True
+            filtered.append(stripped)
+            continue
+
+        # If we're in the Model Architecture section, keep all lines
+        if in_model_architecture:
+            filtered.append(stripped)
+            continue
+
+        # For other lines, apply the original filtering logic
         if any(stripped.startswith(pref) for pref in keep_prefixes):
             filtered.append(stripped)
             continue
@@ -358,9 +366,10 @@ class LLMBasedCodeParser:
     validate_llm_metadata_structure : Function for validating metadata structure.
     """
 
-    def __init__(self, schema_validator=None, llm_interface=None):
+    def __init__(self, schema_validator=None, llm_interface=None, llm_interface_nl=None):
         self.schema_validator = schema_validator
         self.llm_interface = llm_interface
+        self.llm_interface_nl = llm_interface_nl
         self.llm_metadata_cache = {}
         self.ast_summary_generator = ASTSummaryGenerator()
 
@@ -445,10 +454,25 @@ class LLMBasedCodeParser:
         print(f"updated model_info: {model_info}")
         return model_info
 
+    @staticmethod
+    def extract_filename_and_directory(file_path):
+        # Get the base filename (without directory)
+        filename = os.path.basename(file_path)
+
+        # Get the directory containing the file
+        directory = os.path.dirname(file_path)
+
+        # Get just the lowest directory name
+        lowest_directory = os.path.basename(directory)
+
+        return lowest_directory + "_" + filename
+
     def extract_metadata_by_llm(self, code_str: str, file_path: str = "<unknown>", max_retries: int = 15) -> dict:
         # STEP 1: Generate AST digest/summary
         ast_digest = clean_empty_lines(self.ast_summary_generator.generate_summary(code_str=code_str, file_path=file_path))
         # print(f"Total AST digest: {ast_digest}")
+
+        self.ast_summary_generator.analyze_and_visualize_model(file_path, "./model_diagram/" + self.extract_filename_and_directory(file_path) + ".png")
 
         # STEP 2: Extract natural-language summary for each digest chunk
         summary = self.extract_natural_language_summary(
@@ -484,8 +508,7 @@ class LLMBasedCodeParser:
             return {}
 
         # Reduce input size of LLM
-        if len(chunk_text) >= 2500:
-            chunk_text = filter_ast_summary_for_metadata(chunk_text)
+        chunk_text = filter_ast_summary_for_metadata(chunk_text)
 
         system_prompt = IngestionPathPromptManager.get_system_prompt_natural_language_summary_creation()
 
@@ -496,13 +519,13 @@ class LLMBasedCodeParser:
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0,
-                    max_tokens=4096
+                    max_tokens=30000
                 )
                 summary = response.get("content", "").strip()
 
                 if summary:
                     return {
-                        "summary": summary,
+                        "summary": self.remove_thinking_sections(summary),
                         "source_offset": chunk_offset,
                         "source_preview": chunk_text[:120]
                     }
@@ -518,6 +541,23 @@ class LLMBasedCodeParser:
             "source_preview": chunk_text[:120]
         }
 
+    @staticmethod
+    def remove_thinking_sections(text: str) -> str:
+        """
+        Remove all <thinking>...</thinking> sections from the input text.
+
+        Args:
+            text: The input string containing zero or more <thinking> sections.
+
+        Returns:
+            A new string with all <thinking> sections and their content removed.
+        """
+        import re
+        # Regex to match <thinking>...</thinking> including multiline content (non-greedy)
+        pattern = re.compile(r'<(thinking|think)>(.*?)</\1>', re.DOTALL)
+        # Replace matched sections with an empty string
+        return pattern.sub('', text)
+
     def generate_metadata_from_ast_summary(self, summary: str, max_retries: int = 3, file_path: str = "<unknown>") -> dict:
         """Generate structured JSON metadata from AST digest summary."""
         if not self.llm_interface:
@@ -525,9 +565,8 @@ class LLMBasedCodeParser:
 
         # Reduce input size of LLM
         print(f"len(summary): {len(summary)}, file_path: {file_path}")
-        if len(summary) >= 2500:
-            summary = filter_ast_summary_for_metadata(summary)
-            print(f"len(extracted_summary): {len(summary)}, file_path: {file_path}")
+        summary = filter_ast_summary_for_metadata(summary)
+        print(f"len(extracted_summary): {len(summary)}, file_path: {file_path}")
 
         system_prompt = IngestionPathPromptManager.get_system_prompt_for_metadata_from_ast_summary_parsing()
 
@@ -540,7 +579,7 @@ class LLMBasedCodeParser:
 
                 Extract the metadata JSON as specified above.
                 """
-                response = self.llm_interface.generate_structured_response(
+                response = self.llm_interface_nl.generate_structured_response(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0,
