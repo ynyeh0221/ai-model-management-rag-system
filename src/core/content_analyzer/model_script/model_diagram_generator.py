@@ -280,7 +280,6 @@ class ModelDiagramGenerator:
         # Extract and parse the model architecture
         architecture_section = self._extract_architecture_section(ast_summary)
         print(f"Extracted architecture section length: {len(architecture_section)}")
-        print(f"First 200 chars: {architecture_section[:200]}...")
 
         if not architecture_section:
             print("ERROR: No architecture section found in AST summary")
