@@ -3,13 +3,16 @@ import os
 import re
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from src.core.content_analyzer.model_script.visitor.code_summary_visitor import (
-    CodeSummaryVisitor,
-)
-from src.core.content_analyzer.model_script.visitor.dataset_visitor import DatasetVisitor
 from src.core.content_analyzer.model_script.model_diagram_generator import (
     draw_model_architecture,
 )
+from src.core.content_analyzer.model_script.visitor.code_summary_visitor import (
+    CodeSummaryVisitor,
+)
+from src.core.content_analyzer.model_script.visitor.dataset_class_visitor import DatasetClassVisitor
+from src.core.content_analyzer.model_script.visitor.dataset_import_visitor import DatasetImportVisitor
+from src.core.content_analyzer.model_script.visitor.dataset_load_visitor import DataLoaderVisitor
+from src.core.content_analyzer.model_script.visitor.keyword_based_dataset_visitor import KeywordBasedDatasetVisitor
 
 
 class ASTSummaryGenerator:
@@ -39,6 +42,10 @@ class ASTSummaryGenerator:
         # Component usage tracking
         self.component_instantiations: Dict[str, Any] = {}
         self.used_components: Set[str] = set()
+
+        # Dataset tracking - Add these two lines to fix the attribute error
+        self.detected_datasets: Set[str] = set()
+        self.dataset_classes: Set[str] = set()
 
         # Diagram settings
         self.important_layer_types: Set[str] = {
@@ -192,10 +199,110 @@ class ASTSummaryGenerator:
                     insert_pos += 1
 
     def _detect_datasets(self, tree: ast.AST) -> str:
-        """Return a comma-separated list of datasets found in the AST."""
-        visitor = DatasetVisitor()
+        """
+        Return a comma-separated list of datasets found in the AST.
+
+        This method implements a two-tiered detection strategy:
+
+        1. PRIMARY DETECTION (DatasetVisitor):
+           - Faster and more direct approach
+           - Looks for known dataset keywords and explicit dataset mentions
+           - Scans imports, variable names, and string literals
+           - Highly precise but may miss custom or non-standard datasets
+
+        2. SECONDARY DETECTION (Fallback Methods):
+           - Only triggered if primary detection finds nothing
+           - More thorough but potentially more computationally expensive
+           - Uses specialized visitors to detect datasets through:
+             a) DataLoader usage patterns
+             b) Dataset class inheritance hierarchies
+             c) Common dataset import patterns from various libraries
+           - Better at finding custom datasets and implicit references
+
+        WHY TWO APPROACHES:
+        - Primary detection is efficient but may miss complex cases
+        - Secondary detection is more comprehensive but could be overkill for simple cases
+        - Two-tiered approach balances speed and thoroughness
+        - Ensures both explicit and implicit dataset references are found
+
+        Args:
+            tree: The AST tree of the Python code to analyze
+
+        Returns:
+            A comma-separated string of dataset names found in the code.
+            Returns an empty string if no datasets are detected.
+        """
+        visitor = KeywordBasedDatasetVisitor()
         visitor.visit(tree)
-        return ", ".join(sorted(visitor.datasets)) if visitor.datasets else ""
+
+        # Store detected datasets for other methods to use
+        self.detected_datasets.update(visitor.datasets)
+
+        # If primary detection found datasets, return them
+        if visitor.datasets:
+            return ", ".join(sorted(visitor.datasets))
+
+        # If nothing found, try secondary detection methods
+        dataset_names = self._detect_datasets_from_fallback_methods(tree)
+        if dataset_names:
+            self.detected_datasets.update(dataset_names)
+            return ", ".join(sorted(dataset_names))
+
+        return ""
+
+    def _detect_datasets_from_fallback_methods(self, tree: ast.AST) -> Set[str]:
+        """
+        Apply secondary (fallback) strategies to detect datasets when primary detection fails.
+
+        This method implements three specialized approaches that go beyond basic keyword
+        matching to find datasets through structural patterns in the code:
+
+        1. DATALOADER DETECTION (DataLoaderVisitor):
+           - Identifies DataLoader constructor calls
+           - Extracts dataset information from the loader's arguments
+           - Analyzes variable names for context clues
+           - Effective for finding datasets used with standard data loading patterns
+
+        2. DATASET CLASS DETECTION (DatasetClassVisitor):
+           - Recognizes custom dataset classes through inheritance patterns
+           - Analyzes class names and docstrings for dataset references
+           - Filters out common words to avoid false positives
+           - Excellent for identifying project-specific dataset implementations
+
+        3. IMPORT DETECTION (DatasetImportVisitor):
+           - Scans for imports from common dataset libraries
+           - Identifies dataset-specific import patterns
+           - Detects imports of custom dataset modules
+           - Useful for finding datasets referenced through standard libraries
+
+        These methods are more thorough than primary detection but may take more
+        processing time, which is why they're only used as a fallback.
+
+        Args:
+            tree: The AST tree of the Python code to analyze
+
+        Returns:
+            A set of dataset names detected through fallback methods
+        """
+        dataset_names = set()
+
+        # Method 1: Scan for DataLoader and similar constructs
+        loader_visitor = DataLoaderVisitor()
+        loader_visitor.visit(tree)
+        dataset_names.update(loader_visitor.detected_datasets)
+
+        # Method 2: Look for common dataset class patterns and inheritance
+        class_visitor = DatasetClassVisitor()
+        class_visitor.visit(tree)
+        dataset_names.update(class_visitor.detected_datasets)
+        self.dataset_classes.update(class_visitor.dataset_classes)
+
+        # Method 3: Check imports of common datasets
+        import_visitor = DatasetImportVisitor()
+        import_visitor.visit(tree)
+        dataset_names.update(import_visitor.detected_datasets)
+
+        return dataset_names
 
     def _get_ordered_layers(self, names: List[str]) -> List[str]:
         """Return layer names in definition order, preserving any extras."""

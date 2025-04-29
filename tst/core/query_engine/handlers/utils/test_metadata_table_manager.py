@@ -22,14 +22,15 @@ class TestMetadataTableManager(unittest.IsolatedAsyncioTestCase):
     def test_get_metadata_table_weights(self):
         weights = self.metadata_table_manager.get_metadata_table_weights()
         expected_weights = {
-            "model_descriptions": 0.27,
-            "model_architectures": 0.27,
+            "model_descriptions": 0.26,
+            "model_architectures": 0.26,
             "model_frameworks": 0.0,
             "model_datasets": 0.26,
-            "model_training_configs": 0.20,
+            "model_training_configs": 0.22,
             "model_date": 0.0,
             "model_file": 0.0,
-            "model_git": 0.0
+            "model_git": 0.0,
+            "model_diagram_path": 0.0,
         }
         self.assertEqual(weights, expected_weights)
 

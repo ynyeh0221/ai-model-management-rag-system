@@ -32,14 +32,15 @@ class MetadataTableManager:
     def get_metadata_table_weights(self) -> Dict[str, float]:
         """Define metadata tables to search with their weights."""
         return {
-            "model_descriptions": 0.27,
-            "model_architectures": 0.27,
+            "model_descriptions": 0.26,
+            "model_architectures": 0.26,
             "model_frameworks": 0.0,
             "model_datasets": 0.26,
-            "model_training_configs": 0.20,
+            "model_training_configs": 0.22,
             "model_date": 0.0,
             "model_file": 0.0,
-            "model_git": 0.0
+            "model_git": 0.0,
+            "model_diagram_path": 0.0,
         }
 
     async def search_metadata_table(self, table_name, query, filters, limit, weight):

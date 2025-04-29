@@ -8,17 +8,55 @@ class TestNotebookRequestHandler(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         # Create mock dependencies
         self.chroma_manager = MagicMock()
-        self.model_data_fetcher = MagicMock()
         self.access_control_manager = MagicMock()
         self.analytics = MagicMock()
 
-        # Make async methods
-        self.model_data_fetcher.fetch_model_metadata = AsyncMock()
+        # Setup chroma_manager.search to return appropriate model metadata
+        async def mock_search(collection_name=None, query=None, where=None, include=None, **kwargs):
+            # Simple implementation that returns metadata for requested models
+            if query in ["model1", "model2", "model3"]:
+                return [{"model_id": query, "metadata": {"name": f"Model {query[-1]}", "version": f"{query[-1]}.0"}}]
+
+            # If using a filter, return matching models based on the test name
+            if where is not None:
+                if self._testMethodName == "test_handle_notebook_request_no_access":
+                    return []  # No models accessible
+                elif self._testMethodName == "test_handle_notebook_request_partial_access":
+                    return [
+                        {"model_id": "model1", "metadata": {"name": "Model 1", "version": "1.0"}},
+                        {"model_id": "model3", "metadata": {"name": "Model 3", "version": "3.0"}}
+                    ]  # Only model1 and model3 accessible
+                else:
+                    # Default case: return all models in the original model_ids parameter
+                    models = []
+                    for model_id in self.current_model_ids:
+                        models.append({"model_id": model_id,
+                                       "metadata": {"name": f"Model {model_id[-1]}", "version": f"{model_id[-1]}.0"}})
+                    return models
+
+            return []
+
+        self.chroma_manager.search = AsyncMock(side_effect=mock_search)
+
+        # Setup access_control_manager.check_access to control access based on test name
+        def mock_check_access(doc, user_id, permission_type):
+            model_id = doc.get("model_id")
+
+            if self._testMethodName == "test_handle_notebook_request_no_access":
+                return False  # No access for any model
+            elif self._testMethodName == "test_handle_notebook_request_partial_access":
+                return model_id in ["model1", "model3"]  # Only access to model1 and model3
+            else:
+                return True  # Default: access to all models
+
+        self.access_control_manager.check_access = MagicMock(side_effect=mock_check_access)
+
+        # Initialize an empty list to track the current model_ids in the test
+        self.current_model_ids = []
 
         # Create the instance we're testing
         self.handler = NotebookRequestHandler(
             chroma_manager=self.chroma_manager,
-            model_data_fetcher=self.model_data_fetcher,
             access_control_manager=self.access_control_manager,
             analytics=self.analytics
         )
@@ -35,16 +73,8 @@ class TestNotebookRequestHandler(unittest.IsolatedAsyncioTestCase):
             "resources": "high-memory"
         }
 
-        # Mock model_data_fetcher to return valid metadata
-        model1_metadata = {"name": "Model 1", "version": "1.0"}
-        model2_metadata = {"name": "Model 2", "version": "2.0"}
-        self.model_data_fetcher.fetch_model_metadata.side_effect = [
-            model1_metadata,
-            model2_metadata
-        ]
-
-        # Mock access_control_manager to grant access to both models
-        self.access_control_manager.check_access.return_value = True
+        # Store model_ids for mock_search
+        self.current_model_ids = parameters["model_ids"]
 
         # Call the method
         result = await self.handler.handle_notebook_request(query, parameters)
@@ -67,14 +97,17 @@ class TestNotebookRequestHandler(unittest.IsolatedAsyncioTestCase):
         self.assertIn('estimated_completion_time', result['result'])
 
         # Verify method calls
-        self.model_data_fetcher.fetch_model_metadata.assert_any_call("model1")
-        self.model_data_fetcher.fetch_model_metadata.assert_any_call("model2")
-        self.access_control_manager.check_access.assert_any_call(
-            {'metadata': model1_metadata}, "user123", "view"
+        self.chroma_manager.search.assert_any_call(
+            collection_name="model_descriptions",
+            query="model1",
+            include=["metadatas"]
         )
-        self.access_control_manager.check_access.assert_any_call(
-            {'metadata': model2_metadata}, "user123", "view"
+        self.chroma_manager.search.assert_any_call(
+            collection_name="model_descriptions",
+            query="model2",
+            include=["metadatas"]
         )
+        self.access_control_manager.check_access.assert_called()
 
     async def test_handle_notebook_request_no_model_ids(self):
         """Test handle_notebook_request with missing model IDs."""
@@ -102,16 +135,8 @@ class TestNotebookRequestHandler(unittest.IsolatedAsyncioTestCase):
             "model_ids": ["model1", "model2"]
         }
 
-        # Mock model_data_fetcher to return valid metadata
-        model1_metadata = {"name": "Model 1", "version": "1.0"}
-        model2_metadata = {"name": "Model 2", "version": "2.0"}
-        self.model_data_fetcher.fetch_model_metadata.side_effect = [
-            model1_metadata,
-            model2_metadata
-        ]
-
-        # Mock access_control_manager to deny access to all models
-        self.access_control_manager.check_access.return_value = False
+        # Store model_ids for mock_search
+        self.current_model_ids = parameters["model_ids"]
 
         # Call the method and expect an exception
         with self.assertRaises(ValueError) as context:
@@ -121,14 +146,17 @@ class TestNotebookRequestHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(str(context.exception), "User does not have access to any of the requested models")
 
         # Verify method calls
-        self.model_data_fetcher.fetch_model_metadata.assert_any_call("model1")
-        self.model_data_fetcher.fetch_model_metadata.assert_any_call("model2")
-        self.access_control_manager.check_access.assert_any_call(
-            {'metadata': model1_metadata}, "user123", "view"
+        self.chroma_manager.search.assert_any_call(
+            collection_name="model_descriptions",
+            query="model1",
+            include=["metadatas"]
         )
-        self.access_control_manager.check_access.assert_any_call(
-            {'metadata': model2_metadata}, "user123", "view"
+        self.chroma_manager.search.assert_any_call(
+            collection_name="model_descriptions",
+            query="model2",
+            include=["metadatas"]
         )
+        self.access_control_manager.check_access.assert_called()
 
     async def test_handle_notebook_request_partial_access(self):
         """Test handle_notebook_request when user has access to some but not all models."""
@@ -139,21 +167,8 @@ class TestNotebookRequestHandler(unittest.IsolatedAsyncioTestCase):
             "model_ids": ["model1", "model2", "model3"]
         }
 
-        # Mock model_data_fetcher to return valid metadata
-        model1_metadata = {"name": "Model 1", "version": "1.0"}
-        model2_metadata = {"name": "Model 2", "version": "2.0"}
-        model3_metadata = {"name": "Model 3", "version": "3.0"}
-        self.model_data_fetcher.fetch_model_metadata.side_effect = [
-            model1_metadata,
-            model2_metadata,
-            model3_metadata
-        ]
-
-        # Mock access_control_manager to grant access to only model1 and model3
-        def check_access_side_effect(doc, user_id, permission):
-            return doc['metadata'] in [model1_metadata, model3_metadata]
-
-        self.access_control_manager.check_access.side_effect = check_access_side_effect
+        # Store model_ids for mock_search
+        self.current_model_ids = parameters["model_ids"]
 
         # Call the method
         result = await self.handler.handle_notebook_request(query, parameters)
@@ -164,9 +179,22 @@ class TestNotebookRequestHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['request']['model_ids'], ["model1", "model3"])
 
         # Verify method calls
-        self.model_data_fetcher.fetch_model_metadata.assert_any_call("model1")
-        self.model_data_fetcher.fetch_model_metadata.assert_any_call("model2")
-        self.model_data_fetcher.fetch_model_metadata.assert_any_call("model3")
+        self.chroma_manager.search.assert_any_call(
+            collection_name="model_descriptions",
+            query="model1",
+            include=["metadatas"]
+        )
+        self.chroma_manager.search.assert_any_call(
+            collection_name="model_descriptions",
+            query="model2",
+            include=["metadatas"]
+        )
+        self.chroma_manager.search.assert_any_call(
+            collection_name="model_descriptions",
+            query="model3",
+            include=["metadatas"]
+        )
+        self.access_control_manager.check_access.assert_called()
 
     async def test_handle_notebook_request_default_values(self):
         """Test handle_notebook_request with minimal parameters, using default values."""
@@ -177,12 +205,8 @@ class TestNotebookRequestHandler(unittest.IsolatedAsyncioTestCase):
             "model_ids": ["model1"]
         }
 
-        # Mock model_data_fetcher to return valid metadata
-        model_metadata = {"name": "Model 1", "version": "1.0"}
-        self.model_data_fetcher.fetch_model_metadata.return_value = model_metadata
-
-        # Mock access_control_manager to grant access
-        self.access_control_manager.check_access.return_value = True
+        # Store model_ids for mock_search
+        self.current_model_ids = parameters["model_ids"]
 
         # Call the method
         result = await self.handler.handle_notebook_request(query, parameters)
@@ -204,7 +228,6 @@ class TestNotebookRequestHandler(unittest.IsolatedAsyncioTestCase):
         # Recreate handler with mocked logger
         handler = NotebookRequestHandler(
             chroma_manager=self.chroma_manager,
-            model_data_fetcher=self.model_data_fetcher,
             access_control_manager=self.access_control_manager,
             analytics=self.analytics
         )
@@ -216,9 +239,8 @@ class TestNotebookRequestHandler(unittest.IsolatedAsyncioTestCase):
             "model_ids": ["model1"]
         }
 
-        # Mock dependencies for success path
-        self.model_data_fetcher.fetch_model_metadata.return_value = {"name": "Model 1"}
-        self.access_control_manager.check_access.return_value = True
+        # Store model_ids for mock_search
+        self.current_model_ids = parameters["model_ids"]
 
         # Call the method
         await handler.handle_notebook_request(query, parameters)
@@ -227,8 +249,8 @@ class TestNotebookRequestHandler(unittest.IsolatedAsyncioTestCase):
         mock_logger.debug.assert_called_once_with(f"Handling notebook request: {parameters}")
         mock_logger.error.assert_not_called()
 
-        # Test error path
-        self.model_data_fetcher.fetch_model_metadata.side_effect = Exception("Test error")
+        # Test error path by making search raise an exception
+        self.chroma_manager.search.side_effect = Exception("Test error")
 
         # Call the method and expect an exception
         with self.assertRaises(Exception):

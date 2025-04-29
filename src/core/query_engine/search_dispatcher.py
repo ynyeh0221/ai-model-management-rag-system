@@ -9,7 +9,6 @@ from src.core.query_engine.handlers.notebook_request_handler import NotebookRequ
 from src.core.query_engine.handlers.utils.distance_normalizer import DistanceNormalizer
 from src.core.query_engine.handlers.utils.filter_translator import FilterTranslator
 from src.core.query_engine.handlers.utils.metadata_table_manager import MetadataTableManager
-from src.core.query_engine.handlers.utils.model_data_fetcher import ModelDataFetcher
 from src.core.query_engine.handlers.utils.performance_metrics_calculator import PerformanceMetricsCalculator
 from src.core.query_engine.query_intent import QueryIntent
 
@@ -43,7 +42,6 @@ class SearchDispatcher:
         # Initialize utility classes
         self.distance_normalizer = DistanceNormalizer()
         self.filter_translator = FilterTranslator()
-        self.model_data_fetcher = ModelDataFetcher(chroma_manager, access_control_manager)
         self.performance_metrics = PerformanceMetricsCalculator(analytics)
         self.metadata_table_manager = MetadataTableManager(chroma_manager, access_control_manager)
 
@@ -57,7 +55,6 @@ class SearchDispatcher:
         )
         self.notebook_manager = NotebookRequestHandler(
             chroma_manager=chroma_manager,
-            model_data_fetcher=self.model_data_fetcher,
             access_control_manager=access_control_manager,
             analytics=analytics
         )

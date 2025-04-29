@@ -1,12 +1,42 @@
 import ast
-from typing import Set, Union
+from typing import Set
 
 
-class DatasetVisitor(ast.NodeVisitor):
+class KeywordBasedDatasetVisitor(ast.NodeVisitor):
     """
-    AST visitor that collects references to well-known datasets
-    across variable names, imports, calls, class definitions, and strings.
+    AST visitor that collects references to well-known datasets across various code elements.
+
+    This primary dataset detection visitor scans Python code for references to known
+    datasets by analyzing variable names, imports, function calls, class definitions,
+    and string literals. It uses a predefined set of dataset keywords to identify
+    datasets with high precision.
+
+    Key capabilities:
+      - Recognizes a comprehensive list of standard dataset names (MNIST, CIFAR, etc.)
+      - Detects dataset references in variable names and identifiers
+      - Identifies dataset imports from common libraries
+      - Finds dataset usage in function calls and arguments
+      - Extracts dataset mentions from docstrings and string literals
+      - Analyzes class definitions that might represent datasets
+
+    This visitor provides the first line of detection in a two-tiered approach.
+    It offers high precision but may miss custom or non-standard datasets that
+    aren't in its predefined keyword list.
+
+    Attributes:
+        datasets (Set[str]): Set of dataset names collected during tree traversal
+        DATASET_KEYWORDS (Set[str]): Predefined set of known dataset names to look for
+
+    Example:
+        ```python
+        # For code like:
+        mnist_data = load_dataset('mnist')
+
+        # This visitor would detect:
+        # datasets = {"MNIST"}
+        ```
     """
+
     DATASET_KEYWORDS = {
         "mnist", "cifar", "imagenet", "coco", "kitti", "voc", "pascal",
         "celeba", "clevr", "shapenet", "kinetics", "audio", "audioset",

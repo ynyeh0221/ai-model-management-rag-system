@@ -515,7 +515,7 @@ class LLMBasedCodeParser:
     def extract_metadata_by_llm(self, code_str: str, file_path: str = "<unknown>", max_retries: int = 15) -> dict:
         # STEP 1: Generate AST digest/summary
         ast_digest = clean_empty_lines(self.ast_summary_generator.generate_summary(code_str=code_str, file_path=file_path))
-        # print(f"Total AST digest: {ast_digest}")
+        print(f"Total AST digest: {ast_digest}")
 
         # STEP 2: Extract natural-language summary for each digest chunk
         summary = self.extract_natural_language_summary(

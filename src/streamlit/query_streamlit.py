@@ -127,6 +127,8 @@ class StreamlitInterface:
                         "Rank": i + 1,
                         "Model ID": result.get('model_id', result.get('id', f'Item {i + 1}')),
                         "Score": result.get('score', result.get('similarity', result.get('rank_score', 'N/A'))),
+                        "Created At": result.get('created_at', result.get('created_at', 'N/A')),
+                        "Last Modified At": result.get('last_modified_at', result.get('last_modified_at', 'N/A')),
                         "Path": file_data.get('absolute_path', metadata.get('absolute_path', 'N/A')),
                         "Description": result.get('merged_description', 'N/A')[:100] + (
                             '...' if len(result.get('merged_description', '')) > 100 else '')
@@ -137,6 +139,7 @@ class StreamlitInterface:
                 df = pd.DataFrame(search_data)
                 st.dataframe(df, use_container_width=True)
 
+                # Show detailed information for the top result
                 # Show detailed information for the top result
                 if len(r["search_results"]) > 0:
                     with st.expander("Top Result Details"):
@@ -166,6 +169,26 @@ class StreamlitInterface:
                             with file_cols[2]:
                                 st.metric("Modified", file_info.get('last_modified_date', 'N/A')[:10] if isinstance(
                                     file_info.get('last_modified_date'), str) else 'N/A')
+
+                        # Display model component diagram if available
+                        if metadata.get('diagram_path'):
+                            st.subheader("Model Component Diagram")
+                            diagram_path = metadata.get('diagram_path')
+
+                            # Create a clickable container for the image
+                            with st.container():
+                                # Display image at a fixed height but maintain aspect ratio
+                                st.image(diagram_path, width=500)
+
+                                # Add a button to show full-size image in a modal
+                                if st.button("View Full Size Diagram"):
+                                    st.markdown(f"""
+                                    <div style="display: flex; justify-content: center;">
+                                        <a href="{diagram_path}" target="_blank">
+                                            <img src="{diagram_path}" style="max-width: 100%;" />
+                                        </a>
+                                    </div>
+                                    """, unsafe_allow_html=True)
 
                         # Display framework and architecture
                         if metadata.get('framework') or metadata.get('architecture'):

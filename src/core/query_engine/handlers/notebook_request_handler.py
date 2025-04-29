@@ -8,18 +8,16 @@ class NotebookRequestHandler:
     Manager for handling notebook generation requests.
     """
 
-    def __init__(self, chroma_manager, model_data_fetcher, access_control_manager=None, analytics=None):
+    def __init__(self, chroma_manager, access_control_manager=None, analytics=None):
         """
         Initialize the NotebookManager with required dependencies.
 
         Args:
             chroma_manager: Manager for Chroma vector database interactions
-            model_data_fetcher: Component for fetching model metadata
             access_control_manager: Optional manager for access control
             analytics: Optional analytics collector
         """
         self.chroma_manager = chroma_manager
-        self.model_data_fetcher = model_data_fetcher
         self.access_control_manager = access_control_manager
         self.analytics = analytics
         self.logger = logging.getLogger(__name__)
@@ -47,22 +45,38 @@ class NotebookRequestHandler:
             if not model_ids:
                 raise ValueError("Notebook generation requires at least one model ID")
 
-            # Verify user has access to all requested models
-            if self.access_control_manager and user_id:
-                accessible_models = []
-                for model_id in model_ids:
-                    # Check if user has access to this model
-                    model_info = await self.model_data_fetcher.fetch_model_metadata(model_id)
-                    if model_info and self.access_control_manager.check_access(
-                            {'metadata': model_info}, user_id, "view"
-                    ):
-                        accessible_models.append(model_id)
+            # Check access for each model
+            accessible_models = []
 
-                # Update model_ids to only include accessible ones
-                model_ids = accessible_models
+            for model_id in model_ids:
+                try:
+                    # Get model metadata from chroma
+                    search_results = await self.chroma_manager.search(
+                        collection_name="model_descriptions",
+                        query=model_id,  # Use model_id as the query to find the specific model
+                        include=["metadatas"]
+                    )
 
-                if not model_ids:
-                    raise ValueError("User does not have access to any of the requested models")
+                    if not search_results:
+                        continue
+
+                    # For each result, check if the user has access
+                    for doc in search_results:
+                        if doc.get("model_id") == model_id:
+                            # Check access using AccessControlManager
+                            if self.access_control_manager.check_access(doc, user_id, "view"):
+                                accessible_models.append(model_id)
+                                break
+                except Exception as e:
+                    self.logger.warning(f"Error checking access for model {model_id}: {e}")
+                    continue
+
+            # Raise error if user doesn't have access to any models
+            if not accessible_models:
+                raise ValueError("User does not have access to any of the requested models")
+
+            # Update model_ids to only include accessible models
+            model_ids = accessible_models
 
             # Get analysis types
             analysis_types = parameters.get('analysis_types', ['basic'])
@@ -74,7 +88,6 @@ class NotebookRequestHandler:
             resources = parameters.get('resources', 'standard')
 
             # Placeholder for notebook generation logic
-            # In a real implementation, this would call the Colab Notebook Generator
             notebook_request = {
                 'model_ids': model_ids,
                 'analysis_types': analysis_types,
