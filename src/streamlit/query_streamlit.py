@@ -140,7 +140,6 @@ class StreamlitInterface:
                 st.dataframe(df, use_container_width=True)
 
                 # Show detailed information for the top result
-                # Show detailed information for the top result
                 if len(r["search_results"]) > 0:
                     with st.expander("Top Result Details"):
                         top_result = r["search_results"][0]
@@ -175,20 +174,71 @@ class StreamlitInterface:
                             st.subheader("Model Component Diagram")
                             diagram_path = metadata.get('diagram_path')
 
-                            # Create a clickable container for the image
-                            with st.container():
-                                # Display image at a fixed height but maintain aspect ratio
-                                st.image(diagram_path, width=500)
+                            # Debug information
+                            st.write(f"Debug - Diagram path type: {type(diagram_path)}")
 
-                                # Add a button to show full-size image in a modal
-                                if st.button("View Full Size Diagram"):
-                                    st.markdown(f"""
-                                    <div style="display: flex; justify-content: center;">
-                                        <a href="{diagram_path}" target="_blank">
-                                            <img src="{diagram_path}" style="max-width: 100%;" />
-                                        </a>
-                                    </div>
-                                    """, unsafe_allow_html=True)
+                            # Handle diagram path appropriately based on its type
+                            try:
+                                import os
+                                import json
+
+                                # If diagram_path is a JSON string
+                                if isinstance(diagram_path, str) and diagram_path.startswith(
+                                        '{') and diagram_path.endswith('}'):
+                                    try:
+                                        # Try to parse the JSON string
+                                        path_info = json.loads(diagram_path)
+                                        if isinstance(path_info, dict) and "name" in path_info:
+                                            # Extract the actual file path from the JSON
+                                            actual_path = path_info["name"]
+                                            st.write(f"Debug - Extracted file path: {actual_path}")
+
+                                            # Check if the file exists
+                                            if os.path.exists(actual_path) and os.path.isfile(actual_path):
+                                                # Display the image
+                                                st.image(actual_path, width=500)
+
+                                                # Add a button to show full-size image in a modal
+                                                if st.button("View Full Size Diagram"):
+                                                    st.markdown(f"""
+                                                    <div style="display: flex; justify-content: center;">
+                                                        <a href="{actual_path}" target="_blank">
+                                                            <img src="{actual_path}" style="max-width: 100%;" />
+                                                        </a>
+                                                    </div>
+                                                    """, unsafe_allow_html=True)
+                                            else:
+                                                st.error(f"Diagram file not found: {actual_path}")
+                                                st.write(f"Current working directory: {os.getcwd()}")
+                                        else:
+                                            st.error(f"Invalid diagram path format in JSON: {path_info}")
+                                    except json.JSONDecodeError as e:
+                                        st.error(f"Failed to parse diagram path as JSON: {e}")
+
+                                        # Try as a direct path instead
+                                        if os.path.exists(diagram_path) and os.path.isfile(diagram_path):
+                                            st.image(diagram_path, width=500)
+                                        else:
+                                            st.error(f"Diagram file not found: {diagram_path}")
+                                elif isinstance(diagram_path, dict) and "name" in diagram_path:
+                                    # If diagram_path is already a dictionary
+                                    actual_path = diagram_path["name"]
+                                    if os.path.exists(actual_path) and os.path.isfile(actual_path):
+                                        st.image(actual_path, width=500)
+                                    else:
+                                        st.error(f"Diagram file not found: {actual_path}")
+                                else:
+                                    # Handle as a direct path
+                                    if os.path.exists(diagram_path) and os.path.isfile(diagram_path):
+                                        st.image(diagram_path, width=500)
+                                    else:
+                                        st.error(f"Diagram file not found: {diagram_path}")
+                            except Exception as e:
+                                st.error(f"Error displaying diagram: {str(e)}")
+                                st.write(f"Diagram path: {diagram_path}")
+                                st.write(f"Type: {type(diagram_path)}")
+                                import traceback
+                                st.code(traceback.format_exc())
 
                         # Display framework and architecture
                         if metadata.get('framework') or metadata.get('architecture'):
@@ -228,6 +278,7 @@ class StreamlitInterface:
                                 with train_cols[3]:
                                     st.metric("Epochs", training.get('epochs', 'N/A'))
 
+        # [Rest of the method remains unchanged]
         elif t == "image_search":
             st.header("Image Search Results")
             # Display images in a grid layout

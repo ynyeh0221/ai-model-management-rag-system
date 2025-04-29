@@ -30,7 +30,7 @@ def initialize_components(config_path="./config", llm_model_name: str = "llm"):
 
     # Initialize document cli_runner components
     schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
-    code_parser = LLMBasedCodeParser(schema_validator=schema_validator, llm_interface=llm_interface, llm_interface_natural_language_summary=LLMInterface(model_name="deepseek-r1:7b", timeout=60000))
+    code_parser = LLMBasedCodeParser(schema_validator=schema_validator, llm_interface=llm_interface, llm_interface_natural_language_summary=LLMInterface(model_name="qwen3:8b", timeout=60000))
     metadata_extractor = MetadataExtractor()
     image_processor = ImageProcessor(schema_validator)
     
@@ -131,8 +131,8 @@ def main():
         components = initialize_components(llm_model_name="deepseek-llm:7b")
         image_processor_runner.process_single_image(components, args.file_path)
     elif args.command == "start-cli":
-        # Use deepseek-r1 to better show thinking steps
-        components = initialize_components(llm_model_name="deepseek-r1:7b")
+        # Use model to better show thinking steps
+        components = initialize_components(llm_model_name="qwen3:8b")
         cli_interface.start_cli(components, args.host, args.port)
     else:
         parser.print_help()
