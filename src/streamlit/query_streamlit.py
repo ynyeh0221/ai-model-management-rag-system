@@ -174,69 +174,227 @@ class StreamlitInterface:
                             st.subheader("Model Component Diagram")
                             diagram_path = metadata.get('diagram_path')
 
-                            # Debug information
-                            st.write(f"Debug - Diagram path type: {type(diagram_path)}")
-
                             # Handle diagram path appropriately based on its type
                             try:
                                 import os
                                 import json
+                                from PIL import Image
+                                import base64
 
-                                # If diagram_path is a JSON string
+                                # Variable to store the actual path for both display and full-size view
+                                actual_image_path = None
+
+                                # Resolve the actual image path from various possible formats
                                 if isinstance(diagram_path, str) and diagram_path.startswith(
                                         '{') and diagram_path.endswith('}'):
                                     try:
-                                        # Try to parse the JSON string
                                         path_info = json.loads(diagram_path)
                                         if isinstance(path_info, dict) and "name" in path_info:
-                                            # Extract the actual file path from the JSON
-                                            actual_path = path_info["name"]
-                                            st.write(f"Debug - Extracted file path: {actual_path}")
-
-                                            # Check if the file exists
-                                            if os.path.exists(actual_path) and os.path.isfile(actual_path):
-                                                # Display the image
-                                                st.image(actual_path, width=500)
-
-                                                # Add a button to show full-size image in a modal
-                                                if st.button("View Full Size Diagram"):
-                                                    st.markdown(f"""
-                                                    <div style="display: flex; justify-content: center;">
-                                                        <a href="{actual_path}" target="_blank">
-                                                            <img src="{actual_path}" style="max-width: 100%;" />
-                                                        </a>
-                                                    </div>
-                                                    """, unsafe_allow_html=True)
-                                            else:
-                                                st.error(f"Diagram file not found: {actual_path}")
-                                                st.write(f"Current working directory: {os.getcwd()}")
-                                        else:
-                                            st.error(f"Invalid diagram path format in JSON: {path_info}")
-                                    except json.JSONDecodeError as e:
-                                        st.error(f"Failed to parse diagram path as JSON: {e}")
-
-                                        # Try as a direct path instead
+                                            actual_image_path = path_info["name"]
+                                    except json.JSONDecodeError:
                                         if os.path.exists(diagram_path) and os.path.isfile(diagram_path):
-                                            st.image(diagram_path, width=500)
-                                        else:
-                                            st.error(f"Diagram file not found: {diagram_path}")
+                                            actual_image_path = diagram_path
                                 elif isinstance(diagram_path, dict) and "name" in diagram_path:
-                                    # If diagram_path is already a dictionary
-                                    actual_path = diagram_path["name"]
-                                    if os.path.exists(actual_path) and os.path.isfile(actual_path):
-                                        st.image(actual_path, width=500)
-                                    else:
-                                        st.error(f"Diagram file not found: {actual_path}")
+                                    actual_image_path = diagram_path["name"]
                                 else:
-                                    # Handle as a direct path
                                     if os.path.exists(diagram_path) and os.path.isfile(diagram_path):
-                                        st.image(diagram_path, width=500)
-                                    else:
-                                        st.error(f"Diagram file not found: {diagram_path}")
+                                        actual_image_path = diagram_path
+
+                                # If we have a valid path, display the image
+                                if actual_image_path and os.path.exists(actual_image_path):
+                                    # Display thumbnail version
+                                    st.image(actual_image_path, width=500)
+
+                                    # Get original image dimensions
+                                    img_width, img_height = Image.open(actual_image_path).size
+
+                                    # Create a unique key for the fullscreen button
+                                    button_key = f"fullscreen_{os.path.basename(actual_image_path)}"
+
+                                    # Add a fullscreen button that emphasizes original size
+                                    if st.button("View 100% Original Size in Fullscreen", key=button_key):
+                                        # Convert image to base64 for embedding
+                                        with open(actual_image_path, "rb") as img_file:
+                                            encoded = base64.b64encode(img_file.read()).decode()
+
+                                        # Create HTML that ensures the image is displayed at 100% original size
+                                        html = f"""
+                                        <html>
+                                        <head>
+                                            <title>Original Size Diagram</title>
+                                            <style>
+                                                body, html {{
+                                                    margin: 0;
+                                                    padding: 0;
+                                                    height: 100%;
+                                                    width: 100%;
+                                                    background-color: #000;
+                                                    overflow: auto;
+                                                }}
+                                                .controls {{
+                                                    position: fixed;
+                                                    top: 15px;
+                                                    right: 15px;
+                                                    z-index: 1000;
+                                                    display: flex;
+                                                    gap: 10px;
+                                                }}
+                                                .btn {{
+                                                    background-color: rgba(255, 255, 255, 0.8);
+                                                    border: none;
+                                                    padding: 8px 15px;
+                                                    border-radius: 4px;
+                                                    cursor: pointer;
+                                                    font-size: 14px;
+                                                    font-weight: bold;
+                                                }}
+                                                .img-container {{
+                                                    position: absolute;
+                                                    top: 0;
+                                                    left: 0;
+                                                    width: 100%;
+                                                    height: 100%;
+                                                    display: flex;
+                                                    justify-content: center;
+                                                    align-items: center;
+                                                    padding: 20px;
+                                                    box-sizing: border-box;
+                                                }}
+                                                .img-wrapper {{
+                                                    overflow: auto;
+                                                    max-width: 100%;
+                                                    max-height: 100%;
+                                                }}
+                                                #diagram {{
+                                                    /* Ensure image displays at exact original size - no scaling */
+                                                    width: {img_width}px;
+                                                    height: {img_height}px;
+                                                    image-rendering: pixelated;
+                                                    image-rendering: -webkit-optimize-contrast;
+                                                }}
+                                                .size-info {{
+                                                    position: fixed;
+                                                    bottom: 15px;
+                                                    left: 15px;
+                                                    background-color: rgba(255, 255, 255, 0.8);
+                                                    padding: 5px 10px;
+                                                    border-radius: 4px;
+                                                    font-size: 12px;
+                                                }}
+                                            </style>
+                                        </head>
+                                        <body>
+                                            <div class="controls">
+                                                <button id="zoomIn" class="btn">Zoom In (+)</button>
+                                                <button id="zoomOut" class="btn">Zoom Out (-)</button>
+                                                <button id="resetZoom" class="btn">Reset (100%)</button>
+                                                <button id="toggleFullscreen" class="btn">Toggle Fullscreen</button>
+                                                <button id="close" class="btn">Close</button>
+                                            </div>
+
+                                            <div class="img-container">
+                                                <div class="img-wrapper">
+                                                    <img id="diagram" src="data:image/png;base64,{encoded}" alt="Model Diagram">
+                                                </div>
+                                            </div>
+
+                                            <div class="size-info">
+                                                Original size: {img_width}×{img_height}px | Current zoom: <span id="zoomLevel">100%</span>
+                                            </div>
+
+                                            <script>
+                                                // Variables to track current zoom level
+                                                let currentZoom = 1.0;
+                                                const zoomFactor = 0.1;
+                                                const diagram = document.getElementById('diagram');
+                                                const zoomLevelDisplay = document.getElementById('zoomLevel');
+
+                                                // Function to update zoom
+                                                function updateZoom() {{
+                                                    diagram.style.width = `${{img_width * currentZoom}}px`;
+                                                    diagram.style.height = `${{img_height * currentZoom}}px`;
+                                                    zoomLevelDisplay.textContent = `${{Math.round(currentZoom * 100)}}%`;
+                                                }}
+
+                                                // Zoom in function
+                                                document.getElementById('zoomIn').addEventListener('click', function() {{
+                                                    currentZoom += zoomFactor;
+                                                    updateZoom();
+                                                }});
+
+                                                // Zoom out function
+                                                document.getElementById('zoomOut').addEventListener('click', function() {{
+                                                    if (currentZoom > zoomFactor) {{
+                                                        currentZoom -= zoomFactor;
+                                                        updateZoom();
+                                                    }}
+                                                }});
+
+                                                // Reset zoom function
+                                                document.getElementById('resetZoom').addEventListener('click', function() {{
+                                                    currentZoom = 1.0;
+                                                    updateZoom();
+                                                }});
+
+                                                // Function to toggle fullscreen
+                                                function toggleFullscreen() {{
+                                                    if (!document.fullscreenElement &&
+                                                        !document.mozFullScreenElement &&
+                                                        !document.webkitFullscreenElement &&
+                                                        !document.msFullscreenElement) {{
+                                                        // Enter fullscreen
+                                                        if (document.documentElement.requestFullscreen) {{
+                                                            document.documentElement.requestFullscreen();
+                                                        }} else if (document.documentElement.msRequestFullscreen) {{
+                                                            document.documentElement.msRequestFullscreen();
+                                                        }} else if (document.documentElement.mozRequestFullScreen) {{
+                                                            document.documentElement.mozRequestFullScreen();
+                                                        }} else if (document.documentElement.webkitRequestFullscreen) {{
+                                                            document.documentElement.webkitRequestFullscreen(Element.ALLOW_KEYBOARD_INPUT);
+                                                        }}
+                                                    }} else {{
+                                                        // Exit fullscreen
+                                                        if (document.exitFullscreen) {{
+                                                            document.exitFullscreen();
+                                                        }} else if (document.msExitFullscreen) {{
+                                                            document.msExitFullscreen();
+                                                        }} else if (document.mozCancelFullScreen) {{
+                                                            document.mozCancelFullScreen();
+                                                        }} else if (document.webkitExitFullscreen) {{
+                                                            document.webkitExitFullscreen();
+                                                        }}
+                                                    }}
+                                                }}
+
+                                                // Auto-enter fullscreen when the page loads
+                                                document.addEventListener('DOMContentLoaded', function() {{
+                                                    toggleFullscreen();
+                                                }});
+
+                                                // Set up event listeners
+                                                document.getElementById('toggleFullscreen').addEventListener('click', toggleFullscreen);
+                                                document.getElementById('close').addEventListener('click', function() {{
+                                                    if (document.fullscreenElement) toggleFullscreen();
+                                                    window.close(); // Try to close window
+                                                    window.history.back(); // Fallback to going back
+                                                }});
+                                            </script>
+                                        </body>
+                                        </html>
+                                        """
+
+                                        # Open in a new browser tab
+                                        from tempfile import NamedTemporaryFile
+                                        import webbrowser
+
+                                        with NamedTemporaryFile(delete=False, suffix='.html') as tmp:
+                                            tmp.write(html.encode())
+                                            webbrowser.open('file://' + tmp.name, new=2)
+                                else:
+                                    st.error(f"Diagram file not found: {diagram_path}")
+
                             except Exception as e:
                                 st.error(f"Error displaying diagram: {str(e)}")
-                                st.write(f"Diagram path: {diagram_path}")
-                                st.write(f"Type: {type(diagram_path)}")
                                 import traceback
                                 st.code(traceback.format_exc())
 
