@@ -46,7 +46,7 @@ class ASTSummaryGenerator:
             "Embedding", "GRU", "Linear", "LSTM", "MultiheadAttention",
             "Sequential", "Transformer",
         }
-        self.max_dims_to_show: int = 2
+        self.max_dims_to_show: int = 2 # Keep it low to make llm more focus on important information when parsing
 
     def generate_summary(self, code_str: str, file_path: str = "<unknown>") -> str:
         """

@@ -12,8 +12,35 @@ from src.core.content_analyzer.model_script.ast_summary_generator import ASTSumm
 from src.core.content_analyzer.utils.model_id_utils import ModelIdUtils
 from src.core.prompt_manager.ingestion_path_prompt_manager import IngestionPathPromptManager
 
+def filter_model_architecture_from_ast_summary(summary: str) -> str:
+    """
+    Given an AST digest summary, return only the lines that
+    contain:
+      - Import / From   (framework & dataset)
+      - Variable        (batch_size, lr, optimizer, epochs, device)
+      - Model Architecture and all subsequent lines
+    """
+    lines = summary.splitlines()
+    filtered: List[str] = []
+    in_model_architecture = False
 
-def filter_ast_summary_for_metadata(summary: str) -> str:
+    for line in lines:
+        stripped = line.strip()
+
+        # Check if we've reached the Model Architecture section
+        if stripped.startswith("Model Architecture:"):
+            in_model_architecture = True
+            filtered.append(stripped)
+            continue
+
+        # If we're in the Model Architecture section, keep all lines
+        if in_model_architecture:
+            filtered.append(stripped)
+            continue
+
+    return "\n".join(filtered)
+
+def filter_ast_summary_for_metadata(summary: str, include_model_architecture: bool = True) -> str:
     """
     Given an AST digest summary, return only the lines that
     contain:
@@ -34,13 +61,13 @@ def filter_ast_summary_for_metadata(summary: str) -> str:
         stripped = line.strip()
 
         # Check if we've reached the Model Architecture section
-        if stripped.startswith("Model Architecture:") or stripped.startswith("Component Dependencies:"):
+        if stripped.startswith("Model Architecture:"):
             in_model_architecture = True
             filtered.append(stripped)
             continue
 
         # If we're in the Model Architecture section, keep all lines
-        if in_model_architecture:
+        if in_model_architecture and include_model_architecture:
             filtered.append(stripped)
             continue
 
@@ -61,6 +88,8 @@ def filter_ast_summary_for_metadata(summary: str) -> str:
     return "\n".join(filtered)
 
 def sanitize_json_string(json_str: str) -> str:
+    # Remove thinking tags and their contents
+    json_str = re.sub(r"<think(ing)?>.*?</think(ing)?>", "", json_str, flags=re.DOTALL)
     # Remove JS-style comments
     json_str = re.sub(r"//.*?$", "", json_str, flags=re.MULTILINE)
     # Remove trailing commas
@@ -207,8 +236,6 @@ def split_summary_into_chunks(summary_text, similarity_threshold=0.5, max_senten
         text = " ".join(sentences[j] for j in current_idxs)
         chunks.append({"description": text, "offset": start_off})
 
-    print(f"chunks: {chunks}")
-
     return chunks
 
 def split_code_chunks_via_ast(file_content: str, file_path: str, chunk_size: int = 500, overlap: int = 100):
@@ -247,10 +274,10 @@ def split_code_chunks_via_ast(file_content: str, file_path: str, chunk_size: int
 
     return chunks
 
-def validate_llm_metadata_structure(metadata: dict) -> Tuple[bool, str]:
+def validate_architecture_llm_metadata_structure(metadata: dict) -> Tuple[bool, str]:
     """Validate that the metadata has the required structure."""
     # Check that all required top-level fields exist
-    required_fields = ["architecture", "dataset", "training_config"]
+    required_fields = ["architecture"]
     if not all(field in metadata for field in required_fields):
         return False, "Missing required fields"
 
@@ -260,6 +287,15 @@ def validate_llm_metadata_structure(metadata: dict) -> Tuple[bool, str]:
             metadata["architecture"].get("type").lower() == "n/a" or "reason" not in metadata["architecture"] or metadata["architecture"].get("reason") is None or \
             metadata["architecture"].get("reason").lower() == "missing" or metadata["architecture"].get("type").lower() == "pytorch" or metadata["architecture"].get("type").lower() == "gpu" or metadata["architecture"].get("type").lower() == "cpu":
         return False, "Invalid architecture structure"
+
+    return True, ""
+
+def validate_other_llm_metadata_structure(metadata: dict) -> Tuple[bool, str]:
+    """Validate that the metadata has the required structure."""
+    # Check that all required top-level fields exist
+    required_fields = ["dataset", "training_config"]
+    if not all(field in metadata for field in required_fields):
+        return False, "Missing required fields"
 
     # Check that dataset has name
     if not isinstance(metadata["dataset"], dict) or "name" not in metadata["dataset"]:
@@ -273,10 +309,15 @@ def validate_llm_metadata_structure(metadata: dict) -> Tuple[bool, str]:
 
     return True, ""
 
-def create_default_llm_metadata() -> dict:
+def create_default_architecture_llm_metadata() -> dict:
     """Create default metadata structure with empty/null values."""
     return {
         "architecture": {"type": "missing"},
+    }
+
+def create_default_other_llm_metadata() -> dict:
+    """Create default metadata structure with empty/null values."""
+    return {
         "dataset": {"name": "missing"},
         "imaged_folder": {"name": "missing"},
         "training_config": {
@@ -368,9 +409,10 @@ class LLMBasedCodeParser:
     validate_llm_metadata_structure : Function for validating metadata structure.
     """
 
-    def __init__(self, schema_validator=None, llm_interface=None):
+    def __init__(self, schema_validator=None, llm_interface=None, llm_interface_natural_language_summary=None):
         self.schema_validator = schema_validator
         self.llm_interface = llm_interface
+        self.llm_interface_natural_language_summary = llm_interface_natural_language_summary
         self.llm_metadata_cache = {}
         self.ast_summary_generator = ASTSummaryGenerator()
 
@@ -484,7 +526,19 @@ class LLMBasedCodeParser:
         print(f"Natural language summary from AST digest: {summary}")
 
         # STEP 3: Feed merged summary to LLM for structured metadata generation
-        final = self.generate_metadata_from_ast_summary(ast_digest, max_retries=max_retries, file_path=file_path)
+        final = {}
+        # STEP 3-1: Parse architecture metadata
+        architecture_metadata = self.generate_architecture_metadata_from_ast_summary(ast_digest,
+                                                                                     max_retries=max_retries,
+                                                                                     file_path=file_path)
+        print(f"architecture_metadata: {architecture_metadata}")
+        final.update(architecture_metadata)
+        # STEP 3-2: Parse other metadata
+        other_metadata = self.generate_other_metadata_from_ast_summary(ast_digest, max_retries=max_retries,
+                                                                       file_path=file_path)
+        print(f"other_metadata: {other_metadata}")
+        final.update(other_metadata)
+
         final['chunk_descriptions'] = split_summary_into_chunks(summary_text=summary.get("summary", ""), max_sentences_per_chunk=1)
         print(f"Chunk descriptions count: {len(final['chunk_descriptions'])}")
 
@@ -515,19 +569,18 @@ class LLMBasedCodeParser:
             return {}
 
         # Reduce input size of LLM
-        chunk_text = filter_ast_summary_for_metadata(chunk_text)
-        print(f"chunk_text: {chunk_text}")
+        chunk_text = filter_ast_summary_for_metadata(chunk_text, True)
 
         system_prompt = IngestionPathPromptManager.get_system_prompt_natural_language_summary_creation()
 
         for attempt in range(max_retries):
             try:
                 user_prompt = f"Here is the AST summary:\n{chunk_text}\n```"
-                response = self.llm_interface.generate_structured_response(
+                response = self.llm_interface_natural_language_summary.generate_structured_response(
                     system_prompt=system_prompt,
                     user_prompt=user_prompt,
                     temperature=0,
-                    max_tokens=4096
+                    max_tokens=32000
                 )
                 summary = response.get("content", "").strip()
 
@@ -566,17 +619,74 @@ class LLMBasedCodeParser:
         # Replace matched sections with an empty string
         return pattern.sub('', text)
 
-    def generate_metadata_from_ast_summary(self, summary: str, max_retries: int = 3, file_path: str = "<unknown>") -> dict:
+    def generate_architecture_metadata_from_ast_summary(self, summary: str, max_retries: int = 3, file_path: str = "<unknown>") -> dict:
         """Generate structured JSON metadata from AST digest summary."""
-        if not self.llm_interface:
-            return create_default_llm_metadata()
+        if not self.llm_interface_natural_language_summary:
+            return create_default_architecture_llm_metadata()
 
         # Reduce input size of LLM
         print(f"len(summary): {len(summary)}, file_path: {file_path}")
-        summary = filter_ast_summary_for_metadata(summary)
+        summary = filter_model_architecture_from_ast_summary(summary)
         print(f"len(extracted_summary): {len(summary)}, file_path: {file_path}")
 
-        system_prompt = IngestionPathPromptManager.get_system_prompt_for_metadata_from_ast_summary_parsing()
+        system_prompt = IngestionPathPromptManager.get_system_prompt_for_architecture_metadata_from_ast_summary_parsing()
+
+        for attempt in range(max_retries):
+            try:
+                user_prompt = f"""
+                Here is the model AST digest summary:
+
+                {summary}
+
+                Extract the JSON according to this schema:
+                {{
+                  "architecture": {{
+                    "type": "string",
+                    "reason": "string"
+                  }}
+                }}
+
+                Your response should be a valid JSON object with ONLY an "architecture" property containing exactly two fields: "type" and "reason". Both must be strings. The "type" should identify the overall architecture (like "ResNet", "UNet", "GAN", etc.) and the "reason" should explain why this architecture type was identified.
+                """
+                response = self.llm_interface_natural_language_summary.generate_structured_response(
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    temperature=0,
+                    max_tokens=32000
+                )
+                print(f"Architecture metadata generation response (attempt {attempt + 1}): {response}")
+                raw = response.get("content", "").strip()
+                match = re.search(r"\{.*\}", raw, re.DOTALL)
+                if match:
+                    json_str = sanitize_json_string(match.group())
+                    try:
+                        parsed = json.loads(json_str)
+                        is_parse_success, reason = validate_architecture_llm_metadata_structure(parsed)
+                        if is_parse_success:
+                            return parsed
+                        else:
+                            print(f"[Retry {attempt + 1}] Invalid metadata structure: {reason}, file_path: {file_path}")
+                    except json.JSONDecodeError as e:
+                        print(f"[Retry {attempt + 1}] Invalid JSON format: {e}, file_path: {file_path}")
+                else:
+                    print(f"[Retry {attempt + 1}] No valid JSON object found in LLM response, file_path: {file_path}")
+            except Exception as e:
+                print(f"[Retry {attempt + 1}] Metadata generation failed: {e}, file_path: {file_path}")
+
+        # After all retries, return default metadata
+        return create_default_architecture_llm_metadata()
+
+    def generate_other_metadata_from_ast_summary(self, summary: str, max_retries: int = 3, file_path: str = "<unknown>") -> dict:
+        """Generate structured JSON metadata from AST digest summary."""
+        if not self.llm_interface:
+            return create_default_other_llm_metadata()
+
+        # Reduce input size of LLM
+        print(f"len(summary): {len(summary)}, file_path: {file_path}")
+        summary = filter_ast_summary_for_metadata(summary, False)
+        print(f"len(extracted_summary): {len(summary)}, file_path: {file_path}")
+
+        system_prompt = IngestionPathPromptManager.get_system_prompt_for_other_metadata_from_ast_summary_parsing()
 
         for attempt in range(max_retries):
             try:
@@ -593,14 +703,14 @@ class LLMBasedCodeParser:
                     temperature=0,
                     max_tokens=4096
                 )
-                print(f"metadata generation response (attempt {attempt + 1}): {response}")
+                print(f"Other metadata generation response (attempt {attempt + 1}): {response}")
                 raw = response.get("content", "").strip()
                 match = re.search(r"\{.*\}", raw, re.DOTALL)
                 if match:
                     json_str = sanitize_json_string(match.group())
                     try:
                         parsed = json.loads(json_str)
-                        is_parse_success, reason = validate_llm_metadata_structure(parsed)
+                        is_parse_success, reason = validate_other_llm_metadata_structure(parsed)
                         if is_parse_success:
                             return parsed
                         else:
@@ -613,7 +723,7 @@ class LLMBasedCodeParser:
                 print(f"[Retry {attempt + 1}] Metadata generation failed: {e}, file_path: {file_path}")
 
         # After all retries, return default metadata
-        return create_default_llm_metadata()
+        return create_default_other_llm_metadata()
 
     def extract_model_info(self, file_content: str, file_path: str) -> dict:
         try:

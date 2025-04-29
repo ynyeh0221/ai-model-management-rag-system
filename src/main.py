@@ -30,7 +30,7 @@ def initialize_components(config_path="./config", llm_model_name: str = "llm"):
 
     # Initialize document cli_runner components
     schema_validator = SchemaValidator(os.path.join(config_path, "schema_registry.json"))
-    code_parser = LLMBasedCodeParser(schema_validator=schema_validator, llm_interface=llm_interface)
+    code_parser = LLMBasedCodeParser(schema_validator=schema_validator, llm_interface=llm_interface, llm_interface_natural_language_summary=LLMInterface(model_name="deepseek-r1:7b", timeout=60000))
     metadata_extractor = MetadataExtractor()
     image_processor = ImageProcessor(schema_validator)
     
