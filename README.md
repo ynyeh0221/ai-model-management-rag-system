@@ -302,7 +302,8 @@ src/
 │
 │   └── rag_system.py           # Entry point for orchestrating end-to-end processing
 │
-├── main.py                     # Standalone app entry point (optional)
+├── main.py                     # Standalone cli entry point
+├── streamlit_main.py           # Standalone Streamlit UI entry point
 └── analytics.db                # Local usage logging or performance tracking DB
 
 ```
