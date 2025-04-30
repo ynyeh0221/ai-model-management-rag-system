@@ -182,6 +182,10 @@ Sample 10: [Please find models not using RNN, created in March 2025.](https://gi
 
 ![](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/screenshot/streamlit%20query%204.png)
 
+![](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/screenshot/streamlit%20query%205.png)
+
+![](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/screenshot/streamlit%20query%206.png)
+
 ##### List-models
 ![](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/screenshot/streamlit%20list-models.png)
 
