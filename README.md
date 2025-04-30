@@ -145,6 +145,12 @@ python src/main.py process-single-script path/to/model.py
 
 # Process a directory of scripts
 python src/main.py process-scripts path/to/models/
+
+# Process a single image
+python src/main.py process-single-image path/to/image.py
+
+# Process a directory of images
+python src/main.py process-images path/to/images/
 ```
 
 ### Web interface
