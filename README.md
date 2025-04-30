@@ -135,51 +135,52 @@ Document-level access control is enforced at the time of ingestion:
 
 ---
 
-### Response Generation Workflow
+### Query Workflow
 
-When a user submits a query through the CLI interface (`UIRunner`), the system follows a structured multi-stage process to generate a final response:
+When a user submits a query through the Streamlit interface or the CLI interface, the system executes a structured, multi-stage process to generate a final response:
 
-#### 1. **Query Clarity Checking and Improving**
-- The raw query is processed by a `check_query_clarity` component.
-- Calls LLM to check if user's query is clear or can be improved. For latter case, suggests a set of improved queries for users to choose, or let user to enter new query.
+#### 1. **Query Clarity Evaluation and Enhancement**
+- The raw query is first processed by the `check_query_clarity` component.
+- This component uses an LLM to determine if the query is clear. If not, it suggests improved versions for the user to choose from, or allows the user to input a revised query.
 
-#### 2. **Comparison Query Detecting**
-- The query is processed by a `detect_comparison_query` component.
-- Calls LLM to split comparison query (e.g., `Can you please compare differences in architecture between my diffusion models on CIFAR-10 and MNIST?`) to a set of sub data-retrieval queries (e.g., [`Can you please fetch architecture of my diffusion model on CIFAR-10`, ``Can you please fetch architecture of my diffusion model on MNIST``]).
+#### 2. **Detection of Comparison Queries**
+- The query is analyzed by the `detect_comparison_query` component.
+- If it is identified as a comparison query (e.g., *"Compare differences in architecture between my diffusion models on CIFAR-10 and MNIST"*), the system decomposes it into multiple sub-queries (e.g., *"Fetch architecture of my diffusion model on CIFAR-10"*, *"Fetch architecture of my diffusion model on MNIST"*).
+- Each sub-query is then independently passed through the retrieval pipeline (Steps 3–5), and their results are later merged in Step 7 to construct the final comparison response.
 
 #### 3. **Query Parsing**
-- The query is processed by a `query_parser` component.
-- Calls LLM to extract the user's intent (e.g., text/metadata retrieval, image search, notebook creation)
-- Calls LLM to extract NERs (e.g., architecture, dataset, train config) which will be used to construct queries for target tables.
-- Uses rule-based filters to parse parameters which requires exact values (e.g., model id, created month/year, last modified month/year).
-  
+- The `query_parser` component extracts structured information from the query:
+  - Uses an LLM to identify user intent (e.g., metadata retrieval, image search, notebook generation).
+  - Extracts named entities (e.g., architecture, dataset, training configuration) for use in downstream queries.
+  - Applies rule-based filters to extract exact parameters (e.g., model ID, creation date, modification date).
+
 #### 4. **Search Dispatching**
-- The parsed query is sent to a `search_dispatcher`, which dispatches it to one or more vector collections:
+- The parsed query is forwarded to the `search_dispatcher`, which routes it to appropriate vector collections:
   - `model_descriptions` for natural language summaries
-  - `model_frameworks`, `model_architectures`, `model_training_configs` for structured filtering
-- The dispatcher supports hybrid vector+metadata queries and returns relevant matches.
+  - `model_frameworks`, `model_architectures`, and `model_training_configs` for structured filtering
+- The dispatcher supports hybrid vector + metadata queries and returns a ranked set of relevant matches.
 
-#### 5. **Reranking**
-- Raw search results are reranked using a `reranker` (e.g., BGE-Reranker or CrossEncoder).
-- Scores are adjusted based on textual similarity and contextual relevance to the query.
+#### 5. **Reranking of Search Results**
+- Retrieved results are reranked using a `reranker` (e.g., BGE-Reranker or CrossEncoder).
+- Ranking scores are refined based on textual similarity and contextual relevance to the original query.
 
-#### 6. **(Non-comparison) LLM Response Generation**
-- For non-comparison query detected in step 2, the `llm_interface` (e.g., Deepseek, Qwen or other LLM provider) generates a final answer using the templated prompt.
-- Responses can include:
-  - LLM thinking steps
-  - LLM response to user query
-  - Searched results table
-  - Details of searched results, including model component diagram
-  - Recommendations based on metadata
- 
-#### 7. **(Comparison) LLM Response Generation**
-- For comparison query detected in step 2, the `llm_interface` (e.g., Deepseek, Qwen or other LLM provider) generates a final answer using the templated prompt.
-- Responses can include:
-  - LLM thinking steps (made based on searched results of all sub data-retrieval queries)
-  - LLM response to user query (made based on searched results of all sub data-retrieval queries)
-  - Searched results table (merged from searched results of all sub data-retrieval queries)
-  - Details of searched results, including model component diagram
-  - Recommendations based on metadata
+#### 6. **LLM Response Generation (Non-Comparison Queries)**
+- For standard (non-comparison) queries, the `llm_interface` (e.g., Deepseek, Qwen) generates a response using a structured prompt.
+- The response may include:
+  - Step-by-step reasoning from the LLM
+  - Direct answer to the user's query
+  - Tabulated search results
+  - Detailed information, such as model component diagrams
+  - Metadata-based recommendations
+
+#### 7. **LLM Response Generation (Comparison Queries)**
+- For comparison queries, the `llm_interface` synthesizes results from all sub-queries to generate a unified response.
+- The response may include:
+  - LLM reasoning based on the combined sub-query results
+  - A comparative answer to the user’s original question
+  - Merged result tables across all sub-queries
+  - Detailed breakdowns, including model component diagrams
+  - Metadata-driven recommendations
 
 ---
 
