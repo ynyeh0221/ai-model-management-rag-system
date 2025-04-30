@@ -6,6 +6,8 @@ A comprehensive framework for understanding, indexing, and retrieving machine le
 
 For ML engineers drowning in disparate model folders, Model-Insight-RAG transforms raw code into structured, searchable knowledge with powerful semantic understanding.
 
+[DEMO](https://github.com/ynyeh0221/model-insight-rag/blob/main/DEMO.md)
+
 ## Quick Start
 
 ```bash
