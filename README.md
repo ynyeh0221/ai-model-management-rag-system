@@ -187,14 +187,6 @@ src/ (~5K LoC)
 
 We welcome contributions! See our [contributing guide](docs/CONTRIBUTING.md) for details on how to get involved.
 
-## Benchmarks
-
-| Query Type | Model Insight RAG | Baseline Text Search |
-|------------|-------------------|----------------------|
-| Architecture query | 95ms | 210ms |
-| Code pattern search | 120ms | 450ms |
-| Cross-modal search | 150ms | N/A |
-
 ## License
 
 [MIT License](https://github.com/ynyeh0221/model-insight-rag/blob/main/LICENSE)
