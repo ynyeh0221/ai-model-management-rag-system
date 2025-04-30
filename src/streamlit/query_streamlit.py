@@ -1,6 +1,9 @@
 import asyncio
 import logging
+import re
 import time
+
+from st_aggrid import GridOptionsBuilder, AgGrid, GridUpdateMode, DataReturnMode
 
 import streamlit as st
 from src.cli.cli_response_utils.image_display_manager import ImageDisplayManager
@@ -78,11 +81,10 @@ class StreamlitInterface:
     def render(self):
         """
         Display results in a streamlit-appropriate way
-        Using AgGrid for clickable search results, with safe emptiness checks
+        Using AgGrid for clickable search results, with safe emptiness checks,
+        and moving the description into the details pane.
         """
         import pandas as pd
-        import re
-        from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
 
         r = st.session_state.results
         if not r:
@@ -92,7 +94,7 @@ class StreamlitInterface:
         if t == "text_search":
             st.header("Answer")
 
-            # LLM response with thinking tags
+            # ——— LLM response with thinking tags ———
             response_text = r["final_response"]
             thinking_pattern = re.compile(r'<(thinking|think)>(.*?)</\1>', re.DOTALL)
             thinking_matches = thinking_pattern.findall(response_text)
@@ -101,23 +103,21 @@ class StreamlitInterface:
                     st.markdown(
                         f"<div style='background-color:#e6f3ff; padding:10px; border-radius:5px; "
                         f"margin-bottom:10px; color:#003366;'><strong>Thinking:</strong><br>{thinking_text}</div>",
-                        unsafe_allow_html=True
+                        unsafe_allow_html=True,
                     )
-                clean_response = thinking_pattern.sub('', response_text)
+                clean_response = thinking_pattern.sub("", response_text)
                 st.write(clean_response)
             else:
                 st.write(response_text)
 
-            # clickable search results
+            # ——— clickable search results (no Description column) ———
             if "search_results" in r and r["search_results"]:
                 st.subheader("Search Results")
 
-                # Build DataFrame
                 rows = []
                 for i, result in enumerate(r["search_results"]):
                     meta = result.get("metadata", {}) or {}
                     # parse nested file JSON if needed
-                    file_meta = {}
                     if isinstance(meta.get("file"), str):
                         try:
                             file_meta = json.loads(meta["file"])
@@ -125,20 +125,16 @@ class StreamlitInterface:
                             file_meta = {}
                     else:
                         file_meta = meta.get("file", {})
+
                     rows.append({
                         "Rank": i + 1,
-                        "Model ID": result.get("model_id", result.get("id", f"Item {i + 1}")),
-                        "Created Month": meta.get("created_month", "N/A"),
-                        "Created Year": meta.get("created_year", "N/A"),
-                        "Last Modified Month": meta.get("last_modified_month", "N/A"),
-                        "Last Modified Year": meta.get("last_modified_year", "N/A"),
+                        "Model ID": result.get("model_id", result.get("id", f"Item {i+1}")),
+                        "Created At": meta.get("created_at", "N/A"),
                         "Path": file_meta.get("absolute_path", meta.get("absolute_path", "N/A")),
-                        "Description": (result.get("merged_description", "")[:500] +
-                                        ("..." if len(result.get("merged_description", "")) > 100 else ""))
                     })
+
                 df = pd.DataFrame(rows)
 
-                # configure AgGrid
                 gb = GridOptionsBuilder.from_dataframe(df)
                 gb.configure_selection(selection_mode="single", use_checkbox=False)
                 grid_opts = gb.build()
@@ -152,17 +148,16 @@ class StreamlitInterface:
                     height=300,
                 )
 
-                # robustly check for a selection, whether it's a list or DataFrame
+                # ——— robust selection check ———
                 sel = None
                 sel_rows = grid_resp.get("selected_rows", [])
                 if isinstance(sel_rows, pd.DataFrame):
                     if not sel_rows.empty:
                         sel = sel_rows.iloc[0].to_dict()
                         idx = int(sel["Rank"]) - 1
-                else:
-                    if isinstance(sel_rows, list) and sel_rows:
-                        sel = sel_rows[0]
-                        idx = int(sel["Rank"]) - 1
+                elif isinstance(sel_rows, list) and sel_rows:
+                    sel = sel_rows[0]
+                    idx = int(sel["Rank"]) - 1
 
                 if sel is not None:
                     model = r["search_results"][idx]
@@ -175,25 +170,37 @@ class StreamlitInterface:
                             except:
                                 pass
 
-                    with st.expander(f"Details for Rank {sel['Rank']} – {sel['Model ID']}", expanded=True):
-                        # File Information
+                    # ——— Details expander, auto-expanded ———
+                    with st.expander(
+                        f"Details for Rank {sel['Rank']} – {sel['Model ID']}",
+                        expanded=True
+                    ):
+                        # —— Description moved here ——
+                        st.subheader("Description")
+                        desc = model.get("merged_description", "")
+                        st.write(desc if desc else "No description available.")
+
+                        # —— File Information ——
                         if meta.get("file"):
                             st.subheader("File Information")
                             f = meta["file"]
                             c1, c2, c3 = st.columns(3)
                             with c1:
-                                st.metric("Size", f"{int(f.get('size_bytes', 0) / 1024)} KB")
+                                size_kb = int(f.get("size_bytes", 0) / 1024)
+                                st.metric("Size", f"{size_kb} KB")
                             with c2:
-                                st.metric("Created", f.get("creation_date", "")[:10])
+                                created = f.get("creation_date", "")[:10]
+                                st.metric("Created", created or "N/A")
                             with c3:
-                                st.metric("Modified", f.get("last_modified_date", "")[:10])
+                                modified = f.get("last_modified_date", "")[:10]
+                                st.metric("Modified", modified or "N/A")
 
-                        # Diagram (if any)
+                        # —— Model Component Diagram ——
                         if meta.get("diagram_path"):
                             st.subheader("Model Component Diagram")
                             diagram_path = meta["diagram_path"]
                             try:
-                                # resolve the actual file path
+                                # resolve actual path
                                 if isinstance(diagram_path, str) and diagram_path.startswith("{"):
                                     info = json.loads(diagram_path)
                                     actual = info.get("name")
@@ -205,77 +212,78 @@ class StreamlitInterface:
                                 if not os.path.exists(actual):
                                     st.error(f"Diagram file not found: {diagram_path}")
                                 else:
-                                    # load image and get its true size
                                     img = Image.open(actual)
-                                    img_width, img_height = img.size
-
-                                    # show a downsized preview
+                                    w, h = img.size
+                                    # thumbnail
                                     st.image(actual, width=500)
+                                    # prepare base64
+                                    with open(actual, "rb") as fh:
+                                        encoded = base64.b64encode(fh.read()).decode()
 
-                                    # prepare the Base64 data URL
-                                    with open(actual, "rb") as f:
-                                        encoded = base64.b64encode(f.read()).decode()
-
-                                    # one‐click full‐res
-                                    btn_key = f"view_full_{os.path.basename(actual)}"
-                                    if st.button("View at 100% Original Size", key=btn_key):
+                                    key = f"fullres_{os.path.basename(actual)}"
+                                    if st.button("View at 100% Original Size", key=key):
                                         html_code = f"""
                                         <html>
-                                          <body style="margin:0; padding:0; background-color:#000; 
-                                                       display:flex; justify-content:center; align-items:center;">
-                                            <img src="data:image/png;base64,{encoded}"
-                                                 style="width:{img_width}px; height:{img_height}px; 
-                                                        image-rendering:pixelated;" />
+                                          <body style="
+                                            margin:0; padding:0;
+                                            background-color:#000;
+                                            display:flex; justify-content:center; align-items:center;
+                                          ">
+                                            <img
+                                              src="data:image/png;base64,{encoded}"
+                                              style="
+                                                width:{w}px; height:{h}px;
+                                                image-rendering:pixelated;
+                                              "
+                                            />
                                           </body>
                                         </html>
                                         """
-                                        # render inline with scrollbars if needed
                                         st.components.v1.html(
                                             html_code,
-                                            height=min(img_height, 800),  # adjust max height as you like
-                                            width=min(img_width, 1200),
+                                            height=min(h, 800),
+                                            width=min(w, 1200),
                                             scrolling=True
                                         )
-
                             except Exception as e:
                                 st.error(f"Error displaying diagram: {e}")
 
-                        # Technical Information
+                        # —— Technical Information ——
                         if meta.get("framework") or meta.get("architecture"):
                             st.subheader("Technical Information")
-                            a1, a2 = st.columns(2)
-                            with a1:
+                            col_a, col_b = st.columns(2)
+                            with col_a:
                                 st.write("**Framework:**")
                                 fw = meta.get("framework", {})
                                 if isinstance(fw, dict):
-                                    st.write(f"{fw.get('name', 'N/A')} {fw.get('version', '')}")
+                                    st.write(f"{fw.get('name','N/A')} {fw.get('version','')}")
                                 else:
                                     st.write(fw)
-                            with a2:
+                            with col_b:
                                 st.write("**Architecture:**")
                                 arch = meta.get("architecture", {})
                                 if isinstance(arch, dict):
-                                    st.write(arch.get("type", "N/A"))
+                                    st.write(arch.get("type","N/A"))
                                 else:
                                     st.write(arch)
 
-                        # Training Information
+                        # —— Training Information ——
                         if meta.get("dataset") or meta.get("training_config"):
                             st.subheader("Training Information")
                             ds = meta.get("dataset", {})
                             if isinstance(ds, dict):
-                                st.write(f"**Dataset:** {ds.get('name', 'N/A')}")
+                                st.write(f"**Dataset:** {ds.get('name','N/A')}")
                             tc = meta.get("training_config", {})
                             if isinstance(tc, dict):
                                 tcols = st.columns(4)
-                                metrics = [
+                                specs = [
                                     ("Batch Size", "batch_size"),
                                     ("Learning Rate", "learning_rate"),
                                     ("Optimizer", "optimizer"),
-                                    ("Epochs", "epochs")
+                                    ("Epochs", "epochs"),
                                 ]
-                                for col, (label, key) in zip(tcols, metrics):
-                                    col.metric(label, tc.get(key, "N/A"))
+                                for col, (lbl, key) in zip(tcols, specs):
+                                    col.metric(lbl, tc.get(key, "N/A"))
 
         # [Rest of the method remains unchanged]
         elif t == "image_search":

@@ -33,3 +33,4 @@ langchain-core~=0.3.51
 streamlit~=1.45.0
 nest-asyncio~=1.6.0
 graphviz~=0.20.3
+streamlit-aggrid~=1.0.5
