@@ -68,12 +68,12 @@ class StreamlitInterface:
         self.rag.register_callback("on_result", lambda r: st.session_state.__setitem__('results', r))
         self.rag.register_callback("on_error", lambda e: st.error(e))
 
-    async def process_query(self, q):
+    async def process_query(self, q, enable_clarity_check: bool = True):
         if not st.session_state.logged_in:
             st.error("Not logged in")
             return
         await self.rag.process_query(q,
-                                     enable_clarity_check=st.session_state.get('enable_clarity_check', False),
+                                     enable_clarity_check=enable_clarity_check,
                                      enable_comparison_detection=st.session_state.get('enable_comparison_detection',
                                                                                       True)
                                      )
@@ -410,55 +410,52 @@ class StreamlitInterface:
             st.error(r["error"])
 
         elif t == "needs_clarification":
-
             # Handle query that needs clarification
             query = r.get("query", "")
             clarity_result = r.get("clarity_result", {})
+
             st.warning("Your query could be clearer")
             st.write(f"**Reason**: {clarity_result.get('reason', 'No reason provided')}")
+
             improved_query = clarity_result.get('improved_query', query)
             suggestions = clarity_result.get('suggestions', [])
+
             st.write("**Suggestions**:")
             suggestion_options = [f"Improved query: {improved_query}"] + suggestions + [f"Use original query: {query}",
                                                                                         "Enter a new query"]
 
-            choice = st.selectbox("Select an option:", suggestion_options)
+            # Add a unique key to prevent duplicate element ID error
+            choice = st.selectbox("Select an option:", suggestion_options, key=f"clarification_options_{id(r)}")
 
             # Create a text area for new query input that's shown conditionally
             new_query_input = ""
-
             if choice == "Enter a new query":
-                new_query_input = st.text_area("Enter new query:", key="new_query_input", height=100)
+                new_query_input = st.text_area("Enter new query:", key=f"new_query_input_{id(r)}", height=100)
 
-            if st.button("Use this query"):
+            if st.button("Use this query", key=f"use_query_button_{id(r)}"):
                 if choice == suggestion_options[0]:  # Improved query
                     new_query = improved_query
-
                 elif choice == suggestion_options[-2]:  # Original query
                     new_query = query
-
                 elif choice == suggestion_options[-1]:  # New query
                     new_query = new_query_input  # Use the value from the conditional text area
-
                 else:
                     # One of the suggestions
                     new_query = suggestions[suggestion_options.index(choice) - 1]
 
                 if new_query:
                     with st.spinner("Processing query..."):
-                        asyncio.run(self.process_query(new_query))
+                        asyncio.run(self.process_query(new_query, False))
 
                         # Display current status
                         status = st.session_state.status
                         if status in ["processing", "searching", "processing_results", "generating_response"]:
                             st.info(f"Status: {status.replace('_', ' ').title()}")
-
                         elif status == "error":
                             st.error("Error occurred")
 
                         # Display results
                         self.render()
-
 
 class CommandHandler:
     """Handles command processing and delegation to appropriate components for Streamlit."""
@@ -726,7 +723,7 @@ def run_streamlit_app(components):
 
             if process_btn and query_text:
                 with st.spinner("Processing query..."):
-                    asyncio.run(interface.process_query(query_text))
+                    asyncio.run(interface.process_query(query_text, st.session_state.get('enable_clarity_check', True)))
 
         elif st.session_state.selected_command == "list-models":
             st.header("Available Models")
