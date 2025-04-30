@@ -432,13 +432,24 @@ class StreamlitInterface:
                 elif choice == suggestion_options[-2]:  # Original query
                     new_query = query
                 elif choice == suggestion_options[-1]:  # New query
-                    new_query = st.session_state.get('new_query', '')
+                    new_query = st.text_area("Enter new query:", key="new_query", height=100)
                 else:
                     # One of the suggestions
                     new_query = suggestions[suggestion_options.index(choice) - 1]
 
                 if new_query:
-                    asyncio.run(self.process_query(new_query))
+                    with st.spinner("Processing query..."):
+                        asyncio.run(self.process_query(new_query))
+
+                        # Display current status
+                        status = st.session_state.status
+                        if status in ["processing", "searching", "processing_results", "generating_response"]:
+                            st.info(f"Status: {status.replace('_', ' ').title()}")
+                        elif status == "error":
+                            st.error("Error occurred")
+
+                        # Display results
+                        self.render()
 
 
 class CommandHandler:
