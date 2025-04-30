@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import re
 import time
 
 import streamlit as st
@@ -11,6 +10,10 @@ from src.core.notebook_generator import NotebookGenerator
 from src.core.rag_system import RAGSystem
 
 logging.basicConfig(level=logging.INFO)
+import os
+import json
+import base64
+from PIL import Image
 
 
 def set_streamlit_page_config():
@@ -75,366 +78,204 @@ class StreamlitInterface:
     def render(self):
         """
         Display results in a streamlit-appropriate way
-        Using proper Streamlit UI components instead of text-based tables
+        Using AgGrid for clickable search results, with safe emptiness checks
         """
+        import pandas as pd
+        import re
+        from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode, DataReturnMode
+
         r = st.session_state.results
-        if not r: return
+        if not r:
+            return
         t = r.get("type", "")
 
         if t == "text_search":
             st.header("Answer")
 
-            # Check if the response contains thinking tags (either <thinking> or <think>)
+            # LLM response with thinking tags
             response_text = r["final_response"]
             thinking_pattern = re.compile(r'<(thinking|think)>(.*?)</\1>', re.DOTALL)
             thinking_matches = thinking_pattern.findall(response_text)
-
             if thinking_matches:
-                # If thinking tags are found, separate thinking from the response
                 for tag_type, thinking_text in thinking_matches:
-                    # Display thinking text with dark blue color on the same light blue background
-                    st.markdown(f"""<div style='background-color:#e6f3ff; padding:10px; border-radius:5px; 
-                                    margin-bottom:10px; color:#003366;'><strong>Thinking:</strong><br>{thinking_text}</div>""",
-                                unsafe_allow_html=True)
-
-                # Remove thinking tags from the main response
+                    st.markdown(
+                        f"<div style='background-color:#e6f3ff; padding:10px; border-radius:5px; "
+                        f"margin-bottom:10px; color:#003366;'><strong>Thinking:</strong><br>{thinking_text}</div>",
+                        unsafe_allow_html=True
+                    )
                 clean_response = thinking_pattern.sub('', response_text)
                 st.write(clean_response)
             else:
-                # If no thinking tags, display the response as is
                 st.write(response_text)
 
-            # Display search results in a proper Streamlit table
-            if "search_results" in r and len(r["search_results"]) > 0:
+            # clickable search results
+            if "search_results" in r and r["search_results"]:
                 st.subheader("Search Results")
 
-                # Prepare data for Streamlit DataFrame
-                search_data = []
+                # Build DataFrame
+                rows = []
                 for i, result in enumerate(r["search_results"]):
-                    metadata = result.get('metadata', {})
-                    # Get file metadata
-                    if isinstance(metadata.get('file'), str):
+                    meta = result.get("metadata", {}) or {}
+                    # parse nested file JSON if needed
+                    file_meta = {}
+                    if isinstance(meta.get("file"), str):
                         try:
-                            import json
-                            file_data = json.loads(metadata.get('file', '{}'))
+                            file_meta = json.loads(meta["file"])
                         except:
-                            file_data = {}
+                            file_meta = {}
                     else:
-                        file_data = metadata.get('file', {})
-
-                    # Extract data points
-                    search_data.append({
+                        file_meta = meta.get("file", {})
+                    rows.append({
                         "Rank": i + 1,
-                        "Model ID": result.get('model_id', result.get('id', f'Item {i + 1}')),
-                        "Score": result.get('score', result.get('similarity', result.get('rank_score', 'N/A'))),
-                        "Created At": result.get('created_at', result.get('created_at', 'N/A')),
-                        "Last Modified At": result.get('last_modified_at', result.get('last_modified_at', 'N/A')),
-                        "Path": file_data.get('absolute_path', metadata.get('absolute_path', 'N/A')),
-                        "Description": result.get('merged_description', 'N/A')[:100] + (
-                            '...' if len(result.get('merged_description', '')) > 100 else '')
+                        "Model ID": result.get("model_id", result.get("id", f"Item {i + 1}")),
+                        "Created Month": meta.get("created_month", "N/A"),
+                        "Created Year": meta.get("created_year", "N/A"),
+                        "Last Modified Month": meta.get("last_modified_month", "N/A"),
+                        "Last Modified Year": meta.get("last_modified_year", "N/A"),
+                        "Path": file_meta.get("absolute_path", meta.get("absolute_path", "N/A")),
+                        "Description": (result.get("merged_description", "")[:500] +
+                                        ("..." if len(result.get("merged_description", "")) > 100 else ""))
                     })
+                df = pd.DataFrame(rows)
 
-                # Create and display the DataFrame
-                import pandas as pd
-                df = pd.DataFrame(search_data)
-                st.dataframe(df, use_container_width=True)
+                # configure AgGrid
+                gb = GridOptionsBuilder.from_dataframe(df)
+                gb.configure_selection(selection_mode="single", use_checkbox=False)
+                grid_opts = gb.build()
 
-                # Show detailed information for the top result
-                if len(r["search_results"]) > 0:
-                    with st.expander("Top Result Details"):
-                        top_result = r["search_results"][0]
-                        metadata = top_result.get('metadata', {})
+                grid_resp = AgGrid(
+                    df,
+                    gridOptions=grid_opts,
+                    update_mode=GridUpdateMode.SELECTION_CHANGED,
+                    data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+                    fit_columns_on_grid_load=True,
+                    height=300,
+                )
 
-                        # Parse nested JSON if needed
-                        for field in ["file", "framework", "architecture", "dataset", "training_config"]:
-                            if isinstance(metadata.get(field), str):
-                                try:
-                                    import json
-                                    parsed = json.loads(metadata.get(field, '{}'))
-                                    metadata[field] = parsed
-                                except:
-                                    pass
+                # robustly check for a selection, whether it's a list or DataFrame
+                sel = None
+                sel_rows = grid_resp.get("selected_rows", [])
+                if isinstance(sel_rows, pd.DataFrame):
+                    if not sel_rows.empty:
+                        sel = sel_rows.iloc[0].to_dict()
+                        idx = int(sel["Rank"]) - 1
+                else:
+                    if isinstance(sel_rows, list) and sel_rows:
+                        sel = sel_rows[0]
+                        idx = int(sel["Rank"]) - 1
 
-                        # Display file info
-                        if metadata.get('file'):
-                            st.subheader("File Information")
-                            file_info = metadata.get('file', {})
-                            file_cols = st.columns(3)
-                            with file_cols[0]:
-                                st.metric("Size", f"{int(file_info.get('size_bytes', 0) / 1024)} KB")
-                            with file_cols[1]:
-                                st.metric("Created", file_info.get('creation_date', 'N/A')[:10] if isinstance(
-                                    file_info.get('creation_date'), str) else 'N/A')
-                            with file_cols[2]:
-                                st.metric("Modified", file_info.get('last_modified_date', 'N/A')[:10] if isinstance(
-                                    file_info.get('last_modified_date'), str) else 'N/A')
-
-                        # Display model component diagram if available
-                        if metadata.get('diagram_path'):
-                            st.subheader("Model Component Diagram")
-                            diagram_path = metadata.get('diagram_path')
-
-                            # Handle diagram path appropriately based on its type
+                if sel is not None:
+                    model = r["search_results"][idx]
+                    meta = model.get("metadata", {}) or {}
+                    # parse JSON subfields
+                    for fld in ["file", "framework", "architecture", "dataset", "training_config"]:
+                        if isinstance(meta.get(fld), str):
                             try:
-                                import os
-                                import json
-                                from PIL import Image
-                                import base64
+                                meta[fld] = json.loads(meta[fld])
+                            except:
+                                pass
 
-                                # Variable to store the actual path for both display and full-size view
-                                actual_image_path = None
+                    with st.expander(f"Details for Rank {sel['Rank']} – {sel['Model ID']}", expanded=True):
+                        # File Information
+                        if meta.get("file"):
+                            st.subheader("File Information")
+                            f = meta["file"]
+                            c1, c2, c3 = st.columns(3)
+                            with c1:
+                                st.metric("Size", f"{int(f.get('size_bytes', 0) / 1024)} KB")
+                            with c2:
+                                st.metric("Created", f.get("creation_date", "")[:10])
+                            with c3:
+                                st.metric("Modified", f.get("last_modified_date", "")[:10])
 
-                                # Resolve the actual image path from various possible formats
-                                if isinstance(diagram_path, str) and diagram_path.startswith(
-                                        '{') and diagram_path.endswith('}'):
-                                    try:
-                                        path_info = json.loads(diagram_path)
-                                        if isinstance(path_info, dict) and "name" in path_info:
-                                            actual_image_path = path_info["name"]
-                                    except json.JSONDecodeError:
-                                        if os.path.exists(diagram_path) and os.path.isfile(diagram_path):
-                                            actual_image_path = diagram_path
-                                elif isinstance(diagram_path, dict) and "name" in diagram_path:
-                                    actual_image_path = diagram_path["name"]
+                        # Diagram (if any)
+                        if meta.get("diagram_path"):
+                            st.subheader("Model Component Diagram")
+                            diagram_path = meta["diagram_path"]
+                            try:
+                                # resolve the actual file path
+                                if isinstance(diagram_path, str) and diagram_path.startswith("{"):
+                                    info = json.loads(diagram_path)
+                                    actual = info.get("name")
+                                elif isinstance(diagram_path, dict):
+                                    actual = diagram_path.get("name")
                                 else:
-                                    if os.path.exists(diagram_path) and os.path.isfile(diagram_path):
-                                        actual_image_path = diagram_path
+                                    actual = diagram_path
 
-                                # If we have a valid path, display the image
-                                if actual_image_path and os.path.exists(actual_image_path):
-                                    # Display thumbnail version
-                                    st.image(actual_image_path, width=500)
+                                if not os.path.exists(actual):
+                                    st.error(f"Diagram file not found: {diagram_path}")
+                                else:
+                                    # load image and get its true size
+                                    img = Image.open(actual)
+                                    img_width, img_height = img.size
 
-                                    # Get original image dimensions
-                                    img_width, img_height = Image.open(actual_image_path).size
+                                    # show a downsized preview
+                                    st.image(actual, width=500)
 
-                                    # Create a unique key for the fullscreen button
-                                    button_key = f"fullscreen_{os.path.basename(actual_image_path)}"
+                                    # prepare the Base64 data URL
+                                    with open(actual, "rb") as f:
+                                        encoded = base64.b64encode(f.read()).decode()
 
-                                    # Add a fullscreen button that emphasizes original size
-                                    if st.button("View 100% Original Size in Fullscreen", key=button_key):
-                                        # Convert image to base64 for embedding
-                                        with open(actual_image_path, "rb") as img_file:
-                                            encoded = base64.b64encode(img_file.read()).decode()
-
-                                        # Create HTML that ensures the image is displayed at 100% original size
-                                        html = f"""
+                                    # one‐click full‐res
+                                    btn_key = f"view_full_{os.path.basename(actual)}"
+                                    if st.button("View at 100% Original Size", key=btn_key):
+                                        html_code = f"""
                                         <html>
-                                        <head>
-                                            <title>Original Size Diagram</title>
-                                            <style>
-                                                body, html {{
-                                                    margin: 0;
-                                                    padding: 0;
-                                                    height: 100%;
-                                                    width: 100%;
-                                                    background-color: #000;
-                                                    overflow: auto;
-                                                }}
-                                                .controls {{
-                                                    position: fixed;
-                                                    top: 15px;
-                                                    right: 15px;
-                                                    z-index: 1000;
-                                                    display: flex;
-                                                    gap: 10px;
-                                                }}
-                                                .btn {{
-                                                    background-color: rgba(255, 255, 255, 0.8);
-                                                    border: none;
-                                                    padding: 8px 15px;
-                                                    border-radius: 4px;
-                                                    cursor: pointer;
-                                                    font-size: 14px;
-                                                    font-weight: bold;
-                                                }}
-                                                .img-container {{
-                                                    position: absolute;
-                                                    top: 0;
-                                                    left: 0;
-                                                    width: 100%;
-                                                    height: 100%;
-                                                    display: flex;
-                                                    justify-content: center;
-                                                    align-items: center;
-                                                    padding: 20px;
-                                                    box-sizing: border-box;
-                                                }}
-                                                .img-wrapper {{
-                                                    overflow: auto;
-                                                    max-width: 100%;
-                                                    max-height: 100%;
-                                                }}
-                                                #diagram {{
-                                                    /* Ensure image displays at exact original size - no scaling */
-                                                    width: {img_width}px;
-                                                    height: {img_height}px;
-                                                    image-rendering: pixelated;
-                                                    image-rendering: -webkit-optimize-contrast;
-                                                }}
-                                                .size-info {{
-                                                    position: fixed;
-                                                    bottom: 15px;
-                                                    left: 15px;
-                                                    background-color: rgba(255, 255, 255, 0.8);
-                                                    padding: 5px 10px;
-                                                    border-radius: 4px;
-                                                    font-size: 12px;
-                                                }}
-                                            </style>
-                                        </head>
-                                        <body>
-                                            <div class="controls">
-                                                <button id="zoomIn" class="btn">Zoom In (+)</button>
-                                                <button id="zoomOut" class="btn">Zoom Out (-)</button>
-                                                <button id="resetZoom" class="btn">Reset (100%)</button>
-                                                <button id="toggleFullscreen" class="btn">Toggle Fullscreen</button>
-                                                <button id="close" class="btn">Close</button>
-                                            </div>
-
-                                            <div class="img-container">
-                                                <div class="img-wrapper">
-                                                    <img id="diagram" src="data:image/png;base64,{encoded}" alt="Model Diagram">
-                                                </div>
-                                            </div>
-
-                                            <div class="size-info">
-                                                Original size: {img_width}×{img_height}px | Current zoom: <span id="zoomLevel">100%</span>
-                                            </div>
-
-                                            <script>
-                                                // Variables to track current zoom level
-                                                let currentZoom = 1.0;
-                                                const zoomFactor = 0.1;
-                                                const diagram = document.getElementById('diagram');
-                                                const zoomLevelDisplay = document.getElementById('zoomLevel');
-
-                                                // Function to update zoom
-                                                function updateZoom() {{
-                                                    diagram.style.width = `${{img_width * currentZoom}}px`;
-                                                    diagram.style.height = `${{img_height * currentZoom}}px`;
-                                                    zoomLevelDisplay.textContent = `${{Math.round(currentZoom * 100)}}%`;
-                                                }}
-
-                                                // Zoom in function
-                                                document.getElementById('zoomIn').addEventListener('click', function() {{
-                                                    currentZoom += zoomFactor;
-                                                    updateZoom();
-                                                }});
-
-                                                // Zoom out function
-                                                document.getElementById('zoomOut').addEventListener('click', function() {{
-                                                    if (currentZoom > zoomFactor) {{
-                                                        currentZoom -= zoomFactor;
-                                                        updateZoom();
-                                                    }}
-                                                }});
-
-                                                // Reset zoom function
-                                                document.getElementById('resetZoom').addEventListener('click', function() {{
-                                                    currentZoom = 1.0;
-                                                    updateZoom();
-                                                }});
-
-                                                // Function to toggle fullscreen
-                                                function toggleFullscreen() {{
-                                                    if (!document.fullscreenElement &&
-                                                        !document.mozFullScreenElement &&
-                                                        !document.webkitFullscreenElement &&
-                                                        !document.msFullscreenElement) {{
-                                                        // Enter fullscreen
-                                                        if (document.documentElement.requestFullscreen) {{
-                                                            document.documentElement.requestFullscreen();
-                                                        }} else if (document.documentElement.msRequestFullscreen) {{
-                                                            document.documentElement.msRequestFullscreen();
-                                                        }} else if (document.documentElement.mozRequestFullScreen) {{
-                                                            document.documentElement.mozRequestFullScreen();
-                                                        }} else if (document.documentElement.webkitRequestFullscreen) {{
-                                                            document.documentElement.webkitRequestFullscreen(Element.ALLOW_KEYBOARD_INPUT);
-                                                        }}
-                                                    }} else {{
-                                                        // Exit fullscreen
-                                                        if (document.exitFullscreen) {{
-                                                            document.exitFullscreen();
-                                                        }} else if (document.msExitFullscreen) {{
-                                                            document.msExitFullscreen();
-                                                        }} else if (document.mozCancelFullScreen) {{
-                                                            document.mozCancelFullScreen();
-                                                        }} else if (document.webkitExitFullscreen) {{
-                                                            document.webkitExitFullscreen();
-                                                        }}
-                                                    }}
-                                                }}
-
-                                                // Auto-enter fullscreen when the page loads
-                                                document.addEventListener('DOMContentLoaded', function() {{
-                                                    toggleFullscreen();
-                                                }});
-
-                                                // Set up event listeners
-                                                document.getElementById('toggleFullscreen').addEventListener('click', toggleFullscreen);
-                                                document.getElementById('close').addEventListener('click', function() {{
-                                                    if (document.fullscreenElement) toggleFullscreen();
-                                                    window.close(); // Try to close window
-                                                    window.history.back(); // Fallback to going back
-                                                }});
-                                            </script>
-                                        </body>
+                                          <body style="margin:0; padding:0; background-color:#000; 
+                                                       display:flex; justify-content:center; align-items:center;">
+                                            <img src="data:image/png;base64,{encoded}"
+                                                 style="width:{img_width}px; height:{img_height}px; 
+                                                        image-rendering:pixelated;" />
+                                          </body>
                                         </html>
                                         """
-
-                                        # Open in a new browser tab
-                                        from tempfile import NamedTemporaryFile
-                                        import webbrowser
-
-                                        with NamedTemporaryFile(delete=False, suffix='.html') as tmp:
-                                            tmp.write(html.encode())
-                                            webbrowser.open('file://' + tmp.name, new=2)
-                                else:
-                                    st.error(f"Diagram file not found: {diagram_path}")
+                                        # render inline with scrollbars if needed
+                                        st.components.v1.html(
+                                            html_code,
+                                            height=min(img_height, 800),  # adjust max height as you like
+                                            width=min(img_width, 1200),
+                                            scrolling=True
+                                        )
 
                             except Exception as e:
-                                st.error(f"Error displaying diagram: {str(e)}")
-                                import traceback
-                                st.code(traceback.format_exc())
+                                st.error(f"Error displaying diagram: {e}")
 
-                        # Display framework and architecture
-                        if metadata.get('framework') or metadata.get('architecture'):
+                        # Technical Information
+                        if meta.get("framework") or meta.get("architecture"):
                             st.subheader("Technical Information")
-                            tech_cols = st.columns(2)
-                            with tech_cols[0]:
+                            a1, a2 = st.columns(2)
+                            with a1:
                                 st.write("**Framework:**")
-                                framework = metadata.get('framework', {})
-                                if isinstance(framework, dict):
-                                    st.write(f"{framework.get('name', 'N/A')} {framework.get('version', '')}")
+                                fw = meta.get("framework", {})
+                                if isinstance(fw, dict):
+                                    st.write(f"{fw.get('name', 'N/A')} {fw.get('version', '')}")
                                 else:
-                                    st.write(str(framework))
-                            with tech_cols[1]:
+                                    st.write(fw)
+                            with a2:
                                 st.write("**Architecture:**")
-                                arch = metadata.get('architecture', {})
+                                arch = meta.get("architecture", {})
                                 if isinstance(arch, dict):
-                                    st.write(f"{arch.get('type', 'N/A')}")
+                                    st.write(arch.get("type", "N/A"))
                                 else:
-                                    st.write(str(arch))
+                                    st.write(arch)
 
-                        # Display dataset and training info
-                        if metadata.get('dataset') or metadata.get('training_config'):
+                        # Training Information
+                        if meta.get("dataset") or meta.get("training_config"):
                             st.subheader("Training Information")
-                            dataset = metadata.get('dataset', {})
-                            if isinstance(dataset, dict):
-                                st.write(f"**Dataset:** {dataset.get('name', 'N/A')}")
-
-                            training = metadata.get('training_config', {})
-                            if isinstance(training, dict):
-                                train_cols = st.columns(4)
-                                with train_cols[0]:
-                                    st.metric("Batch Size", training.get('batch_size', 'N/A'))
-                                with train_cols[1]:
-                                    st.metric("Learning Rate", training.get('learning_rate', 'N/A'))
-                                with train_cols[2]:
-                                    st.metric("Optimizer", training.get('optimizer', 'N/A'))
-                                with train_cols[3]:
-                                    st.metric("Epochs", training.get('epochs', 'N/A'))
+                            ds = meta.get("dataset", {})
+                            if isinstance(ds, dict):
+                                st.write(f"**Dataset:** {ds.get('name', 'N/A')}")
+                            tc = meta.get("training_config", {})
+                            if isinstance(tc, dict):
+                                tcols = st.columns(4)
+                                metrics = [
+                                    ("Batch Size", "batch_size"),
+                                    ("Learning Rate", "learning_rate"),
+                                    ("Optimizer", "optimizer"),
+                                    ("Epochs", "epochs")
+                                ]
+                                for col, (label, key) in zip(tcols, metrics):
+                                    col.metric(label, tc.get(key, "N/A"))
 
         # [Rest of the method remains unchanged]
         elif t == "image_search":
