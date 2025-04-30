@@ -75,6 +75,7 @@ Each piece of metadata is stored as a document in a dedicated vector collection:
 | `model_descriptions`     | LLM-generated text summaries       | Concise explanation of each code chunk |
 | `model_ast_summaries`    | Model AST digest summaries         | Concise explanation of code            |
 | `model_images_folder`    | Folders to store generated images  | Folder in /a/b/c format                |
+| `model_diagram_path`     | Folders to store component diagram | Folder in /a/b/c format                |
 | `model_scripts_chunks`   | Code snippets and AST sections     | Actual Python source segments          |
 
 ---
