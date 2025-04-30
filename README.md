@@ -250,19 +250,15 @@ Requirements include:
 
 ### Usage
 
-Run batch model script processing:
+#### Query (Streamlit UI)
+
+Run below command:
 
 ```bash
-python run_model_processor.py --directory ./models
+streamlit run {working directory}/streamlit_main.py
 ```
 
-This will:
-
-- Traverse all supported model scripts
-- Parse and chunk using AST
-- Extract structured metadata via LLM
-- Store into multiple vector collections in Chroma
-- Generate Colab notebooks if configured
+This will start Streamlit UI for query models, list available models, and list available generated images.
 
 ---
 
