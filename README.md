@@ -1,370 +1,194 @@
-## Model Insight RAG System
+# Model Insight RAG System
 
-### Overview
-
-This system enables structured understanding, indexing, and retrieval of machine learning model code and metadata. It combines static analysis, LLM-based summarization, vector embeddings, and Google Colab automation to support advanced retrieval-augmented workflows.
+A comprehensive framework for understanding, indexing, and retrieving machine learning models through advanced code analysis and retrieval-augmented generation.
 
 [DEMO](https://github.com/ynyeh0221/model-insight-rag/blob/main/DEMO.md)
 
-### Features
+## Overview
 
-- Script processing and code chunking via AST
-- LLM-based metadata extraction and summarization
-- Schema validation and multi-collection vector indexing
-- Support for querying across different embedding spaces (multi-vector support)
-- Remote notebook generation and execution via Google Colab API
-- Modular access control and metadata schemas
+The Model Insight RAG System is a specialized retrieval-augmented generation platform designed to help ML engineers, researchers, and teams manage complex model repositories. It combines deep code understanding, multi-modal search, and LLM-powered analysis to transform raw model code into structured, searchable knowledge.
 
----
+## Key Features
 
-### Core Components
+### Intelligent Model Processing
 
-#### ScriptProcessorRunner
+- **AST-Powered Analysis**: Parses Python code using Abstract Syntax Tree analysis to extract model components, layers, and architecture details
+- **LLM-Enhanced Metadata Extraction**: Combines static analysis with LLM capabilities to identify frameworks, architectures, datasets, and training configurations
+- **Multi-Collection Vector Database**: Separates model metadata into specialized collections with appropriate embedding spaces
+- **Auto-Generated Model Visualizations**: Creates component diagrams showing model architecture and layer connections
 
-Processes entire directories of model-related files. For each file:
+### Advanced Search Capabilities
 
-- Verifies file type and structure
-- Parses code using `LLMBasedCodeParser`
-- Extracts both metadata and code chunks
-- Validates documents using schema definitions
-- Embeds and stores both code and metadata in separate Chroma collections
+- **Multi-Stage Query Processing**:
+  - Query clarity checking and improvement
+  - Comparison query detection and splitting
+  - Named entity recognition for technical ML concepts
+  - Multi-vector search across specialized collections
+  - Contextual reranking of search results
+- **Cross-Modal Search**: Find models by text query or image similarity
+- **Semantic Understanding**: Understands technical concepts in ML code (e.g., "transformer with self-attention")
 
-#### LLMBasedCodeParser
+### Rich User Interfaces
 
-Parses `.py` or `.ipynb` files by:
+- **Interactive CLI**: Command-line interface for model queries and administration
+- **Streamlit Web UI**: User-friendly interface for exploring models and visualizing results
+- **Automated Notebook Generation**: Convert model code to executable notebooks
 
-1. Extracting code structure using Python's AST (classes, functions, variables)
-2. Summarizing with an LLM (e.g., GPT) to generate structured metadata including:
-   - Description of model purpose
-   - Framework (name and version)
-   - Architecture type
-   - Dataset used
-   - Training configuration (e.g., batch size, learning rate)
+### Enterprise-Ready Features
 
-All metadata is normalized and can be extended or validated against versioned schemas.
+- **Fine-Grained Access Control**: User and group-level permissions for model access
+- **Performance Optimization**: Smart reranking and distance normalization
+- **Batch Processing**: Efficiently process entire model repositories
+- **Multi-Modal Support**: Handle both model code and generated images
 
-#### Image Embedding & Similarity Search
+## Architecture
 
-The system supports multimodal retrieval by embedding and indexing model-generated or related images. This enables advanced search workflows such as:
+The system follows a modular design with clear separation of concerns:
 
-- **Text-to-Image Search**: Find model outputs or visuals that best match a natural language query.
-- **Image-to-Image Search**: Discover visually similar outputs using image embeddings.
-
-##### Embedding Pipeline
-
-The `ImageEmbedder` module utilizes [OpenCLIP](https://github.com/mlfoundations/open_clip) to compute embeddings for images found in configured directories or generated during model execution. These embeddings are stored in the `model_images_folder` Chroma collection.
-
-- Extracts `.png`, `.jpg`, `.jpeg` files
-- Generates embeddings using CLIP’s vision encoder
-- Associates metadata like `source_model`, `filepath`, `generation_params`
-
----
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│  User Interface │     │  Query Engine   │     │ Vector Database │
+│  - CLI          │────▶│  - Parser       │────▶│  - ChromaDB     │
+│  - Streamlit    │     │  - Dispatcher   │     │  - Collections  │
+└─────────────────┘     │  - Rerankers    │     └─────────────────┘
+                        └─────────────────┘              │
+                                │                        │
+                                ▼                        ▼
+                        ┌─────────────────┐     ┌─────────────────┐
+                        │  Core Logic     │     │ Content Analysis│
+                        │  - RAG System   │────▶│  - Code Parser  │
+                        │  - Access Ctrl  │     │  - AST Generator│
+                        └─────────────────┘     │  - Image Process│
+                                                └─────────────────┘
+```
 
 ### Data Model
 
-Each piece of metadata is stored as a document in a dedicated vector collection:
+Each model is decomposed into a rich set of metadata stored in dedicated collections per the schema definitions:
 
-| Collection               | Purpose                            | Example Metadata                       |
-|--------------------------|------------------------------------|----------------------------------------|
-| `model_file`             | File-level attributes              | Path, size, creation/modification dates|
-| `model_date`             | Timestamp-based indexing           | Month/year created, last modified      |
-| `model_frameworks`       | Framework metadata                 | `{"name": "PyTorch", "version": "2.0"}`|
-| `model_architectures`    | Model type and structure           | `{"type": "Transformer"}`              |
-| `model_datasets`         | Dataset references                 | `{"name": "CIFAR-10"}`                 |
-| `model_training_configs` | Training configuration             | Optimizer, epochs, batch size, etc.    |
-| `model_descriptions`     | LLM-generated text summaries       | Concise explanation of each code chunk |
-| `model_ast_summaries`    | Model AST digest summaries         | Concise explanation of code            |
-| `model_images_folder`    | Folders to store generated images  | Folder in /a/b/c format                |
-| `model_diagram_path`     | Folders to store component diagram | Folder in /a/b/c format                |
-| `model_scripts_chunks`   | Code snippets and AST sections     | Actual Python source segments          |
+| Collection | Purpose | Metadata Structure |
+|------------|---------|-------------------|
+| `model_file` | File-level attributes | `model_id`, `file`: {`size_bytes`, `creation_date`, `last_modified_date`, `file_extension`, `absolute_path`} |
+| `model_date` | Timestamp information | `model_id`, `created_at`, `created_month`, `created_year`, `last_modified_month`, `last_modified_year` |
+| `model_git` | Version control info | `model_id`, `git`: {`creation_date`, `last_modified_date`, `commit_count`} |
+| `model_frameworks` | Framework details | `model_id`, `framework`: {`name`, `version`} |
+| `model_datasets` | Dataset references | `model_id`, `dataset`: {`name`} |
+| `model_training_configs` | Training parameters | `model_id`, `training_config`: {`batch_size`, `learning_rate`, `optimizer`, `epochs`, `hardware_used`} |
+| `model_architectures` | Model type and structure | `model_id`, `architecture`: {`type`, `reason`} |
+| `model_descriptions` | Text summaries | `model_id`, `description`, `total_chunks`, `offset` |
+| `model_ast_summaries` | AST analysis results | `model_id`, `ast_summary`: {`ast_summary`} |
+| `model_scripts_chunks` | Code segments | `model_id`, `chunk_id`, `total_chunks`, `metadata_doc_id`, `offset`, `type` |
+| `model_images_folder` | Image storage location | `model_id`, `images_folder`: {`name`} |
+| `model_diagram_path` | Diagram storage location | `model_id`, `diagram_path`: {`name`} |
+| `generated_images` | Model outputs | `model_id`, `epoch`, `description`, `image_content`: {`subject_type`, `style`, `tags`, etc.}, `image_path`, `thumbnail_path`, `format`, `mode`, `size`, `exif`, `dates` |
 
----
+All collections include `access_control` attributes for permission management.
 
-### Multi-Vector Support
-
-Each Chroma collection supports its own embedding model and schema. This allows different types of information to be indexed, retrieved, and filtered independently.
-
-- `model_descriptions` is optimized for natural language search
-- `model_frameworks` supports faceted filtering on version and name
-- `model_scripts_chunks` enables deep semantic search over model code
-- Queries can be executed across any vector space with optional structured filters
-
-Example:
-
-```python
-results = await chroma_manager.search(
-    query="transformer trained on CIFAR-10",
-    collection_name="model_descriptions",
-    where={"framework.name": {"$eq": "PyTorch"}}
-)
-```
-
----
-
-### ColabAPIClient
-
-Handles notebook lifecycle management with Google APIs.
-
-- Authenticates with service account or OAuth2
-- Creates and uploads Jupyter notebooks from extracted code
-- Launches remote execution with:
-  - Custom parameters
-  - GPU/TPU support
-  - Execution monitoring
-  - Result downloading and inspection
-
-Example:
-
-```python
-nb = codegen.generate_notebook_from_chunks(chunks)
-client = ColabAPIClient()
-file_id = client.create_notebook(nb, "example_model.ipynb")
-execution_id = client.execute_notebook(file_id, accelerator_type="GPU")
-status = client.wait_for_execution(execution_id)
-```
-
----
-
-### Access Control
-
-Document-level access control is enforced at the time of ingestion:
-
-- Documents include access metadata derived from `access_control.get_document_permissions`
-- These access rights are respected during query filtering and sharing
-- Supports user-level, group-level, or public visibility
-
----
-
-### Query Workflow
-
-When a user submits a query through the Streamlit interface or the CLI interface, the system executes a structured, multi-stage process to generate a final response:
-
-#### 1. **Query Clarity Evaluation and Enhancement**
-- The raw query is first processed by the `check_query_clarity` component.
-- This component uses an LLM to determine if the query is clear. If not, it suggests improved versions for the user to choose from, or allows the user to input a revised query.
-
-#### 2. **Detection of Comparison Queries**
-- The query is analyzed by the `detect_comparison_query` component.
-- If it is identified as a comparison query (e.g., *"Compare differences in architecture between my diffusion models on CIFAR-10 and MNIST"*), the system decomposes it into multiple sub-queries (e.g., *"Fetch architecture of my diffusion model on CIFAR-10"*, *"Fetch architecture of my diffusion model on MNIST"*).
-- Each sub-query is then independently passed through the retrieval pipeline (Steps 3–5), and their results are later merged in Step 7 to construct the final comparison response.
-
-#### 3. **Query Parsing**
-- The `query_parser` component extracts structured information from the query:
-  - Uses an LLM to identify user intent (e.g., metadata retrieval, image search, notebook generation).
-  - Extracts named entities (e.g., architecture, dataset, training configuration) for use in downstream queries.
-  - Applies rule-based filters to extract exact parameters (e.g., model ID, creation date, modification date).
-
-#### 4. **Search Dispatching**
-- The parsed query is forwarded to the `search_dispatcher`, which routes it to appropriate vector collections:
-  - `model_descriptions` for natural language summaries
-  - `model_frameworks`, `model_architectures`, and `model_training_configs` for structured filtering
-- The dispatcher supports hybrid vector + metadata queries and returns a ranked set of relevant matches.
-
-#### 5. **Reranking of Search Results**
-- Retrieved results are reranked using a `reranker` (e.g., BGE-Reranker or CrossEncoder).
-- Ranking scores are refined based on textual similarity and contextual relevance to the original query.
-
-#### 6. **LLM Response Generation (Non-Comparison Queries)**
-- For standard (non-comparison) queries, the `llm_interface` (e.g., Deepseek, Qwen) generates a response using a structured prompt.
-- The response may include:
-  - Step-by-step reasoning from the LLM
-  - Direct answer to the user's query
-  - Tabulated search results
-  - Detailed information, such as model component diagrams
-  - Metadata-based recommendations
-
-#### 7. **LLM Response Generation (Comparison Queries)**
-- For comparison queries, the `llm_interface` synthesizes results from all sub-queries to generate a unified response.
-- The response may include:
-  - LLM reasoning based on the combined sub-query results
-  - A comparative answer to the user’s original question
-  - Merged result tables across all sub-queries
-  - Detailed breakdowns, including model component diagrams
-  - Metadata-driven recommendations
-
----
-
-### Technology Stack
-
-| Category          | Tools / Libraries |
-|-------------------|------------------|
-| Language          | Python 3.9+, JavaScript (React) |
-| Backend/Frontend  | Streamlit |
-| Vector Search     | ChromaDB, FAISS, SQLite |
-| Embeddings        | SentenceTransformers, BGE-M3, OpenCLIP |
-| LLM Integration   | LangChain, Deepseek, Qwen |
-| Image Processing  | Pillow, OpenCLIP |
-| Notebooks         | nbformat, Papermill, Google Colab API |
-| Visualization     | Matplotlib, Plotly |
-| Monitoring        | Prometheus, Grafana, OpenTelemetry |
-| Logging           | Elasticsearch, Kibana |
-| Access Control    | JWT, Role-Based Access Control (RBAC) |
-
----
-
-### Example
-
-```bash
-> query transformer with CIFAR-10
-```
-
-The system:
-
-- Parses it as an information retrieval query
-- Searches in `model_descriptions` and filters by dataset
-- Reranks results based on relevance to “transformer”
-- Selects the `information_retrieval` template
-- Builds a prompt like:
-
-```txt
-Query: transformer with CIFAR-10
-
-Top Results:
-1. Model: ViT_CIFAR10
-   - Framework: PyTorch
-   - Dataset: CIFAR-10
-   - Arch: Vision Transformer
-   - Training: Adam, batch=32, lr=3e-4
-2. Model: TransformerBaseline
-   - Framework: TensorFlow
-   - Dataset: CIFAR-10
-   - Arch: Transformer
-
-Please summarize key differences and trends across these models.
-```
-
-LLM returns:
-
-> "Two transformer-based models were found using CIFAR-10. The first uses PyTorch and ViT architecture with Adam optimizer and a learning rate of 3e-4. The second uses a TensorFlow baseline. Most models prefer PyTorch for transformer training on this dataset."
-
----
+## Getting Started
 
 ### Installation
 
 ```bash
+# Clone the repository
+git clone https://github.com/yourusername/model-insight-rag.git
+cd model-insight-rag
+
+# Install dependencies
 pip install -r requirements.txt
 ```
 
-Requirements include:
-
-- `chromadb`, `sentence-transformers`, `nbformat`
-- `openai`, `gitpython`, `google-auth`, `google-api-python-client`
-- `torch`, `Pillow`, `jsonschema`, etc.
-
----
-
 ### Usage
 
-#### Query
-##### Streamlit UI
-
-Run below command:
+#### Web Interface
 
 ```bash
-streamlit run {working directory}/src/streamlit_main.py
+streamlit run src/streamlit_main.py
 ```
 
-This will start Streamlit UI for query models, list available models, list available generated images, and convert target model to colab notebook.
-
-##### CLI
-
-Run below command:
+#### Command Line Interface
 
 ```bash
-python {working directory}/src/main.py start-cli
+python src/main.py start-cli
 ```
 
-This will start CLI for query models, list available models, list available generated images, and convert target model to colab notebook.
-
-#### Model acript processing
-
-##### CLI
-
-###### Single
-
-Run below command:
+#### Process Model Scripts
 
 ```bash
-python {working directory}/src/main.py process-single-script {path of target model script}
+# Process a single script
+python src/main.py process-single-script path/to/model.py
+
+# Process a directory of scripts
+python src/main.py process-scripts path/to/models/
 ```
 
-###### Batch
-
-Run below command:
+#### Process Generated Images
 
 ```bash
-python {working directory}/src/main.py process-scripts {directory of model scripts}
+# Process a single image
+python src/main.py process-single-image path/to/image.png
+
+# Process a directory of images
+python src/main.py process-images path/to/image/directory/
 ```
 
-#### Generated image processing
+## Deep Dive: Query Processing
 
-##### CLI
+When a user submits a query, the system performs:
 
-###### Single
+1. **Query Clarification**: Checks if the query is clear and suggests improvements if needed
+2. **Intent Classification**: Determines if this is a retrieval, comparison, or notebook generation query
+3. **Named Entity Recognition**: Extracts ML-specific entities (architectures, datasets, parameters)
+4. **Multi-Collection Search**: Searches across relevant vector spaces based on query intent
+5. **Result Reranking**: Applies contextual reranking to improve relevance
+6. **Response Generation**: Formats results based on query type and available information
 
-Run below command:
+### Example Query Processing
 
-```bash
-python {working directory}/src/main.py process-single-image {path of target generated image file}
+For a query like "Compare CNN models trained on CIFAR-10 vs. MNIST":
+
+1. System detects a comparison query and splits into sub-queries:
+   - "Find CNN models trained on CIFAR-10"
+   - "Find CNN models trained on MNIST"
+2. Each sub-query retrieves relevant models
+3. System reranks results for each collection
+4. LLM synthesizes comparison highlighting key differences in architecture, performance, etc.
+
+## Technical Requirements
+
+- **Python**: 3.9+
+- **Core Dependencies**:
+  - Vector Database: `chromadb`
+  - Embeddings: `sentence-transformers`, `open-clip`
+  - LLM Integration: `langchain`
+  - UI: `streamlit`
+  - Code Analysis: Standard library `ast`
+  - Visualization: `graphviz`, `matplotlib`
+
+## Advanced Configuration
+
+The system can be customized through configuration files:
+
+- **Vector Collections**: Configure embedding models and schemas
+- **Access Control**: Set up user groups and permissions
+- **LLM Models**: Configure which models to use for different analysis tasks
+- **Rerankers**: Select and tune reranking strategies
+
+## Project Structure
+
 ```
-
-###### Batch
-
-Run below command:
-
-```bash
-python {working directory}/src/main.py process-images {directory of images generated by models}
-```
-
----
-
-### Folder Structure
-
-```bash
 src/
-├── api/                        # API and UI layer for user-facing query interface
-│
-├── cli/                        # Command-line tools for ingestion and querying
-│   ├── cli_response_utils/     # Helpers for formatting LLM output for CLI display
-│   ├── ingest_images.py        # CLI to ingest and embed image files
-│   ├── ingest_model_scripts.py # CLI to process and ingest model code files
-│   └── query_cli.py            # CLI interface for submitting queries and list all models/images
-│ 
-├── streamlit/                  # Streamlit interface for querying
-│   └── query_streamlit.py      # Streamlit interface for submitting queries and list all models/images
-│
-├── core/                       # Core system logic and orchestration
-│   ├── colab_generator/        # Modules to generate and manage Google Colab notebooks
-│
-│   ├── content_analyzer/       # Static + LLM-based analysis of code, images, and metadata
-│   │   ├── image/              # Image analyzers and CLIP-based embedding tools
-│   │   ├── metadata/           # Extractors and schema validators for metadata
-│   │   └── model_script/       # AST, summarizers, and LLM-based code parsers
-│
-│   ├── query_engine/           # Main RAG query logic and orchestration
-│   │   ├── handlers/           # Response templates, fallback logic, and flow controllers
-│   │   ├── llm_interface.py    # LLM interaction layer
-│   │   ├── query_analytics.py  # Query logging, usage stats, or intent distribution
-│   │   ├── query_intent.py     # Intent detection from user queries
-│   │   ├── query_parser.py     # Turns raw query into structured intent + filters
-│   │   ├── result_reranker.py  # Reranks raw retrieved results for contextual fit
-│   │   └── search_dispatcher.py# Dispatches to one or more vector DBs based on intent
-│
-│   ├── vector_db/              # Vector DB management and embedding orchestration
-│   │   └── notebook_generator.py # (Optional) auto-generates notebooks from stored code
-│
-│   └── rag_system.py           # Entry point for orchestrating end-to-end processing
-│
-├── main.py                     # Standalone cli entry point
-├── streamlit_main.py           # Standalone Streamlit UI entry point
-└── analytics.db                # Local usage logging or performance tracking DB
-
+├── api/                        # API layer
+├── cli/                        # Command-line interface
+├── streamlit/                  # Streamlit web UI 
+├── core/                       # Core system logic
+│   ├── content_analyzer/       # Code and image analysis
+│   ├── query_engine/           # Query processing pipeline
+│   ├── vector_db/              # Database management
+│   └── rag_system.py           # Main orchestration
+├── main.py                     # CLI entry point
+└── streamlit_main.py           # Web UI entry point
 ```
 
----
-
-### License
+## License
 
 [MIT License](https://github.com/ynyeh0221/model-insight-rag/blob/main/LICENSE)
-
----
