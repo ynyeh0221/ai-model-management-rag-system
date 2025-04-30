@@ -175,10 +175,10 @@ src/ (~5K LoC)
 ├── cli/                        # Command-line interface
 ├── streamlit/                  # Streamlit web UI 
 ├── core/                       # Core system logic
-│   ├── content_analyzer/       # Code and image analysis (~1.2K LoC)
-│   ├── query_engine/           # Query processing pipeline (~1.8K LoC)
-│   ├── vector_db/              # Database management (~800 LoC)
-│   └── rag_system.py           # Main orchestration (~500 LoC)
+│   ├── content_analyzer/       # Code and image analysis
+│   ├── query_engine/           # Query processing pipeline
+│   ├── vector_db/              # Database management
+│   └── rag_system.py           # Main orchestration
 ├── main.py                     # CLI entry point
 └── streamlit_main.py           # Web UI entry point
 ```
