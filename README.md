@@ -139,43 +139,47 @@ Document-level access control is enforced at the time of ingestion:
 
 When a user submits a query through the CLI interface (`UIRunner`), the system follows a structured multi-stage process to generate a final response:
 
-#### 1. **Query Parsing**
-- The raw query is processed by a `query_parser` component.
-- Extracts the user's intent (e.g., retrieval, comparison, summarization) and filters (e.g., timeframe, framework).
+#### 1. **Query Clarity Checking and Improving**
+- The raw query is processed by a `check_query_clarity` component.
+- Calls LLM to check if user's query is clear or can be improved. For latter case, suggests a set of improved queries for users to choose, or let user to enter new query.
+
+#### 2. **Comparison Query Detecting**
+- The query is processed by a `detect_comparison_query` component.
+- Calls LLM to split comparison query (e.g., `Can you please compare differences in architecture between my diffusion models on CIFAR-10 and MNIST?`) to a set of sub data-retrieval queries (e.g., [`Can you please fetch architecture of my diffusion model on CIFAR-10`, ``Can you please fetch architecture of my diffusion model on MNIST``]).
+
+#### 3. **Query Parsing**
+- The query is processed by a `query_parser` component.
+- Calls LLM to extract the user's intent (e.g., text/metadata retrieval, image search, notebook creation)
+- Calls LLM to extract NERs (e.g., architecture, dataset, train config) which will be used to construct queries for target tables.
+- Uses rule-based filters to parse parameters which requires exact values (e.g., model id, created month/year, last modified month/year).
   
-#### 2. **Search Dispatching**
+#### 4. **Search Dispatching**
 - The parsed query is sent to a `search_dispatcher`, which dispatches it to one or more vector collections:
   - `model_descriptions` for natural language summaries
   - `model_frameworks`, `model_architectures`, `model_training_configs` for structured filtering
 - The dispatcher supports hybrid vector+metadata queries and returns relevant matches.
 
-#### 3. **Reranking**
+#### 5. **Reranking**
 - Raw search results are reranked using a `reranker` (e.g., BGE-Reranker or CrossEncoder).
 - Scores are adjusted based on textual similarity and contextual relevance to the query.
 
-#### 4. **Template Selection**
-- A `template_manager` selects the appropriate response template based on query type:
-  - Retrieval: e.g., “Which models use Vision Transformers on CIFAR-10?”
-  - Aggregation: e.g., “What frameworks are most common for diffusion models?”
-  - Comparison: e.g., “Compare ModelA vs ModelB”
-  - General query fallback if no intent is confidently extracted
-
-#### 5. **Prompt Construction**
-- The selected template is rendered using:
-  - The original query
-  - Top-N reranked search results
-  - Parsed metadata (frameworks, datasets, configs, etc.)
-
-#### 6. **LLM Response Generation**
-- The `llm_interface` (e.g., OpenAI or other LLM provider) generates a final answer using the templated prompt.
+#### 6. **(Non-comparison) LLM Response Generation**
+- For non-comparison query detected in step 2, the `llm_interface` (e.g., Deepseek, Qwen or other LLM provider) generates a final answer using the templated prompt.
 - Responses can include:
-  - Summary tables
-  - Textual comparisons
+  - LLM thinking steps
+  - LLM response to user query
+  - Searched results table
+  - Details of searched results, including model component diagram
   - Recommendations based on metadata
-
-#### 7. **Fallback Strategy**
-- If template rendering fails, a backup prompt is constructed using raw results + query.
-- A fallback LLM call is made to ensure robustness.
+ 
+#### 7. **(Comparison) LLM Response Generation**
+- For comparison query detected in step 2, the `llm_interface` (e.g., Deepseek, Qwen or other LLM provider) generates a final answer using the templated prompt.
+- Responses can include:
+  - LLM thinking steps (made based on searched results of all sub data-retrieval queries)
+  - LLM response to user query (made based on searched results of all sub data-retrieval queries)
+  - Searched results table (merged from searched results of all sub data-retrieval queries)
+  - Details of searched results, including model component diagram
+  - Recommendations based on metadata
 
 ---
 
