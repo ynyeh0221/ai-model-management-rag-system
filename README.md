@@ -255,10 +255,22 @@ Requirements include:
 Run below command:
 
 ```bash
-streamlit run {working directory}/streamlit_main.py
+streamlit run {working directory}/src/streamlit_main.py
 ```
 
 This will start Streamlit UI for query models, list available models, and list available generated images.
+
+---
+
+#### Query (CLI)
+
+Run below command:
+
+```bash
+python {working directory}/src/main.py process-scripts start-cli
+```
+
+This will start CLI for query models, list available models, and list available generated images.
 
 ---
 
