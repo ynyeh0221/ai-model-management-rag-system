@@ -250,7 +250,8 @@ Requirements include:
 
 ### Usage
 
-#### Query (Streamlit UI)
+#### Query
+##### Streamlit UI
 
 Run below command:
 
@@ -258,11 +259,11 @@ Run below command:
 streamlit run {working directory}/src/streamlit_main.py
 ```
 
-This will start Streamlit UI for query models, list available models, and list available generated images.
+This will start Streamlit UI for query models, list available models, list available generated images, and convert target model to colab notebook.
 
 ---
 
-#### Query (CLI)
+##### CLI
 
 Run below command:
 
@@ -270,7 +271,7 @@ Run below command:
 python {working directory}/src/main.py process-scripts start-cli
 ```
 
-This will start CLI for query models, list available models, and list available generated images.
+This will start CLI for query models, list available models, list available generated images, and convert target model to colab notebook.
 
 ---
 
