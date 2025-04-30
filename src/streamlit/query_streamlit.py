@@ -695,7 +695,7 @@ def run_streamlit_app(components):
 
         # Advanced options
         st.header("Advanced Options")
-        st.checkbox("Enable Query Clarity Check", value=False, key="enable_clarity_check")
+        st.checkbox("Enable Query Clarity Check", value=True, key="enable_clarity_check")
         st.checkbox("Enable Comparison Detection", value=True, key="enable_comparison_detection")
 
         # Debug mode
