@@ -302,55 +302,69 @@ class RAGSystem:
             }
         else:
             # Regular search processing
-            reranked_results = self._process_search_results(
+            all_reranked = self._process_search_results(
                 search_results, reranker, parsed_query, query_text, max_to_return=max_output_counts, rerank_threshold=0
             )
 
-            # Remove content field as it's not needed for display
-            reranked_results = self._remove_field(reranked_results, "content")
+            pages_info = []
+            page_id = 0
+            def process_paged_results(all_reranked, page_id: int, page_size: int, max_pages_to_fetch: int):
 
-            # Build results text
-            results_text = self._build_results_text(reranked_results)
+                print(f"Processing page {page_id}")
 
-            # Initialize result structure
-            result = {
-                "type": "text_search" if generate_llm_response else "retrieval_only",
-                "query": query_text,
-                "parsed_query": parsed_query,
-                "search_results": reranked_results,
-                "results_text": results_text  # Include formatted results text
-            }
+                pages_info.append({})
 
-            # Generate LLM response if requested
-            if generate_llm_response:
-                system_prompt = QueryPathPromptManager.get_system_prompt_for_regular_response()
-                result["meta_prompt"] = system_prompt
+                current_page = all_reranked[page_id * page_size:(page_id + 1) * page_size]
 
-                # Build user prompt
-                user_prompt = f"\nUser query:\n{query_text}\n"
-                user_prompt += f"Search results:\n{results_text}"
+                # Build results text for current page
+                results_text = self._build_results_text(current_page, page_id == len(all_reranked) - 1)
+                print(f"results_text: {results_text}")
 
-                # Generate final response
-                self._update_status("generating_response")
-                final_response = llm_interface.generate_structured_response(
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    temperature=0.25,
-                    max_tokens=32000
-                )
+                # Initialize result structure
+                pages_info[-1] = {
+                    "search_results": current_page,
+                    "has_next_page": page_id == len(all_reranked) - 1,
+                }
 
-                # Process result
-                if isinstance(final_response, dict) and 'content' in final_response:
-                    content = final_response['content']
-                    content = self.remove_thinking_sections(content)
+                # Generate LLM response if requested
+                if generate_llm_response:
+                    system_prompt = QueryPathPromptManager.get_system_prompt_for_regular_response()
+
+                    # Build user prompt
+                    user_prompt = f"\nUser query:\n{query_text}\n"
+                    user_prompt += f"Search results:\n{results_text}"
+
+                    # Generate final response
+                    self._update_status("generating_response")
+                    final_response = llm_interface.generate_structured_response(
+                        system_prompt=system_prompt,
+                        user_prompt=user_prompt,
+                        temperature=0.25,
+                        max_tokens=32000
+                    )
+
+                    # Process result
+                    if isinstance(final_response, dict) and 'content' in final_response:
+                        content = final_response['content']
+                        content = self.remove_thinking_sections(content)
+                    else:
+                        content = str(final_response)
+                        content = self.remove_thinking_sections(content)
+
+                    pages_info[-1]["page_summary"] = content
+
+                    if "<need_more_results>" in content and max_pages_to_fetch > 0:
+                        process_paged_results(all_reranked, page_id + 1, page_size, max_pages_to_fetch - 1)
                 else:
-                    content = str(final_response)
-                    content = self.remove_thinking_sections(content)
+                    # Skip LLM response generation
+                    pages_info[-1]["page_summary"] = ""
 
-                result["final_response"] = content
-            else:
-                # Skip LLM response generation
-                result["final_response"] = ""
+            process_paged_results(all_reranked, 0, 3, 3 if generate_llm_response else 2)
+
+            result = {"type": "text_search" if generate_llm_response else "retrieval_only", "query": query_text,
+                      "parsed_query": parsed_query,
+                      "search_results": [item for page_info in pages_info for item in page_info["search_results"]],
+                      "checked_pages": page_id + 1, "final_response": pages_info[-1]["page_summary"]}
 
         if generate_llm_response:
             self._update_status("completed")
@@ -530,21 +544,22 @@ class RAGSystem:
         # Extract items from search results
         items_to_rerank = search_results['items']
 
-        # Loop through each item and add content field
-        for item in items_to_rerank:
-            item['content'] = ("Model description: " + item.get('merged_description', '') + "\n" +
-                               "architecture is: " + item.get('metadata', {}).get('architecture', '') + "\n" +
-                               "dataset is: " + item.get('metadata', {}).get('dataset', {})
-                               )
-
         if reranker and items_to_rerank:
             self._log(f"Sending {len(items_to_rerank)} items to reranker")
-            return reranker.rerank(
+            # Loop through each item and add content field
+            for item in items_to_rerank:
+                item['content'] = ("Model description: " + item.get('merged_description', '') + "\n" +
+                                   "architecture is: " + item.get('metadata', {}).get('architecture', '') + "\n" +
+                                   "dataset is: " + item.get('metadata', {}).get('dataset', {})
+                                   )
+            all_ranked = reranker.rerank(
                 query=parsed_query.get("processed_query", query_text),
                 results=items_to_rerank,
-                top_k=max_to_return,
+                top_k=len(items_to_rerank),
                 threshold=rerank_threshold
             )
+            all_ranked = self._remove_field(all_ranked, "content")
+            return all_ranked
         else:
             return items_to_rerank
 
@@ -556,7 +571,7 @@ class RAGSystem:
         return [{k: v for k, v in item.items() if k != field_to_remove} for item in dict_list]
 
     @staticmethod
-    def _build_results_text(reranked_results):
+    def _build_results_text(reranked_results, has_next_page: bool):
         """Build structured text of search results"""
         import json
 
@@ -583,6 +598,7 @@ class RAGSystem:
 
             # Extract fields with fallbacks
             model_id = model.get('model_id') or model.get('id') or 'missing'
+            rerank_score = model.get('rerank_score', 'N/A')
             file_md = md.get('file', {})
             fw = md.get('framework', {})
             arch = md.get('architecture', {})
@@ -592,6 +608,7 @@ class RAGSystem:
             # Compose block
             results_text += f"Model #{idx}:\n"
             results_text += f"- Model ID: {model_id}\n"
+            results_text += f"- Rerank Score: {rerank_score}\n"
             results_text += f"- File Size: {file_md.get('size_bytes', 'missing')}\n"
             results_text += f"- Created On: {file_md.get('creation_date', 'missing')}\n"
             results_text += f"- Last Modified: {file_md.get('last_modified_date', 'missing')}\n"
@@ -603,6 +620,8 @@ class RAGSystem:
                 for field in ['batch_size', 'learning_rate', 'optimizer', 'epochs', 'hardware_used']:
                     results_text += f"  - {field.replace('_', ' ').title()}: {training.get(field, 'missing')}\n"
             results_text += f"- Description: {description}\n\n"
+
+            results_text += f"Has More Models: {has_next_page}\n"
 
         return results_text
 
