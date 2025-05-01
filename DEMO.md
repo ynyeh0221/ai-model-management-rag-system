@@ -186,6 +186,12 @@ Sample 10: [Please find models not using RNN, created in March 2025.](https://gi
 
 ![](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/screenshot/streamlit%20query%206.png)
 
+It supports checking clarity of user's query and suggest improved queries:
+
+![](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/screenshot/streamlit%20query%20clarity%20check%201.png)
+
+![](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/screenshot/streamlit%20query%20clarity%20check%202.png)
+
 ##### List-models
 ![](https://github.com/ynyeh0221/model-insight-rag/blob/main/demo/screenshot/streamlit%20list-models.png)
 
