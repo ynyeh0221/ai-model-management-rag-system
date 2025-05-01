@@ -1,10 +1,10 @@
-# Model-Insight-RAG 
+# Model-Insight-RAG: An Agentic Retrieval-Augmented Generation System
 
 ## Overview
 
-A comprehensive framework for understanding, indexing, and retrieving machine learning models through advanced code analysis and retrieval-augmented generation.
+A comprehensive framework for understanding, indexing, and retrieving machine learning models through advanced code analysis and agentic retrieval-augmented generation.
 
-For ML engineers drowning in disparate model folders, Model-Insight-RAG transforms raw code into structured, searchable knowledge with powerful semantic understanding.
+For ML engineers drowning in disparate model folders, Model-Insight-RAG transforms raw code into structured, searchable knowledge with powerful semantic understanding. Unlike traditional RAG systems, our agentic approach autonomously makes decisions about information gathering, result evaluation, and response generation to deliver comprehensive answers with minimal overhead.
 
 [DEMO](https://github.com/ynyeh0221/model-insight-rag/blob/main/DEMO.md)
 
@@ -28,6 +28,16 @@ python src/main.py start-cli
 ## Key Features
 
 <details>
+<summary><strong>Agentic Capabilities</strong> (click to expand)</summary>
+
+- **Autonomous Decision-Making**: System independently evaluates result quality and decides when more information is needed
+- **Self-Directed Information Gathering**: Adaptively retrieves additional results based on analysis of current information
+- **Goal-Oriented Behavior**: Pursues comprehensive answers by continuously evaluating if user queries are fully addressed
+- **Multi-Step Planning**: Orchestrates complex workflows from query understanding to response synthesis
+- **Tool Utilization**: Strategically employs specialized components as tools to accomplish different aspects of information retrieval and processing
+</details>
+
+<details>
 <summary><strong>Intelligent Model Processing</strong> (click to expand)</summary>
 
 - **AST-Powered Analysis**: Parses Python code using Abstract Syntax Tree analysis to extract model components, layers, and architecture details
@@ -47,6 +57,12 @@ python src/main.py start-cli
   - Contextual reranking of search results
 - **Cross-Modal Search**: Find models by text query or image similarity
 - **Semantic Understanding**: Understands technical concepts in ML code (e.g., "transformer with self-attention")
+- **Adaptive Results Pagination**: The system intelligently determines if more results are needed:
+  - Analyzes if current results are sufficient to answer the query
+  - LLM determines if additional results would provide better context by detecting the "<need_more_results>" marker
+  - Optimizes resource usage by only fetching additional pages when necessary
+  - Dynamically adjusts based on similarity distance between records in current results
+  - Balances between comprehensive answers and system efficiency with configurable page sizes
 </details>
 
 <details>
@@ -87,6 +103,21 @@ The system follows a modular design with clear separation of concerns:
                                                 └─────────────────┘
 ```
 
+## Agentic RAG System Overview
+
+Our agentic RAG approach transcends traditional retrieval-augmented generation by introducing autonomous decision-making throughout the information retrieval and synthesis process:
+
+1. **Query Understanding Agent**: Analyzes queries for clarity, detects comparison requests, and improves ambiguous questions
+2. **Information Retrieval Agent**: Dynamically determines what information to retrieve and when more data is needed
+3. **Content Evaluation Agent**: Assesses retrieved information for relevance, completeness, and whether it satisfies the query intent
+4. **Response Generation Agent**: Synthesizes comprehensive answers with appropriate detail level and supporting information
+
+This agentic architecture enables the system to:
+- Adapt to query complexity by retrieving just enough information (not too little, not too much)
+- Make autonomous decisions about when to fetch additional results
+- Detect and handle comparison queries by splitting into sub-queries and synthesizing results
+- Balance between information comprehensiveness and response conciseness
+
 ### Data model
 
 The system uses specialized collections for different types of model metadata.
@@ -125,7 +156,7 @@ The system uses specialized collections for different types of model metadata.
 6. **Vector storage**: Store embeddings and metadata
 7. **Association**: Link images to source models
 
-### Query processing pipeline
+### Agentic query processing pipeline
 
 1. **Query preprocessing**: Assess clarity, improve ambiguous queries
 2. **Query parsing**: Classify intent, extract entities and parameters
@@ -133,6 +164,12 @@ The system uses specialized collections for different types of model metadata.
 4. **Result processing**: Rerank, deduplicate, enrich and order results
 5. **Response generation**: Synthesize coherent responses with visuals
 6. **Comparison handling**: Process model comparison queries
+7. **Adaptive result fetching**: 
+   - Initial retrieval with a default page size (typically 3 items)
+   - LLM analyzes current results to determine if they sufficiently answer the query
+   - If more context needed (indicated by "<need_more_results>" marker), system autonomously fetches the next page
+   - Process continues until either sufficient information is gathered or max pages reached
+   - Optimizes between comprehensive answers and system efficiency
 
 ## Usage
 
