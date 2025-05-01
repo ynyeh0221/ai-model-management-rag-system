@@ -414,36 +414,56 @@ class StreamlitInterface:
             query = r.get("query", "")
             clarity_result = r.get("clarity_result", {})
 
+            # Initialize clarification state if not present
+            if "clarification_state" not in st.session_state:
+                st.session_state.clarification_state = {
+                    "query": query,
+                    "improved_query": clarity_result.get('improved_query', query),
+                    "suggestions": clarity_result.get('suggestions', []),
+                    "reason": clarity_result.get('reason', 'No reason provided'),
+                    "unique_id": str(time.time())  # Create a timestamp-based unique ID
+                }
+
+            # Get state from session
+            cstate = st.session_state.clarification_state
+
+            unique_id = cstate["unique_id"]
             st.warning("Your query could be clearer")
-            st.write(f"**Reason**: {clarity_result.get('reason', 'No reason provided')}")
-
-            improved_query = clarity_result.get('improved_query', query)
-            suggestions = clarity_result.get('suggestions', [])
-
+            st.write(f"**Reason**: {cstate['reason']}")
             st.write("**Suggestions**:")
-            suggestion_options = [f"Improved query: {improved_query}"] + suggestions + [f"Use original query: {query}",
-                                                                                        "Enter a new query"]
 
-            # Add a unique key to prevent duplicate element ID error
-            choice = st.selectbox("Select an option:", suggestion_options, key=f"clarification_options_{id(r)}")
+            suggestion_options = [f"Improved query: {cstate['improved_query']}"] + cstate['suggestions'] + [
+                f"Use original query: {cstate['query']}", "Enter a new query"
+            ]
+
+            # Use the stable unique_id for all widget keys
+            choice = st.selectbox("Select an option:", suggestion_options, key=f"clarification_options_{unique_id}")
 
             # Create a text area for new query input that's shown conditionally
             new_query_input = ""
             if choice == "Enter a new query":
-                new_query_input = st.text_area("Enter new query:", key=f"new_query_input_{id(r)}", height=100)
+                new_query_input = st.text_area("Enter new query:", key=f"new_query_input_{unique_id}", height=100)
 
-            if st.button("Use this query", key=f"use_query_button_{id(r)}"):
+            if st.button("Use this query", key=f"use_query_button_{unique_id}"):
+                # Clear clarification state when a query is selected
                 if choice == suggestion_options[0]:  # Improved query
-                    new_query = improved_query
+                    new_query = cstate['improved_query']
+
                 elif choice == suggestion_options[-2]:  # Original query
-                    new_query = query
+                    new_query = cstate['query']
+
                 elif choice == suggestion_options[-1]:  # New query
-                    new_query = new_query_input  # Use the value from the conditional text area
+                    new_query = new_query_input
+
                 else:
                     # One of the suggestions
-                    new_query = suggestions[suggestion_options.index(choice) - 1]
+                    new_query = cstate['suggestions'][suggestion_options.index(choice) - 1]
 
                 if new_query:
+                    # Clear the clarification state to prevent re-displaying
+                    if "clarification_state" in st.session_state:
+                        del st.session_state.clarification_state
+
                     with st.spinner("Processing query..."):
                         asyncio.run(self.process_query(new_query, False))
 
@@ -451,6 +471,7 @@ class StreamlitInterface:
                         status = st.session_state.status
                         if status in ["processing", "searching", "processing_results", "generating_response"]:
                             st.info(f"Status: {status.replace('_', ' ').title()}")
+
                         elif status == "error":
                             st.error("Error occurred")
 

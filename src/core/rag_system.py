@@ -8,7 +8,9 @@ All core functionality is exposed through the RAGSystem class, which can be call
 import asyncio
 import logging
 from typing import Dict, Any, Callable, List, Tuple
+
 from src.core.prompt_manager.query_path_prompt_manager import QueryPathPromptManager
+
 
 class RAGSystem:
     """
