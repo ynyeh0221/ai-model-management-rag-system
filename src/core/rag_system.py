@@ -317,7 +317,7 @@ class RAGSystem:
                 current_page = all_reranked[page_id * page_size:(page_id + 1) * page_size]
 
                 # Build results text for current page
-                results_text = self._build_results_text(current_page, page_id == len(all_reranked) - 1)
+                results_text = self._build_results_text(current_page, page_id != len(all_reranked) - 1)
                 print(f"results_text: {results_text}")
 
                 # Initialize result structure
@@ -328,11 +328,15 @@ class RAGSystem:
 
                 # Generate LLM response if requested
                 if generate_llm_response:
+                    # TODO Refactor this prompt to make it output response in desired format when INSUFFICIENT INFORMATION (MORE RESULTS NEEDED)
                     system_prompt = QueryPathPromptManager.get_system_prompt_for_regular_response()
 
                     # Build user prompt
                     user_prompt = f"\nUser query:\n{query_text}\n"
                     user_prompt += f"Search results:\n{results_text}"
+                    if "page_summary" in pages_info[-1]:
+                        summaries = '\n\n'.join([page_info["page_summary"] for page_info in pages_info])
+                        user_prompt += f"\nSummaries of previous pages: {summaries}"
 
                     # Generate final response
                     self._update_status("generating_response")
@@ -353,13 +357,15 @@ class RAGSystem:
 
                     pages_info[-1]["page_summary"] = content
 
+                    # If llm decides beed more results, then fetch more results
                     if "<need_more_results>" in content and max_pages_to_fetch > 0:
                         process_paged_results(all_reranked, page_id + 1, page_size, max_pages_to_fetch - 1)
                 else:
                     # Skip LLM response generation
                     pages_info[-1]["page_summary"] = ""
 
-            process_paged_results(all_reranked, 0, 3, 3 if generate_llm_response else 2)
+            # TODO make page_size and max_pages_to_fetch defined and passed-in from outside
+            process_paged_results(all_reranked, 0, 3, 3 if generate_llm_response else max_output_counts)
 
             result = {"type": "text_search" if generate_llm_response else "retrieval_only", "query": query_text,
                       "parsed_query": parsed_query,
