@@ -8,6 +8,8 @@ For ML engineers drowning in disparate model folders, Model-Insight-RAG transfor
 
 [DEMO](https://github.com/ynyeh0221/model-insight-rag/blob/main/DEMO.md)
 
+[DEEPWIKI](https://deepwiki.com/ynyeh0221/model-insight-rag)
+
 ## Quick Start
 
 ```bash
