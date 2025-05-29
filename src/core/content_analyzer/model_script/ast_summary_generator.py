@@ -1,3 +1,246 @@
+"""
+AST Summary Generator - Machine Learning Model Code Analyzer
+
+This module parses Python ML model code using Abstract Syntax Trees (AST) to extract
+and summarize model architecture, datasets, and component relationships.
+
+OVERALL ARCHITECTURE FLOW:
+========================
+
+    Input Python File
+           |
+           v
+    ┌─────────────────┐
+    │  AST Parser     │ ── SyntaxError ──> Return Error Message
+    │  (ast.parse)    │
+    └─────────────────┘
+           |
+           v
+    ┌─────────────────┐
+    │  Reset State    │ ── Initialize tracking variables
+    │ (_reset_state)  │    (model_layers, class_hierarchy, etc.)
+    └─────────────────┘
+           |
+           v
+    ┌─────────────────┐
+    │   CodeSummary   │
+    │     Visitor     │ ── Traverses AST nodes to collect:
+    │    (visitor)    │    • Function definitions
+    │                 │    • Class definitions  
+    │                 │    • Variable assignments
+    │                 │    • Import statements
+    └─────────────────┘
+           |
+           v
+    ┌─────────────────────────────────────────────────────────┐
+    │              DATASET DETECTION (Two-Tier)               │
+    │                                                         │
+    │  ┌─────────────────┐    Found?    ┌─────────────────┐   │
+    │  │ PRIMARY METHOD  │ ────No────>  │ FALLBACK METHOD │   │
+    │  │KeywordBasedVisitor│            │ (3 Strategies)  │   │
+    │  │• Fast scanning  │              │• DataLoader     │   │
+    │  │• Known keywords │              │• Class patterns │   │
+    │  │• Direct matches │              │• Import patterns│   │
+    │  └─────────────────┘              └─────────────────┘   │
+    │           │                               │             │
+    │          Yes                              │             │
+    │           │                               │             │
+    │           └─────────────┬─────────────────┘             │
+    └─────────────────────────┼───────────────────────────────┘
+                              │
+                              v
+    ┌─────────────────────────────────────────────────────────┐
+    │              MODEL ARCHITECTURE BUILDING                │
+    │                                                         │
+    │  ┌─────────────────┐    ┌─────────────────┐             │
+    │  │ Identify Used   │───>│ Filter Unused   │             │
+    │  │ Components      │    │ Components      │             │
+    │  │• Layer refs     │    │• Keep only used │             │
+    │  │• Forward calls  │    │• Fallback logic │             │
+    │  └─────────────────┘    └─────────────────┘             │
+    │           │                       │                     │
+    │           v                       v                     │
+    │  ┌─────────────────┐    ┌─────────────────┐             │
+    │  │ Order Layers    │    │ Extract Dims    │             │
+    │  │• Definition     │    │• Important args │             │
+    │  │  order          │    │• Trim to limit  │             │
+    │  │• Preserve extra │    │• Sequential     │             │
+    │  └─────────────────┘    └─────────────────┘             │
+    └─────────────────────────────────────────────────────────┘
+                              │
+                              v
+    ┌─────────────────────────────────────────────────────────┐
+    │                 OUTPUT GENERATION                       │
+    │                                                         │
+    │  Summary Text:                                          │
+    │  • Dataset: [detected datasets]                         │
+    │  • Model Architecture:                                  │
+    │    - Component: ClassName                               │
+    │      - layer1: LayerType(dims)                          │
+    │      - layer2: LayerType(dims)                          │
+    │  • Component Dependencies:                              │
+    │    - ClassA depends on: ClassB, ClassC                  │
+    └─────────────────────────────────────────────────────────┘
+
+DATASET DETECTION STRATEGIES:
+============================
+
+Strategy 1: PRIMARY (KeywordBasedDatasetVisitor)
+┌──────────────────────────────────────────────────┐
+│ Fast keyword scanning:                           │
+│ • Scans imports for dataset libraries            │
+│ • Checks variable names for dataset patterns     │
+│ • Looks for string literals with dataset names   │
+│ • Highly precise, low computational cost         │
+│                                                  │
+│ Keywords: 'CIFAR', 'MNIST', 'ImageNet',          │
+│          'dataset', 'data_loader', etc.          │
+└──────────────────────────────────────────────────┘
+                        │
+                   No datasets found?
+                        │
+                        v
+Strategy 2: FALLBACK (3 specialized visitors)
+┌──────────────────────────────────────────────────┐
+│ A) DataLoaderVisitor:                            │
+│    • Finds DataLoader constructors               │
+│    • Extracts dataset from loader arguments      │
+│    • Analyzes variable context                   │
+│                                                  │
+│ B) DatasetClassVisitor:                          │
+│    • Detects custom dataset classes              │
+│    • Analyzes inheritance patterns               │
+│    • Filters common words                        │
+│                                                  │
+│ C) DatasetImportVisitor:                         │
+│    • Scans library imports                       │
+│    • Identifies dataset-specific patterns        │
+│    • Detects custom dataset modules              │
+└──────────────────────────────────────────────────┘
+
+COMPONENT TRACKING DATA STRUCTURES:
+==================================
+
+self.model_layers: List[Dict]
+┌─────────────────────────────────────┐
+│ [{'name': 'conv1',                  │
+│   'layer_type': 'Conv2d',           │
+│   'class': 'MyModel',               │
+│   'args': [3, 64, 3, 1]}, ...]      │
+└─────────────────────────────────────┘
+
+self.class_layers: Dict[str, List[str]]
+┌─────────────────────────────────────┐
+│ {'MyModel': ['conv1', 'relu1',      │
+│              'conv2', 'pool1'],     │
+│  'Encoder': ['linear1', 'dropout']} │
+└─────────────────────────────────────┘
+
+self.class_hierarchy: Dict[str, List[str]]
+┌─────────────────────────────────────┐
+│ {'MyModel': ['nn.Module'],          │
+│  'CustomLayer': ['nn.Linear']}      │
+└─────────────────────────────────────┘
+
+LAYER ORDERING LOGIC:
+====================
+
+Input: layer_names = ['conv2', 'conv1', 'pool1']
+self.layer_order = ['conv1', 'conv2', 'relu1', 'pool1']
+
+_get_ordered_layers() process:
+┌─────────────────────────────────────┐
+│ Step 1: Follow definition order     │
+│ ordered = []                        │
+│ seen = set()                        │
+│                                     │
+│ For each name in self.layer_order:  │
+│   if name in layer_names and        │
+│      name not in seen:              │
+│     ordered.append(name)            │
+│     seen.add(name)                  │
+│                                     │
+│ Result: ordered = ['conv1', 'conv2',│
+│                    'pool1']         │
+│                                     │
+│ Step 2: Add any remaining           │
+│ For each name in layer_names:       │
+│   if name not in seen:              │
+│     ordered.append(name)            │
+│                                     │
+│ Final: ['conv1', 'conv2', 'pool1']  │
+└─────────────────────────────────────┘
+
+DIMENSION EXTRACTION LOGIC:
+==========================
+
+_extract_important_dimensions() decision tree:
+
+Input: layer = {'layer_type': 'Conv2d', 'args': [3, 64, 3, 1]}
+
+┌─────────────────┐
+│ Is Sequential?  │ ──Yes──> Extract input→output dims
+└─────────────────┘           from first and last layers
+         │ No
+         v
+┌─────────────────┐
+│ In class_       │ ──Yes──> Return layer_type
+│ hierarchy?      │
+└─────────────────┘
+         │ No
+         v
+┌─────────────────┐
+│ Extract numeric │ ──> Filter args for int/float
+│ dimensions      │     Keep only first max_dims_to_show
+└─────────────────┘     
+                        Result: "3, 64" (first 2 dimensions)
+
+VISITOR PATTERN USAGE:
+=====================
+
+CodeSummaryVisitor traverses AST nodes:
+
+ast.FunctionDef ──> Records function signatures
+                   Records parameters and defaults
+                   
+ast.ClassDef ────> Tracks class hierarchy
+                   Sets current_class context
+                   
+ast.Assign ──────> Extracts variable assignments
+                   Records literal values
+                   
+ast.Call ────────> Records function calls
+                   Captures arguments and context
+                   Detects layer instantiations
+
+The visitor pattern allows systematic traversal of the AST while
+maintaining state and context across different node types.
+
+ERROR HANDLING FLOW:
+===================
+
+Input Code
+    │
+    v
+┌─────────────┐
+│ AST Parse   │ ──SyntaxError──> Return "# Failed to parse AST: {error}"
+└─────────────┘
+    │ Success
+    v
+┌─────────────┐
+│ Visitor     │ ──Exception──> Continue processing
+│ Processing  │               (graceful degradation)
+└─────────────┘
+    │
+    v
+┌─────────────┐
+│ Summary     │ ──Always returns a string──> Success or partial results
+│ Generation  │
+└─────────────┘
+
+The system is designed to be fault-tolerant, providing partial results
+even when encountering parsing errors or incomplete information.
+"""
 import ast
 import os
 import re
