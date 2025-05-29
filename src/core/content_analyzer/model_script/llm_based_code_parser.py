@@ -1,3 +1,498 @@
+"""
+LLM-Based Code Parser - Advanced ML Code Analysis System
+
+This system combines traditional AST parsing with Large Language Model analysis
+to extract comprehensive, structured metadata from machine learning code files.
+
+OVERALL SYSTEM ARCHITECTURE:
+===========================
+
+    Input: ML Code File (.py/.ipynb)
+                    |
+                    v
+    ┌─────────────────────────────────────────────────────────┐
+    │                FILE VALIDATION                          │
+    │  • Check file extension (.py, .ipynb)                   │
+    │  • Validate file accessibility                          │
+    │  • Extract file metadata (creation/modification dates)  │
+    └─────────────────────────────────────────────────────────┘
+                    |
+                    v
+    ┌─────────────────────────────────────────────────────────┐
+    │              HYBRID ANALYSIS PIPELINE                   │
+    │                                                         │
+    │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
+    │  │ AST PARSING │───>│ LLM ANALYSIS│───>│ STRUCTURED  │  │
+    │  │ (Static)    │    │ (Semantic)  │    │ METADATA    │  │
+    │  │             │    │             │    │ (JSON)      │  │
+    │  └─────────────┘    └─────────────┘    └─────────────┘  │
+    └─────────────────────────────────────────────────────────┘
+                    |
+                    v
+    ┌─────────────────────────────────────────────────────────┐
+    │                   OUTPUT GENERATION                     │
+    │  • Structured JSON metadata                             │
+    │  • Natural language summaries                           │
+    │  • Architecture diagrams                                │
+    │  • Component dependency maps                            │
+    └─────────────────────────────────────────────────────────┘
+
+DETAILED PROCESSING PIPELINE:
+============================
+
+Step 1: AST Digest Generation
+┌──────────────────────────────────────────────────────────────┐
+│  Input: Raw Python Code                                      │
+│     │                                                        │
+│     v                                                        │
+│  ┌─────────────────┐                                         │
+│  │    ASTSummary   │                                         │
+│  │     Generator   │ ──> Generates structured digest:        │
+│  │ • Classes       │     • Import statements                 │
+│  │ • Functions     │     • Variable assignments              │
+│  │ • Variables     │     • Model layers                      │
+│  │ • Imports       │     • Component relationships           │
+│  │ • Layers        │                                         │
+│  └─────────────────┘                                         │
+│                                                              │
+│  Output: AST Digest Text                                     │
+│  "Import: torch                                              │
+│   Class: ResNet                                              │
+│   Function: forward(x)                                       │
+│   Variable: batch_size = 32                                  │
+│   Dataset: CIFAR10"                                          │
+└──────────────────────────────────────────────────────────────┘
+
+Step 2: Filtering and Preprocessing
+┌──────────────────────────────────────────────────────────────┐
+│  filter_ast_summary_for_metadata()                           │
+│                                                              │
+│  Keeps ONLY relevant lines:                                  │
+│  ┌─────────────────┐    ┌─────────────────┐                  │
+│  │ ALWAYS KEEP:    │    │ VARIABLE FILTER:│                  │
+│  │ • Dataset:      │    │ Keep if contain:│                  │
+│  │ • Images folder:│    │ • batch         │                  │
+│  │ • Model Arch.   │    │ • lr            │                  │
+│  └─────────────────┘    │ • epoch         │                  │
+│                         │ • optimizer     │                  │
+│                         │ • device        │                  │
+│                         └─────────────────┘                  │
+│                                                              │
+│  Result: Compact, focused AST summary                        │
+└──────────────────────────────────────────────────────────────┘
+
+Step 3: Dual LLM Analysis Strategy
+┌──────────────────────────────────────────────────────────────┐
+│                    PARALLEL LLM PROCESSING                   │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │              TRACK A: ARCHITECTURE                      │ │
+│  │                                                         │ │
+│  │  Input: filter_model_architecture_from_ast_summary()    │ │
+│  │  ┌───────────────────────────────────────────────────┐  │ │
+│  │  │ Filters for ONLY:                                 │  │ │
+│  │  │ • "Model Architecture:" and all subsequent lines  │  │ │
+│  │  │ • Component definitions                           │  │ │
+│  │  │ • Layer specifications                            │  │ │
+│  │  │ • Dependencies                                    │  │ │
+│  │  └───────────────────────────────────────────────────┘  │ │
+│  │                        │                                │ │
+│  │                        v                                │ │
+│  │  ┌───────────────────────────────────────────────────┐  │ │
+│  │  │              LLM ANALYSIS                         │  │ │
+│  │  │ System Prompt: Architecture-focused               │  │ │
+│  │  │ Expected Output: {"architecture": {               │  │ │
+│  │  │   "type": "ResNet/UNet/GAN/Transformer/etc",      │  │ │
+│  │  │   "reason": "explanation of identification"       │  │ │
+│  │  │ }}                                                │  │ │
+│  │  └───────────────────────────────────────────────────┘  │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │               TRACK B: OTHER METADATA                   │ │
+│  │                                                         │ │
+│  │  Input: filter_ast_summary_for_metadata                 │ │
+│  │  ┌───────────────────────────────────────────────────┐  │ │
+│  │  │ Filters for:                                      │  │ │
+│  │  │ • Dataset information                             │  │ │
+│  │  │ • Training variables (batch_size, lr, etc.)       │  │ │
+│  │  │ • Hardware specifications                         │  │ │
+│  │  │ • Optimizer settings                              │  │ │
+│  │  └───────────────────────────────────────────────────┘  │ │
+│  │                        │                                │ │
+│  │                        v                                │ │
+│  │  ┌───────────────────────────────────────────────────┐  │ │
+│  │  │              LLM ANALYSIS                         │  │ │
+│  │  │ System Prompt: Training/Dataset-focused           │  │ │
+│  │  │ Expected Output: {"dataset": {...},               │  │ │
+│  │  │   "training_config": {                            │  │ │
+│  │  │     "batch_size": int, "learning_rate": float,    │  │ │
+│  │  │     "optimizer": str, "epochs": int,              │  │ │
+│  │  │     "hardware_used": str}}                        │  │ │
+│  │  └───────────────────────────────────────────────────┘  │ │
+│  └─────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────┘
+
+Step 4: Natural Language Summary Generation
+┌──────────────────────────────────────────────────────────────┐
+│  extract_natural_language_summary()                          │
+│                                                              │
+│  Input: Full AST Digest (filtered for metadata)              │
+│     │                                                        │
+│     v                                                        │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │                 LLM INTERFACE                           │ │
+│  │  System Prompt: "Generate human-readable summary"       │ │
+│  │  Temperature: 0 (deterministic)                         │ │
+│  │  Max Tokens: 32000                                      │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│     │                                                        │
+│     v                                                        │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │              SEMANTIC CHUNKING                          │ │
+│  │  split_summary_into_chunks():                           │ │
+│  │  • NLTK sentence tokenization                           │ │
+│  │  • TF-IDF vectorization                                 │ │
+│  │  • Cosine similarity calculation                        │ │
+│  │  • Threshold-based grouping                             │ │
+│  │                                                         │ │
+│  │  Algorithm:                                             │ │
+│  │  1. Split summary into sentences                        │ │
+│  │  2. Calculate TF-IDF vectors for each sentence          │ │
+│  │  3. Group consecutive sentences if similarity>threshold │ │
+│  │  4. Respect max_sentences_per_chunk limit               │ │
+│  └─────────────────────────────────────────────────────────┘ │
+│                                                              │
+│  Output: List of semantic chunks with offsets                │
+└──────────────────────────────────────────────────────────────┘
+
+RETRY MECHANISM AND ERROR HANDLING:
+==================================
+
+Each LLM interaction includes robust error handling:
+
+┌─────────────────────────────────────────────────────────────┐
+│                    RETRY LOOP PATTERN                       │
+│                                                             │
+│  for attempt in range(max_retries):  # Default: 3-15        │
+│      try:                                                   │
+│          ┌────────────────────────────────────────────┐     │
+│          │            LLM API CALL                    │     │
+│          │  • Generate structured response            │     │
+│          │  • Parse JSON from response                │     │
+│          │  • Validate structure against schema       │     │
+│          └────────────────────────────────────────────┘     │
+│                                │                            │
+│                Success? ──Yes──> Return Result              │
+│                                │                            │
+│                               No                            │
+│                                │                            │
+│          ┌────────────────────────────────────────────┐     │
+│          │              ERROR HANDLING                │     │
+│          │  • JSON parsing errors                     │     │
+│          │  • Schema validation failures              │     │
+│          │  • API communication errors                │     │
+│          │  • Log error with attempt number           │     │
+│          └────────────────────────────────────────────┘     │
+│      except Exception as e:                                 │
+│          log(f"[Retry {attempt + 1}] Error: {e}")           │
+│                                                             │
+│  # After all retries fail:                                  │
+│  return create_default_metadata()                           │
+└─────────────────────────────────────────────────────────────┘
+
+JSON SANITIZATION PIPELINE:
+===========================
+
+sanitize_json_string() applies multiple cleaning steps:
+
+Input: Raw LLM Response
+│
+v
+┌─────────────────────────────────────────────────────────────┐
+│  Step 1: Remove Thinking Tags                               │
+│  Pattern: <think(ing)?>.*?</think(ing)?>                    │
+│  Flags: re.DOTALL (multiline matching)                      │
+│                                                             │
+│  Before: "<thinking>Let me analyze...</thinking>{"key":...} │
+│  After:  {"key":...}                                        │
+└─────────────────────────────────────────────────────────────┘
+│
+v
+┌─────────────────────────────────────────────────────────────┐
+│  Step 2: Remove JS-Style Comments                           │
+│  Pattern: //.*?$                                            │
+│  Flags: re.MULTILINE                                        │
+│                                                             │
+│  Before: {"key": "value", // this is a comment              │
+│           "other": "data"}                                  │
+│  After:  {"key": "value",                                   │
+│           "other": "data"}                                  │
+└─────────────────────────────────────────────────────────────┘
+│
+v
+┌─────────────────────────────────────────────────────────────┐
+│  Step 3: Remove Trailing Commas                             │
+│  Pattern: ,(\s*[}\]])                                       │
+│  Replacement: \1                                            │
+│                                                             │
+│  Before: {"key": "value",}  or  ["item1", "item2",]         │
+│  After:  {"key": "value"}   or  ["item1", "item2"]          │
+└─────────────────────────────────────────────────────────────┘
+│
+v
+Valid JSON String
+
+FRAMEWORK DETECTION LOGIC:
+=========================
+
+parse_framework() uses priority-based regex matching:
+
+Input: AST Summary Text
+│
+v
+┌─────────────────────────────────────────────────────────────┐
+│                  FRAMEWORK PATTERNS                         │
+│                                                             │
+│  Priority 1: PyTorch                                        │
+│  ┌────────────────────────────────────────────────────┐     │
+│  │ Patterns:                                          │     │
+│  │ • "Import: torch"                                  │     │
+│  │ • "From torch"                                     │     │
+│  │ • Case-insensitive matching                        │     │
+│  └────────────────────────────────────────────────────┘     │
+│                                                             │
+│  Priority 2: TensorFlow                                     │
+│  ┌────────────────────────────────────────────────────┐     │
+│  │ Patterns:                                          │     │
+│  │ • "Import: tensorflow"                             │     │
+│  │ • "From tensorflow"                                │     │
+│  │ • "tf." (TensorFlow alias usage)                   │     │
+│  └────────────────────────────────────────────────────┘     │
+│                                                             │
+│  Priority 3: JAX                                            │
+│  ┌────────────────────────────────────────────────────┐     │
+│  │ Patterns:                                          │     │
+│  │ • "Import: jax"                                    │     │
+│  │ • "From jax"                                       │     │
+│  └────────────────────────────────────────────────────┘     │
+│                                                             │
+│  Priority 4: Keras (mapped to TensorFlow)                   │
+│  ┌────────────────────────────────────────────────────┐     │
+│  │ Patterns:                                          │     │
+│  │ • "Import: keras"                                  │     │
+│  │ • "From keras"                                     │     │
+│  │ Note: Returns "TensorFlow" (Keras is part of TF)   │     │
+│  └────────────────────────────────────────────────────┘     │
+│                                                             │
+│  Default: "missing" (if no patterns match)                  │
+└─────────────────────────────────────────────────────────────┘
+
+SEMANTIC TEXT CHUNKING ALGORITHM:
+================================
+
+split_summary_into_chunks() implements intelligent text segmentation:
+
+Input: Natural Language Summary
+│
+v
+┌─────────────────────────────────────────────────────────────┐
+│              SENTENCE TOKENIZATION                          │
+│                                                             │
+│  Uses NLTK Punkt Tokenizer:                                 │
+│  • Downloads punkt_tab if not present                       │
+│  • Generates sentence boundaries with character offsets     │
+│  • Filters out empty sentences                              │
+│                                                             │
+│  Input:  "This model uses ResNet. It has 50 layers. The     │
+│          dataset is CIFAR-10. Training uses Adam optimizer."│
+│  Output: [("This model uses ResNet.", (0, 22)),             │
+│           ("It has 50 layers.", (23, 41)), ...]             │
+└─────────────────────────────────────────────────────────────┘
+│
+v
+┌─────────────────────────────────────────────────────────────┐
+│                TF-IDF VECTORIZATION                         │
+│                                                             │
+│  Sklearn TfidfVectorizer:                                   │
+│  • min_df=1 (include all terms)                             │
+│  • stop_words='english' (remove common words)               │
+│  • Creates vector representation for each sentence          │
+│                                                             │
+│  Sentence: "This model uses ResNet"                         │
+│  Vector:   [0.0, 0.7, 0.0, 0.5, 0.0, 0.9, ...]              │
+└─────────────────────────────────────────────────────────────┘
+│
+v
+┌─────────────────────────────────────────────────────────────┐
+│              SIMILARITY-BASED GROUPING                      │
+│                                                             │
+│  Algorithm:                                                 │
+│  chunks = []                                                │
+│  current_chunk = [sentence_0]                               │
+│                                                             │
+│  for sentence_i in sentences[1:]:                           │
+│      # Calculate similarity to chunk boundaries             │
+│      sim_first = cosine_similarity(sentence_i, chunk[0])    │
+│      sim_last  = cosine_similarity(sentence_i, chunk[-1])   │
+│      max_sim = max(sim_first, sim_last)                     │
+│                                                             │
+│      if max_sim >= threshold AND len(chunk) < max_size:     │
+│          current_chunk.append(sentence_i)                   │
+│      else:                                                  │
+│          chunks.append(join(current_chunk))                 │
+│          current_chunk = [sentence_i]                       │
+│                                                             │
+│  chunks.append(join(current_chunk))  # Final chunk          │
+│                                                             │
+│  Parameters:                                                │
+│  • similarity_threshold: 0.5 (default)                      │
+│  • max_sentences_per_chunk: 10 (default)                    │
+└─────────────────────────────────────────────────────────────┘
+
+VALIDATION SCHEMAS:
+==================
+
+Two separate validation functions ensure metadata quality:
+
+Architecture Metadata Validation:
+┌─────────────────────────────────────────────────────────────┐
+│  validate_architecture_llm_metadata_structure()             │
+│                                                             │
+│  Required Structure:                                        │
+│  {                                                          │
+│    "architecture": {                                        │
+│      "type": <string, not null, not "missing"/"unknown">    │
+│      "reason": <string, not null, not empty>                │
+│    }                                                        │
+│  }                                                          │
+│                                                             │
+│  Forbidden Values for "type":                               │
+│  • "missing", "unknown", "hybrid", "mixed", "both"          │
+│  • "n/a", "pytorch", "gpu", "cpu"                           │
+│                                                             │
+│  Returns: (is_valid: bool, error_message: str)              │
+└─────────────────────────────────────────────────────────────┘
+
+Other Metadata Validation:
+┌─────────────────────────────────────────────────────────────┐
+│  validate_other_llm_metadata_structure()                    │
+│                                                             │
+│  Required Structure:                                        │
+│  {                                                          │
+│    "dataset": {"name": <string>},                           │
+│    "training_config": {                                     │
+│      "batch_size": <int|null>,                              │
+│      "learning_rate": <float|null>,                         │
+│      "optimizer": <string|null>,                            │
+│      "epochs": <int|null>,                                  │
+│      "hardware_used": <string|null>                         │
+│    }                                                        │
+│  }                                                          │
+│                                                             │
+│  All fields must be present, but values can be null         │
+│  Returns: (is_valid: bool, error_message: str)              │
+└─────────────────────────────────────────────────────────────┘
+
+GIT INTEGRATION FOR TIMESTAMPS:
+==============================
+
+The system attempts to get accurate file timestamps through Git:
+
+get_creation_date() / get_last_modified_date():
+┌─────────────────────────────────────────────────────────────┐
+│                    TIMESTAMP RESOLUTION                     │
+│                                                             │
+│  Strategy 1: Git Repository Analysis                        │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │ try:                                                    ││
+│  │     repo = Repo(dirname, search_parent_directories=True)││
+│  │     # For creation: get first commit touching file      ││
+│  │     commits = repo.iter_commits(paths=file,reverse=True)││
+│  │     # For modification: get latest commit               ││
+│  │     commit = next(repo.iter_commits(paths=file, max=1)) ││
+│  │     return datetime.fromtimestamp(commit.date).isoformat││
+│  │ except Exception: pass                                  ││
+│  └─────────────────────────────────────────────────────────┘│
+│                              │                              │
+│                         Git failed?                         │
+│                              │                              │
+│                              v                              │
+│  Strategy 2: Filesystem Metadata                            │
+│  ┌─────────────────────────────────────────────────────────┐│
+│  │ try:                                                    ││
+│  │     stat = os.stat(file_path)                           ││
+│  │     # st_ctime for creation, st_mtime for modification  ││
+│  │     return datetime.fromtimestamp(stat.time).isoformat()││
+│  │ except Exception: return None                           ││
+│  └─────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────┘
+
+FINAL METADATA ASSEMBLY:
+=======================
+
+parse_file() orchestrates the complete metadata assembly:
+
+┌─────────────────────────────────────────────────────────────┐
+│                    METADATA AGGREGATION                     │
+│                                                             │
+│  Base Information:                                          │
+│  • creation_date (from Git/filesystem)                      │
+│  • last_modified_date (from Git/filesystem)                 │
+│  • model_id, model_family, version (from AST)               │
+│                                                             │
+│  LLM-Extracted Metadata:                                    │
+│  • framework: {name, version}                               │
+│  • architecture: {type, reason}                             │
+│  • dataset: {name}                                          │
+│  • images_folder: {name}                                    │
+│  • training_config: {batch_size, learning_rate, ...}        │
+│                                                             │
+│  Generated Content:                                         │
+│  • chunk_descriptions: [semantic chunks with offsets]       │
+│  • ast_summary: (full AST digest)                           │
+│  • diagram_path: (generated architecture diagram)           │
+│  • content: (original file content)                         │
+│                                                             │
+│  Flags:                                                     │
+│  • is_model_script: true                                    │
+└─────────────────────────────────────────────────────────────┘
+
+ERROR HANDLING PHILOSOPHY:
+=========================
+
+The system implements "graceful degradation":
+
+┌─────────────────────────────────────────────────────────────┐
+│              FAULT TOLERANCE DESIGN                         │
+│                                                             │
+│  Principle: Always return usable metadata                   │
+│                                                             │
+│  ┌─────────────────┐    ┌─────────────────┐                 │
+│  │ BEST CASE:      │    │ WORST CASE:     │                 │
+│  │ • Full LLM      │    │ • Syntax errors │                 │
+│  │   analysis      │    │ • LLM failures  │                 │
+│  │ • Rich metadata │    │ • API timeouts  │                 │
+│  │ • Diagrams      │    │ • Invalid JSON  │                 │
+│  └─────────────────┘    └─────────────────┘                 │
+│                                │                            │
+│                                v                            │
+│                    ┌─────────────────┐                      │
+│                    │ FALLBACK CHAIN: │                      │
+│                    │ • Default values│                      │
+│                    │ • Partial data  │                      │
+│                    │ • Error logging │                      │
+│                    │ • Minimal struct│                      │
+│                    └─────────────────┘                      │
+│                                                             │
+│  Result: System never completely fails, always provides     │
+│          some level of usable metadata for downstream       │
+│          systems and users.                                 │
+└─────────────────────────────────────────────────────────────┘
+
+This architecture ensures robust, production-ready ML code analysis
+with comprehensive error handling and multiple fallback strategies.
+"""
 import ast
 import datetime
 import json
