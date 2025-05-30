@@ -1,8 +1,36 @@
 """
-RAG System Core Module - Encapsulating CLI functionality into callable functions
+RAG System Core Module - Workflow Documentation
 
-This module provides the core functionality of the RAG system, separating business logic from the UI layer.
-All core functionality is exposed through the RAGSystem class, which can be called by any interface (CLI, API, etc.).
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           RAG SYSTEM ARCHITECTURE OVERVIEW                      │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌─────────────┐    ┌──────────────────┐    ┌─────────────────────────────────┐ │
+│  │   User UI   │───▶│   RAGSystem      │───▶│       Components                │ │
+│  │ (CLI/Web)   │    │   Core Class     │    │                                 │ │
+│  └─────────────┘    └──────────────────┘    │ ┌─────────────────────────────┐ │ │
+│                              │              │ │     Query Engine            │ │ │
+│                              │              │ │ • Parser                    │ │ │
+│                              │              │ │ • Search Dispatcher         │ │ │
+│                              │              │ │ • Analytics                 │ │ │
+│                              │              │ │ • Reranker                  │ │ │
+│                              │              │ └─────────────────────────────┘ │ │
+│                              │              │                                 │ │
+│                              │              │ ┌─────────────────────────────┐ │ │
+│                              │              │ │   Response Generator        │ │ │
+│                              │              │ │ • LLM Interface             │ │ │
+│                              │              │ └─────────────────────────────┘ │ │
+│                              │              └─────────────────────────────────┘ │
+│                              │                                                  │
+│                              ▼                                                  │
+│                    ┌──────────────────┐                                         │
+│                    │    Callbacks     │                                         │
+│                    │ • on_log         │                                         │
+│                    │ • on_result      │                                         │
+│                    │ • on_error       │                                         │
+│                    │ • on_status      │                                         │
+│                    └──────────────────┘                                         │
+└─────────────────────────────────────────────────────────────────────────────────┘
 """
 
 import asyncio
