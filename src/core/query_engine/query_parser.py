@@ -1,3 +1,159 @@
+"""
+QueryParser Workflow ASCII Diagram
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              QUERYPARSER INITIALIZATION                         │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐ │
+│  │   spaCy     │  │    NLTK     │  │ LangChain   │  │     Regex Patterns      │ │
+│  │   Model     │  │ Components  │  │   LLM       │  │  (model_id, metrics,    │ │
+│  │(NLP Parser) │  │(Lemmatizer, │  │ (Ollama)    │  │   filters, limits)      │ │
+│  │             │  │ Stopwords)  │  │             │  │                         │ │
+│  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                         │
+                                         ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                                PARSE_QUERY()                                    │
+│                            [Main Entry Point]                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                         │
+                         ┌───────────────┼───────────────┐
+                         ▼               ▼               ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────────────────────┐
+│ PREPROCESS_     │ │ CLASSIFY_       │ │        EXTRACT_PARAMETERS()         │
+│ QUERY()         │ │ INTENT()        │ │                                     │
+├─────────────────┤ ├─────────────────┤ ├─────────────────────────────────────┤
+│ 1. Text cleaning│ │ 1. LangChain    │ │ 1. Basic regex extraction           │
+│ 2. spaCy parse  │ │    system       │ │ 2. Model ID detection               │
+│ 3. Preserve     │ │    prompt       │ │ 3. LLM-based NER                    │
+│    entities     │ │ 2. LLM          │ │ 4. Intent-specific params           │
+│ 4. Preserve     │ │    inference    │ │                                     │
+│    noun phrases │ │ 3. JSON         │ │ ┌─────────────────────────────────┐ │
+│ 5. Lemmatize    │ │    parsing      │ │ │      Sub-extractors:            │ │
+│    remaining    │ │ 4. Return       │ │ │  • _extract_model_id_mentions() │ │
+│    tokens       │ │    QueryIntent  │ │ │  • _extract_entities_with_llm() │ │
+└─────────────────┘ └─────────────────┘ │ │  • _extract_image_parameters()  │ │
+         │                   │          │ │    (if IMAGE_SEARCH intent)     │ │
+         ▼                   ▼          │ └─────────────────────────────────┘ │
+┌─────────────────┐ ┌─────────────────┐ └─────────────────────────────────────┘
+│ Cleaned Query   │ │ Intent + Reason │                   │
+│ Text            │ │                 │                   ▼
+└─────────────────┘ └─────────────────┘ ┌─────────────────────────────────────┐
+                                        │        Parameter Extraction         │
+                                        │             Sub-flows               │
+                                        ├─────────────────────────────────────┤
+                                        │                                     │
+                                        │ ┌─────────────────────────────────┐ │
+                                        │ │     REGEX-BASED EXTRACTION      │ │
+                                        │ │  • Model IDs (model_id_pattern) │ │
+                                        │ │  • Metrics (accuracy, loss...)  │ │
+                                        │ │  • Filters (architecture...)    │ │
+                                        │ │  • Limits (top 5, first 10...)  │ │
+                                        │ │  • Sort parameters              │ │
+                                        │ │  • Date/year patterns           │ │
+                                        │ └─────────────────────────────────┘ │
+                                        │                │                    │
+                                        │                ▼                    │
+                                        │ ┌─────────────────────────────────┐ │
+                                        │ │       LLM-BASED NER             │ │
+                                        │ │  (_extract_entities_with_llm)   │ │
+                                        │ │                                 │ │
+                                        │ │  Input: Query text              │ │
+                                        │ │  ┌─────────────────────────────┐│ │
+                                        │ │  │   LangChain Chat Pipeline   ││ │
+                                        │ │  │  ┌─────────────────────────┐││ │
+                                        │ │  │  │    System Message       │││ │
+                                        │ │  │  │  (NER instructions)     │││ │
+                                        │ │  │  └─────────────────────────┘││ │
+                                        │ │  │  ┌─────────────────────────┐││ │
+                                        │ │  │  │    Human Message        │││ │
+                                        │ │  │  │   (User query)          │││ │
+                                        │ │  │  └─────────────────────────┘││ │
+                                        │ │  │  ┌─────────────────────────┐││ │
+                                        │ │  │  │       LLM               │││ │
+                                        │ │  │  │   (Ollama model)        │││ │
+                                        │ │  │  └─────────────────────────┘││ │
+                                        │ │  └─────────────────────────────┘│ │
+                                        │ │  │                              │ │
+                                        │ │  ▼                              │ │
+                                        │ │  Output: Structured JSON        │ │
+                                        │ │  {                              │ │
+                                        │ │    "architecture": {...},       │ │
+                                        │ │    "dataset": {...},            │ │
+                                        │ │    "training_config": {...}     │ │
+                                        │ │  }                              │ │
+                                        │ └─────────────────────────────────┘ │
+                                        │                │                    │
+                                        │                ▼                    │
+                                        │ ┌─────────────────────────────────┐ │
+                                        │ │   INTENT-SPECIFIC EXTRACTION    │ │
+                                        │ │                                 │ │
+                                        │ │  If intent == IMAGE_SEARCH:     │ │
+                                        │ │  ┌─────────────────────────────┐│ │
+                                        │ │  │ _extract_image_parameters() ││ │
+                                        │ │  │  • Search type detection    ││ │
+                                        │ │  │  • Epoch/tag/color filters  ││ │
+                                        │ │  │  • Content/style filters    ││ │
+                                        │ │  │  • Resolution preferences   ││ │
+                                        │ │  └─────────────────────────────┘│ │
+                                        │ └─────────────────────────────────┘ │
+                                        └─────────────────────────────────────┘
+                                                          │
+                                                          ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              FINAL OUTPUT                                       │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  {                                                                              │
+│    "intent": "retrieval|image_search|...",                                      │
+│    "reason": "Explanation from LLM",                                            │
+│    "type": "retrieval|image_search|...",  // backward compatibility             │
+│    "parameters": {                                                              │
+│      "filters": {                        // Regex-extracted filters             │
+│        "model_id": "...",                                                       │
+│        "created_year": "2023",                                                  │
+│        "created_month": "January"                                               │
+│      },                                                                         │
+│      "ner_filters": {                    // LLM-extracted entities              │
+│        "architecture": {"value": "transformer", "is_positive": true},           │
+│        "dataset": {"value": "ImageNet", "is_positive": true},                   │
+│        "training_config": {                                                     │
+│          "batch_size": {"value": 32, "is_positive": true},                      │
+│          "learning_rate": {"value": 0.001, "is_positive": true},                │
+│          "optimizer": {"value": "Adam", "is_positive": true},                   │
+│          "epochs": {"value": 100, "is_positive": true},                         │
+│          "hardware_used": {"value": "GPU", "is_positive": true}                 │
+│        }                                                                        │
+│      },                                                                         │
+│      "limit": 10,                       // Result limit                         │
+│      "sort_by": {"field": "...", "order": "..."},                               │
+│      // Image search specific parameters (if applicable)                        │
+│      "search_type": "similarity|epoch|tag|color|date|content|model_id",         │
+│      "epoch": 42,                                                               │
+│      "tags": ["tag1", "tag2"],                                                  │
+│      "colors": ["red", "blue"],                                                 │
+│      "prompt_terms": "...",                                                     │
+│      "style_tags": ["abstract", "modern"]                                       │
+│    },                                                                           │
+│    "processed_query": "cleaned and lemmatized query text"                       │
+│  }                                                                              │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+Key Components:
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│ • spaCy: Named entity recognition, noun phrase extraction, POS tagging          │
+│ • NLTK: Lemmatization, stopword filtering                                       │
+│ • LangChain + Ollama: Intent classification and NER via LLM                     │
+│ • Regex Patterns: Rule-based parameter extraction for known formats             │
+│ • QueryPathPromptManager: Provides system prompts for LLM operations            │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+Flow Summary:
+1. Raw query → Preprocessing (clean, normalize, preserve entities)
+2. Processed query → Intent classification (LLM-based with structured JSON output)
+3. Query + Intent → Parameter extraction (hybrid regex + LLM approach)
+4. All components → Structured result dictionary with intent and extracted parameters
+"""
 import json
 import logging
 import re
