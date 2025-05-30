@@ -1,3 +1,201 @@
+"""
+MetadataExtractor Workflow ASCII Diagram
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         METADATAEXTRACTOR INITIALIZATION                        │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  Define Configuration File Patterns:                                            │
+│  • config.yaml, config.yml, config.json                                         │
+│  • settings.yaml, settings.yml, settings.json                                   │
+│  • config.ini                                                                   │
+│  • Glob patterns: *.config.*, *.conf, *.ini                                     │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                         │
+                                         ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            EXTRACT_METADATA(file_path)                          │
+│                                [Main Entry Point]                               │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                         │
+                         ┌───────────────┼───────────────┐
+                         ▼               ▼               ▼
+┌─────────────────┐ ┌─────────────────┐ ┌─────────────────────────────────────┐
+│ EXTRACT_GIT_    │ │ EXTRACT_FILE_   │ │    FIND_ASSOCIATED_CONFIG()         │
+│ METADATA()      │ │ METADATA()      │ │                                     │
+├─────────────────┤ ├─────────────────┤ ├─────────────────────────────────────┤
+│ Input: file_path│ │ Input: file_path│ │ Input: file_path                    │
+│                 │ │                 │ │                                     │
+│ ┌─────────────┐ │ │ ┌─────────────┐ │ │ ┌─────────────────────────────────┐ │
+│ │   GitPython │ │ │ │  os.stat()  │ │ │ │        Config Search            │ │
+│ │  Repository │ │ │ │ File System │ │ │ │                                 │ │
+│ │   Analysis  │ │ │ │  Metadata   │ │ │ │ 1. Exact Pattern Matching       │ │
+│ └─────────────┘ │ │ └─────────────┘ │ │ │    • config.yaml                │ │
+│        │        │ │        │        │ │ │    • settings.json              │ │
+│        ▼        │ │        ▼        │ │ │    • config.ini                 │ │
+│ ┌─────────────┐ │ │ ┌─────────────┐ │ │ │                                 │ │
+│ │ Find Repo   │ │ │ │ Get File    │ │ │ │ 2. Glob Pattern Matching        │ │
+│ │ (search     │ │ │ │ Statistics  │ │ │ │    • *.config.*                 │ │
+│ │ parents)    │ │ │ │             │ │ │ │    • *.conf                     │ │
+│ └─────────────┘ │ │ └─────────────┘ │ │ │    • *.ini                      │ │
+│        │        │ │        │        │ │ └─────────────────────────────────┘ │
+│        ▼        │ │        ▼        │ └─────────────────────────────────────┘
+│ ┌─────────────┐ │ │ ┌─────────────┐ │
+│ │ Get Commits │ │ │ │ Extract:    │ │
+│ │ for File    │ │ │ │ • Size      │ │
+│ │ iter_commits│ │ │ │ • Timestamps│ │
+│ │ (paths=...) │ │ │ │ • Extension │ │
+│ └─────────────┘ │ │ │ • Abs Path  │ │
+│        │        │ │ └─────────────┘ │
+│        ▼        │ └─────────────────┘
+│ ┌─────────────┐ │
+│ │ Process     │ │
+│ │ Commit List │ │
+│ └─────────────┘ │
+└─────────────────┘
+         │                │                │
+         ▼                ▼                ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            DETAILED EXTRACTION WORKFLOWS                        │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │                        GIT METADATA EXTRACTION                              ││
+│  │  ┌──────────────────────────────────────────────────────────────────────────┤│
+│  │  │  try:                                                                    ││
+│  │  │    1. Locate Git Repository                                              ││
+│  │  │       Repo(dirname(file_path), search_parent_directories=True)           ││
+│  │  │                                                                          ││
+│  │  │    2. Get All Commits for File                                           ││
+│  │  │       commits = list(repo.iter_commits(paths=file_path))                 ││
+│  │  │                                                                          ││
+│  │  │    3. Process Commit History                                             ││
+│  │  │       ┌─────────────────────────────────────────────────────────────┐    ││
+│  │  │       │  If commits exist:                                          │    ││
+│  │  │       │  • first_commit = commits[-1]  (oldest)                     │    ││
+│  │  │       │  • latest_commit = commits[0]  (newest)                     │    ││
+│  │  │       │  • creation_date = first_commit.committed_date              │    ││
+│  │  │       │  • last_modified_date = latest_commit.committed_date        │    ││
+│  │  │       │  • commit_count = len(commits)                              │    ││
+│  │  │       └─────────────────────────────────────────────────────────────┘    ││
+│  │  │                                                                          ││
+│  │  │  except Exception:                                                       ││
+│  │  │    • creation_date = None                                                ││
+│  │  │    • last_modified_date = None                                           ││
+│  │  │    • commit_count = 0                                                    ││
+│  │  │                                                                          ││
+│  │  │  Output: {                                                               ││
+│  │  │    "creation_date": "2023-01-15T10:30:00",                               ││
+│  │  │    "last_modified_date": "2024-03-20T15:45:30",                          ││
+│  │  │    "commit_count": 15                                                    ││
+│  │  │  }                                                                       ││
+│  │  └──────────────────────────────────────────────────────────────────────────┘│
+│  └──────────────────────────────────────────────────────────────────────────────┘
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │                        FILE METADATA EXTRACTION                            │ │
+│  │  ┌─────────────────────────────────────────────────────────────────────────┤ │
+│  │  │  try:                                                                   │ │
+│  │  │    1. Get File Statistics                                               │ │
+│  │  │       stat = os.stat(file_path)                                         │ │
+│  │  │                                                                         │ │
+│  │  │    2. Extract File Properties                                           │ │
+│  │  │       ┌─────────────────────────────────────────────────────────────┐   │ │
+│  │  │       │  • size_bytes = stat.st_size                                │   │ │
+│  │  │       │  • creation_date = datetime.fromtimestamp(stat.st_ctime)    │   │ │
+│  │  │       │  • last_modified_date = datetime.fromtimestamp()            │   │ │
+│  │  │       │  • file_extension = os.path.splitext(file_path)[1]          │   │ │
+│  │  │       │  • absolute_path = os.path.abspath(file_path)               │   │ │
+│  │  │       └─────────────────────────────────────────────────────────────┘   │ │
+│  │  │                                                                         │ │
+│  │  │  except Exception:                                                      │ │
+│  │  │    • All fields = None                                                  │ │
+│  │  │                                                                         │ │
+│  │  │  Output: {                                                              │ │
+│  │  │    "size_bytes": 2048576,                                               │ │
+│  │  │    "creation_date": "2023-01-15T10:30:00",                              │ │
+│  │  │    "last_modified_date": "2024-03-20T15:45:30",                         │ │
+│  │  │    "file_extension": ".py",                                             │ │
+│  │  │    "absolute_path": "/full/path/to/file.py"                             │ │
+│  │  │  }                                                                      │ │
+│  │  └─────────────────────────────────────────────────────────────────────────┘ │
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │                     CONFIGURATION FILE DISCOVERY                           │ │
+│  │  ┌─────────────────────────────────────────────────────────────────────────┤ │
+│  │  │  1. Get File Directory                                                  │ │
+│  │  │     file_dir = os.path.dirname(file_path)                               │ │
+│  │  │                                                                         │ │
+│  │  │  2. Exact Pattern Matching                                              │ │
+│  │  │     For each pattern in self.config_patterns:                           │ │
+│  │  │     ┌─────────────────────────────────────────────────────────────┐     │ │
+│  │  │     │  config_path = os.path.join(file_dir, pattern)              │     │ │
+│  │  │     │  if os.path.isfile(config_path):                            │     │ │
+│  │  │     │    associated_configs.append(os.path.abspath(config_path))  │     │ │
+│  │  │     └─────────────────────────────────────────────────────────────┘     │ │
+│  │  │                                                                         │ │
+│  │  │  3. Glob Pattern Matching                                               │ │
+│  │  │     For each glob_pattern in ["*.config.*", "*.conf", "*.ini"]:         │ │
+│  │  │     ┌─────────────────────────────────────────────────────────────┐     │ │
+│  │  │     │  matches = glob.glob(os.path.join(file_dir, glob_pattern))  │     │ │
+│  │  │     │  for match in matches:                                      │     │ │
+│  │  │     │    if match not in associated_configs:                      │     │ │
+│  │  │     │      associated_configs.append(os.path.abspath(match))      │     │ │
+│  │  │     └─────────────────────────────────────────────────────────────┘     │ │
+│  │  │                                                                         │ │
+│  │  │  Output: [                                                              │ │
+│  │  │    "/path/to/config.yaml",                                              │ │
+│  │  │    "/path/to/settings.json",                                            │ │
+│  │  │    "/path/to/app.config.ini"                                            │ │
+│  │  │  ]                                                                      │ │
+│  │  └─────────────────────────────────────────────────────────────────────────┘ │
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                         │
+                                         ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              FINAL AGGREGATED OUTPUT                            │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│  {                                                                              │
+│    "git": {                              // Git metadata                        │
+│      "creation_date": "2023-01-15T10:30:00",                                    │
+│      "last_modified_date": "2024-03-20T15:45:30",                               │
+│      "commit_count": 15                                                         │
+│    },                                                                           │
+│    "file": {                             // File system metadata                │
+│      "size_bytes": 2048576,                                                     │
+│      "creation_date": "2023-01-15T10:30:00",                                    │
+│      "last_modified_date": "2024-03-20T15:45:30",                               │
+│      "file_extension": ".py",                                                   │
+│      "absolute_path": "/full/path/to/file.py"                                   │
+│    },                                                                           │
+│    "associated_configs": [               // Related configuration files         │
+│      "/path/to/config.yaml",                                                    │
+│      "/path/to/settings.json",                                                  │
+│      "/path/to/app.config.ini"                                                  │
+│    ]                                                                            │
+│  }                                                                              │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+Key Features:
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│ • Multi-Source Metadata: Combines Git history, file system, and config data     │
+│ • Robust Error Handling: Graceful degradation when data sources unavailable     │
+│ • Git Integration: Uses GitPython to extract repository history                 │
+│ • Flexible Config Discovery: Multiple patterns for finding configuration files  │
+│ • Timestamp Consistency: ISO format timestamps across all metadata sources      │
+│ • Path Resolution: Always returns absolute paths for reliable file references   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+Flow Summary:
+1. Initialize with predefined configuration file patterns
+2. Extract metadata from three independent sources in parallel:
+   - Git repository history (creation, modification, commit count)
+   - File system metadata (size, timestamps, extension, path)
+   - Associated configuration files (exact and glob pattern matching)
+3. Aggregate all metadata into a structured dictionary with error handling
+4. Return comprehensive metadata suitable for indexing and analysis
+"""
 import datetime
 import glob
 import os
