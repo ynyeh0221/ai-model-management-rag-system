@@ -131,7 +131,7 @@ class TestSchemaValidator(unittest.TestCase):
         self.assertIsNotNone(result["errors"])
 
     def test_validate_without_schema_version(self):
-        # Create a valid document without specifying schema version
+        # Create a valid document without specifying a schema version
         document = {
             "name": "John Doe",
             "age": 30,
@@ -141,12 +141,12 @@ class TestSchemaValidator(unittest.TestCase):
         # Validate the document
         result = self.validator.validate(document, "test_schema")
 
-        # Check if validation passed and latest version was used
+        # Check if validation passed and the latest version was used
         self.assertTrue(result["valid"])
         self.assertEqual(result["document"]["$schema_version"], "1.1")
 
     def test_get_schema(self):
-        # Get schema with specific version
+        # Get schema with a specific version
         schema = self.validator.get_schema("test_schema", "1.0")
 
         # Check schema content
@@ -178,11 +178,11 @@ class TestSchemaValidator(unittest.TestCase):
         self.assertEqual(test_schema["all_versions"], ["1.0", "1.1"])
 
     def test_get_latest_version(self):
-        # Check latest version for test_schema (should be 1.1)
+        # Check the latest version for test_schema (should be 1.1)
         version = self.validator._get_latest_version("test_schema")
         self.assertEqual(version, "1.1")
 
-        # Check latest version for another_schema (should be 1.0)
+        # Check the latest version for another_schema (should be 1.0)
         version = self.validator._get_latest_version("another_schema")
         self.assertEqual(version, "1.0")
 
@@ -199,7 +199,7 @@ class TestSchemaValidator(unittest.TestCase):
         issues = self.validator.validate_schema_compatibility(document, "test_schema", "1.1")
 
         # Should have compatibility issues
-        self.assertTrue(len(issues) > 0)
+        self.assertGreater(len(issues), 0)
         self.assertIn("Missing required field: email", issues)
 
         # Add the missing field
@@ -242,7 +242,7 @@ class TestSchemaValidator(unittest.TestCase):
             self.validator.migrate_document(document, "test_schema", "1.1")
 
     def test_error_handling(self):
-        # Test with non-existent registry file
+        # Test with a non-existent registry file
         with self.assertRaises(FileNotFoundError):
             SchemaValidator("non_existent_file.json")
 
@@ -250,7 +250,7 @@ class TestSchemaValidator(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.validator.validate({"name": "John"}, "non_existent_schema")
 
-        # Test with invalid schema version
+        # Test with an invalid schema version
         document = {
             "name": "John",
             "$schema_version": "999.999"  # Non-existent version

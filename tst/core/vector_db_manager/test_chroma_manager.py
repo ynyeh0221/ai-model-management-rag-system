@@ -6,14 +6,14 @@ from unittest.mock import patch
 from src.core.vector_db.chroma_manager import ChromaManager
 
 
-# --- Dummy Classes for Testing ---
+# --- Fake Classes for Testing ---
 
 class DummyEmbeddingFunction:
     def __init__(self, model_name):
         self.model_name = model_name
 
     def __call__(self, texts):
-        # For simplicity, for each input text return a fixed-dimension vector, here of length 5.
+        # For simplicity, for each input text returns a fixed-dimension vector, here of length 5.
         # (In a real case, the embedding would be a numpy array or a list; here we use a list.)
         return [ [1.0] * 5 for _ in texts ]
 
@@ -69,7 +69,7 @@ class DummyCollection:
     def query(self, query_embeddings, n_results, include, where=None):
         # For simplicity, use get() and simulate distances as zeros.
         result = self.get()
-        # Create a distances array with zeros; same shape as ids list.
+        # Create a distance array with zeros; same shape as id list.
         result["distances"] = [ [0.0 for _ in result["ids"][0]] ] if result["ids"][0] else [[]]
         return result
 
@@ -144,7 +144,7 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
             msg=f"Expected collections {expected_collections} not found in actual collections {actual_collections}"
         )
 
-        # Also ensure that the dummy client has these collections
+        # Also ensure that the fake client has these collections
         for name in expected_collections:
             collection = self.manager.collections.get(name)
             self.assertIsNotNone(collection, f"Collection '{name}' not found in manager")
@@ -168,7 +168,7 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
         }
         doc_id = await self.manager.add_document(document, collection_name="model_script_processing")
         self.assertEqual(doc_id, "doc1")
-        # Check that the document exists in the dummy collection.
+        # Check that the document exists in the fake collection.
         collection = self.manager.get_collection("model_script_processing")
         self.assertLessEqual(
             document["metadata"].items(), collection.docs["doc1"]["metadata"].items()
@@ -270,7 +270,7 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
         ]
         await self.manager.add_documents(documents, collection_name="model_script_processing")
         # Delete documents matching a filter.
-        # Note: In our dummy implementation, the where filter doesn't actually filter,
+        # Note: In our dummy implementation, the where filter doesn't filter,
         # but we're testing the API calls correctly flow through.
         deleted_count = await self.manager.delete_documents(where={"test": {"$eq": "value1"}}, collection_name="model_script_processing")
         # Verify the count is as expected

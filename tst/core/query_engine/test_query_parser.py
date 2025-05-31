@@ -187,7 +187,7 @@ class TestQueryParser(unittest.TestCase):
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["search_type"], "color")
         self.assertIn("colors", params)
-        self.assertTrue(len(params["colors"]) >= 1)
+        self.assertGreater(len(params["colors"]), 1)
 
         # Test date search type
         query = "Find image_processing created in 2023"  # Using a format the implementation recognizes

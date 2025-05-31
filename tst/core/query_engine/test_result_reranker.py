@@ -38,7 +38,7 @@ class TestCrossEncoderReranker(unittest.TestCase):
 
     def test_init_import_error(self):
         """Test initialization when sentence_transformers can't be imported."""
-        # Setup a mock that will simulate the ImportError
+        # Set up a mock that will simulate the ImportError
         orig_import = __builtins__['__import__']
 
         def mock_import(name, *args, **kwargs):
@@ -112,7 +112,7 @@ class TestCrossEncoderReranker(unittest.TestCase):
             self.assertEqual(reranked_results[2]["id"], 2)  # Score 0.6
 
     def test_rerank_empty_results(self):
-        """Test reranking with empty results list."""
+        """Test reranking with an empty results list."""
         # Create a mock for the model
         mock_model = MagicMock()
 
@@ -183,7 +183,7 @@ class TestCrossEncoderReranker(unittest.TestCase):
             # Sort by score
             reranked = sorted(results_input, key=lambda r: r["rerank_score"], reverse=True)
 
-            # Apply threshold
+            # Apply the threshold
             if threshold is not None:
                 reranked = [r for r in reranked if r["rerank_score"] >= threshold]
 

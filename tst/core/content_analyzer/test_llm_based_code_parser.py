@@ -224,7 +224,7 @@ eval_dataset = "CIFAR-10-test"
             self.assertIn("source_block", chunk)
             self.assertIn("offset", chunk)
             self.assertIsInstance(chunk["text"], str)
-            self.assertTrue(len(chunk["text"].strip()) > 0)
+            self.assertGreater(len(chunk["text"].strip()), 0)
 
         # Join all chunks' text to check content
         joined_code = "\n".join(chunk["text"] for chunk in chunks)

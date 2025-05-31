@@ -33,7 +33,7 @@ class TestImageEmbedder(unittest.TestCase):
         real_img.save(img_io, format='PNG')
         self.mock_image_bytes = img_io.getvalue()
 
-        # Set up proper mock clip model
+        # Set up a proper mock clip model
         self.mock_clip_model = MagicMock()
         self.mock_clip_model.visual.output_dim = TEST_EMBEDDING_DIM
         self.mock_clip_model.encode_image.return_value = torch.ones((1, TEST_EMBEDDING_DIM), device=TEST_DEVICE)
@@ -211,7 +211,7 @@ class TestImageEmbedder(unittest.TestCase):
         # Check if os.path.exists was called with the correct parameters
         mock_exists.assert_called_once_with("test_image.jpg")
 
-        # Test error case when file does not exist
+        # Test error case when a file does not exist
         mock_exists.return_value = False
         with self.assertRaises(ValueError) as cm:
             embedder._load_and_preprocess_image("nonexistent_image.jpg")
@@ -305,7 +305,7 @@ class TestImageEmbedder(unittest.TestCase):
         self.assertIsInstance(result, np.ndarray)
         self.assertEqual(result.shape, (3, TEST_TARGET_DIM))
 
-        # Test with empty list
+        # Test with an empty list
         result = embedder.embed_batch([])
         self.assertIsInstance(result, np.ndarray)
         self.assertEqual(result.shape, (0,))
@@ -441,7 +441,7 @@ class TestImageEmbedder(unittest.TestCase):
         # Check if os.path.exists was called with the correct parameters
         mock_exists.assert_called_once_with("test_image.jpg")
 
-        # Test error case when file does not exist
+        # Test error case when a file does not exist
         mock_exists.return_value = False
         with self.assertRaises(ValueError) as cm:
             embedder._load_and_preprocess_image("nonexistent_image.jpg")
