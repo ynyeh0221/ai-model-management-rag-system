@@ -32,6 +32,7 @@ scikit-learn = "*"
 langchain_core = "*"
 langchain_ollama = "*"
 graphviz="*"
+pandas="*"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "*"
