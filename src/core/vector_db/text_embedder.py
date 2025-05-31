@@ -43,7 +43,7 @@ class TextEmbedder:
                 os.makedirs(self.cache_folder, exist_ok=True)
                 os.environ['TRANSFORMERS_CACHE'] = self.cache_folder
 
-            # Detect device if not specified
+            # Detect a device if not specified
             if self.device is None:
                 # Extract nested conditional into separate statements
                 if torch.backends.mps.is_available():
@@ -86,7 +86,7 @@ class TextEmbedder:
         """
         if not text:
             self.logger.warning("Received empty text for embedding")
-            # Return zero vector with correct dimension
+            # Return zero vectors with correct dimension
             return np.zeros(self.embedding_dim)
 
         try:
@@ -96,7 +96,7 @@ class TextEmbedder:
 
         except Exception as e:
             self.logger.error(f"Error embedding text: {e}", exc_info=True)
-            # Return zero vector in case of error
+            # Return zero vectors in case of error
             return np.zeros(self.embedding_dim)
 
     def embed_batch(
@@ -140,7 +140,7 @@ class TextEmbedder:
             self.logger.error(
                 f"Error embedding batch of {len(texts)} texts: {e}", exc_info=True
             )
-            # Return zero matrix in case of error
+            # Return zero matrices in case of error
             return np.zeros((len(texts), self.embedding_dim))
 
     def embed_mixed_content(
@@ -188,7 +188,7 @@ class TextEmbedder:
 
         except Exception as e:
             self.logger.error(f"Error embedding mixed content: {e}", exc_info=True)
-            # Return zero vector in case of error
+            # Return zero vectors in case of error
             return np.zeros(self.embedding_dim)
 
     def compute_similarity(self, embedding1: np.ndarray, embedding2: np.ndarray) -> float:

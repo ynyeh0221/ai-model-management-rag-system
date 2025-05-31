@@ -11,8 +11,8 @@ class TestImageDisplayManager(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures before each test method."""
         # Create the patches that will be applied to the actual module
-        self.display_utils_patcher = patch('cli.cli_response_utils.image_display_manager.DisplayUtils')
-        self.thumbnail_table_patcher = patch('cli.cli_response_utils.image_display_manager.ThumbnailTable')
+        self.display_utils_patcher = patch('src.cli.cli_response_utils.image_display_manager.DisplayUtils')
+        self.thumbnail_table_patcher = patch('src.cli.cli_response_utils.image_display_manager.ThumbnailTable')
 
         # Start the patches
         self.mock_display_utils = self.display_utils_patcher.start()
