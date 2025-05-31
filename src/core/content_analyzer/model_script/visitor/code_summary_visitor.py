@@ -23,7 +23,7 @@ class CodeSummaryVisitor(ast.NodeVisitor):
 
         # Counters and context tracking
         self.call_counter: Dict[str, int] = {}
-        self.current_function: Optional[str]
+        self.current_function: Optional[str] = None
         self.function_references: Dict[str, Set[str]] = {}
 
     # ---------------------- Visitor Methods ----------------------
