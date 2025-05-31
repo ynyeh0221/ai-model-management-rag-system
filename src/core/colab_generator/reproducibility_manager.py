@@ -3,7 +3,7 @@ import os
 import platform
 import socket
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 
 import nbformat
 from nbconvert import HTMLExporter, PDFExporter
@@ -12,6 +12,8 @@ from traitlets.config import Config
 
 class ReproducibilityManager:
     def __init__(self):
+        # __init__ is deliberately empty because there is no state to initialize.
+        # If we later need to cache or configure something, we can add it here.
         pass
 
     def generate_execution_log(self, notebook, parameters):
@@ -23,20 +25,25 @@ class ReproducibilityManager:
             parameters (dict): Execution parameters used in this run.
 
         Returns:
-            dict: Execution log containing hash, timestamp, parameters, etc.
+            dict: Execution log containing hash, timestamp (UTC), parameters, etc.
         """
+        # Compute a SHA256 hash of the notebook contents
         digest = self.calculate_hash_digest(notebook)
-        timestamp = datetime.utcnow().isoformat()
+
+        # Use a timezone-aware UTC timestamp instead of datetime.utcnow()
+        now_utc = datetime.now(timezone.utc)
+        timestamp = now_utc.isoformat()
+
         log = {
-            "execution_id": f"exec_{digest[:8]}_{int(datetime.utcnow().timestamp())}",
+            "execution_id": f"exec_{digest[:8]}_{int(now_utc.timestamp())}",
             "timestamp": timestamp,
             "notebook_hash": digest,
             "parameters": parameters,
             "machine": {
                 "hostname": socket.gethostname(),
                 "platform": platform.platform(),
-                "python_version": platform.python_version()
-            }
+                "python_version": platform.python_version(),
+            },
         }
         return log
 
@@ -50,6 +57,7 @@ class ReproducibilityManager:
         Returns:
             str: SHA256 hex digest.
         """
+        # Serialize the notebook to a string, then hash it
         nb_str = nbformat.writes(notebook)
         return hashlib.sha256(nb_str.encode("utf-8")).hexdigest()
 
@@ -65,22 +73,26 @@ class ReproducibilityManager:
         """
         try:
             import pkg_resources
+
             packages = sorted(
                 [f"{d.project_name}=={d.version}" for d in pkg_resources.working_set]
             )
         except ImportError:
             packages = ["Could not retrieve installed packages"]
 
+        # Again, use timezone-aware UTC timestamp
+        now_utc = datetime.now(timezone.utc)
+
         env_snapshot = {
             "execution_id": execution_id,
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": now_utc.isoformat(),
             "system_info": {
                 "os": platform.system(),
                 "os_version": platform.version(),
                 "python_version": platform.python_version(),
-                "hostname": socket.gethostname()
+                "hostname": socket.gethostname(),
             },
-            "packages": packages
+            "packages": packages,
         }
         return env_snapshot
 
@@ -99,7 +111,9 @@ class ReproducibilityManager:
         body, _ = exporter.from_notebook_node(notebook)
 
         if not output_path:
-            output_path = os.path.join(tempfile.gettempdir(), "notebook_export.html")
+            output_path = os.path.join(
+                tempfile.gettempdir(), "notebook_export.html"
+            )
 
         with open(output_path, "w", encoding="utf-8") as f:
             f.write(body)
@@ -125,7 +139,9 @@ class ReproducibilityManager:
         pdf_data, _ = exporter.from_notebook_node(notebook)
 
         if not output_path:
-            output_path = os.path.join(tempfile.gettempdir(), "notebook_export.pdf")
+            output_path = os.path.join(
+                tempfile.gettempdir(), "notebook_export.pdf"
+            )
 
         with open(output_path, "wb") as f:
             f.write(pdf_data)
@@ -143,9 +159,11 @@ class ReproducibilityManager:
         Returns:
             nbformat.NotebookNode: Updated notebook with reproducibility info.
         """
-        log = self.generate_execution_log(notebook, parameters={"model_id": model_id})
+        log = self.generate_execution_log(
+            notebook, parameters={"model_id": model_id}
+        )
         notebook.metadata["reproducibility"] = {
             "execution_log": log,
-            "environment": self.record_environment(log["execution_id"])
+            "environment": self.record_environment(log["execution_id"]),
         }
         return notebook
