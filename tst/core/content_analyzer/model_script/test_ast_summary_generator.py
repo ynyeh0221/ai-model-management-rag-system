@@ -15,67 +15,67 @@ class TestASTSummaryGenerator(unittest.TestCase):
 
         # Sample valid Python code for testing
         self.sample_model_code = '''
-        import torch
-        import torch.nn as nn
-        from torchvision.datasets import CIFAR10
-        from torch.utils.data import DataLoader
-        
-        class SimpleModel(nn.Module):
-            def __init__(self, num_classes=10):
-                super(SimpleModel, self).__init__()
-                self.conv1 = nn.Conv2d(3, 64, kernel_size=3)
-                self.conv2 = nn.Conv2d(64, 128, kernel_size=3)
-                self.fc1 = nn.Linear(128 * 6 * 6, 256)
-                self.fc2 = nn.Linear(256, num_classes)
-                self.relu = nn.ReLU()
-                self.pool = nn.AdaptiveAvgPool2d((6, 6))
-        
-            def forward(self, x):
-                x = self.relu(self.conv1(x))
-                x = self.relu(self.conv2(x))
-                x = self.pool(x)
-                x = x.view(-1, 128 * 6 * 6)
-                x = self.relu(self.fc1(x))
-                x = self.fc2(x)
-                return x
-        
-        def create_dataloader():
-            dataset = CIFAR10(root='./data', train=True, download=True)
-            dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
-            return dataloader
-        '''
+import torch
+import torch.nn as nn
+from torchvision.datasets import CIFAR10
+from torch.utils.data import DataLoader
+
+class SimpleModel(nn.Module):
+    def __init__(self, num_classes=10):
+        super(SimpleModel, self).__init__()
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=3)
+        self.conv2 = nn.Conv2d(64, 128, kernel_size=3)
+        self.fc1 = nn.Linear(128 * 6 * 6, 256)
+        self.fc2 = nn.Linear(256, num_classes)
+        self.relu = nn.ReLU()
+        self.pool = nn.AdaptiveAvgPool2d((6, 6))
+
+    def forward(self, x):
+        x = self.relu(self.conv1(x))
+        x = self.relu(self.conv2(x))
+        x = self.pool(x)
+        x = x.view(-1, 128 * 6 * 6)
+        x = self.relu(self.fc1(x))
+        x = self.fc2(x)
+        return x
+
+def create_dataloader():
+    dataset = CIFAR10(root='./data', train=True, download=True)
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+    return dataloader
+'''
 
         self.sample_invalid_code = '''
-        import torch
-        class InvalidModel(nn.Module):
-            def __init__(self):
-                # Missing super().__init__()
-                self.layer = nn.Linear(10, 5
-                # Missing closing parenthesis - syntax error
-        '''
+import torch
+class InvalidModel(nn.Module):
+    def __init__(self):
+        # Missing super().__init__()
+        self.layer = nn.Linear(10, 5
+        # Missing closing parenthesis - syntax error
+'''
 
         self.sample_dataset_code = '''
-        import torch
-        from torch.utils.data import Dataset, DataLoader
-        from torchvision.datasets import MNIST, CIFAR10, ImageNet
-        
-        class CustomDataset(Dataset):
-            def __init__(self, data_path):
-                self.data_path = data_path
-        
-            def __len__(self):
-                return 1000
-        
-            def __getitem__(self, idx):
-                return torch.randn(3, 32, 32), torch.randint(0, 10, (1,))
-        
-        # Multiple dataset references
-        mnist_dataset = MNIST('./data', train=True)
-        cifar_dataset = CIFAR10('./data', train=False)
-        custom_dataset = CustomDataset('./custom_data')
-        
-        dataloader = DataLoader(mnist_dataset, batch_size=64)
-        '''
+import torch
+from torch.utils.data import Dataset, DataLoader
+from torchvision.datasets import MNIST, CIFAR10, ImageNet
+
+class CustomDataset(Dataset):
+    def __init__(self, data_path):
+        self.data_path = data_path
+
+    def __len__(self):
+        return 1000
+
+    def __getitem__(self, idx):
+        return torch.randn(3, 32, 32), torch.randint(0, 10, (1,))
+
+# Multiple dataset references
+mnist_dataset = MNIST('./data', train=True)
+cifar_dataset = CIFAR10('./data', train=False)
+custom_dataset = CustomDataset('./custom_data')
+
+dataloader = DataLoader(mnist_dataset, batch_size=64)
+'''
 
     def test_init(self):
         """Test ASTSummaryGenerator initialization."""
@@ -157,14 +157,14 @@ class TestASTSummaryGenerator(unittest.TestCase):
         """Test _detect_datasets fallback behavior."""
         # Test with code that has no obvious dataset keywords
         simple_code = '''
-        import torch
-        import torch.nn as nn
-        
-        class SimpleModel(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.layer = nn.Linear(10, 5)
-        '''
+import torch
+import torch.nn as nn
+
+class SimpleModel(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = nn.Linear(10, 5)
+'''
         tree = ast.parse(simple_code)
         result = self.generator._detect_datasets(tree)
 
@@ -811,20 +811,20 @@ class TestASTSummaryGenerator(unittest.TestCase):
         """Test generate_summary with actual visitor implementation."""
         # Simple PyTorch model that should work with real visitors
         simple_model = '''
-        import torch
-        import torch.nn as nn
-        
-        class SimpleNet(nn.Module):
-            def __init__(self):
-                super(SimpleNet, self).__init__()
-                self.conv1 = nn.Conv2d(3, 32, 3)
-                self.fc1 = nn.Linear(32, 10)
-        
-            def forward(self, x):
-                x = self.conv1(x)
-                x = self.fc1(x)
-                return x
-        '''
+import torch
+import torch.nn as nn
+
+class SimpleNet(nn.Module):
+    def __init__(self):
+        super(SimpleNet, self).__init__()
+        self.conv1 = nn.Conv2d(3, 32, 3)
+        self.fc1 = nn.Linear(32, 10)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.fc1(x)
+        return x
+'''
 
         result = self.generator.generate_summary(simple_model, "simple_model.py")
 
@@ -838,17 +838,17 @@ class TestASTSummaryGenerator(unittest.TestCase):
     def test_summary_with_dataset_code(self):
         """Test summary generation with dataset-heavy code."""
         dataset_heavy_code = '''
-        from torchvision.datasets import MNIST, CIFAR10
-        from torch.utils.data import DataLoader
-        
-        # Load datasets
-        train_dataset = MNIST('./data', train=True)
-        test_dataset = CIFAR10('./data', train=False)
-        
-        # Create data loaders
-        train_loader = DataLoader(train_dataset, batch_size=32)
-        test_loader = DataLoader(test_dataset, batch_size=32)
-        '''
+from torchvision.datasets import MNIST, CIFAR10
+from torch.utils.data import DataLoader
+
+# Load datasets
+train_dataset = MNIST('./data', train=True)
+test_dataset = CIFAR10('./data', train=False)
+
+# Create data loaders
+train_loader = DataLoader(train_dataset, batch_size=32)
+test_loader = DataLoader(test_dataset, batch_size=32)
+'''
 
         result = self.generator.generate_summary(dataset_heavy_code, "dataset_example.py")
 
@@ -866,26 +866,26 @@ class TestASTSummaryGenerator(unittest.TestCase):
         """Test that our expectations match the actual behavior seen in failures."""
         # This is the code from the integration test that was failing
         pytorch_model_code = '''
-        import torch
-        import torch.nn as nn
-        from torchvision.datasets import CIFAR10
-        
-        class ResNet(nn.Module):
-            def __init__(self, num_classes=10):
-                super(ResNet, self).__init__()
-                self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3)
-                self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-                self.fc = nn.Linear(512, num_classes)
-        
-            def forward(self, x):
-                x = self.conv1(x)
-                x = self.avgpool(x)
-                x = torch.flatten(x, 1)
-                x = self.fc(x)
-                return x
-        
-        dataset = CIFAR10(root='./data', train=True)
-        '''
+import torch
+import torch.nn as nn
+from torchvision.datasets import CIFAR10
+
+class ResNet(nn.Module):
+    def __init__(self, num_classes=10):
+        super(ResNet, self).__init__()
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(512, num_classes)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.fc(x)
+        return x
+
+dataset = CIFAR10(root='./data', train=True)
+'''
 
         result = self.generator.generate_summary(pytorch_model_code, "resnet_model.py")
 
@@ -911,32 +911,32 @@ class TestASTSummaryGeneratorIntegration(unittest.TestCase):
         """Test end-to-end summary generation with realistic code."""
         # Use a realistic PyTorch model
         pytorch_model_code = '''
-        import torch
-        import torch.nn as nn
-        from torchvision.datasets import CIFAR10
-        
-        class ResNet(nn.Module):
-            def __init__(self, num_classes=10):
-                super(ResNet, self).__init__()
-                self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3)
-                self.bn1 = nn.BatchNorm2d(64)
-                self.relu = nn.ReLU(inplace=True)
-                self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-                self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
-                self.fc = nn.Linear(512, num_classes)
-        
-            def forward(self, x):
-                x = self.conv1(x)
-                x = self.bn1(x)
-                x = self.relu(x)
-                x = self.maxpool(x)
-                x = self.avgpool(x)
-                x = torch.flatten(x, 1)
-                x = self.fc(x)
-                return x
-        
-        dataset = CIFAR10(root='./data', train=True)
-        '''
+import torch
+import torch.nn as nn
+from torchvision.datasets import CIFAR10
+
+class ResNet(nn.Module):
+    def __init__(self, num_classes=10):
+        super(ResNet, self).__init__()
+        self.conv1 = nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3)
+        self.bn1 = nn.BatchNorm2d(64)
+        self.relu = nn.ReLU(inplace=True)
+        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(512, num_classes)
+
+    def forward(self, x):
+        x = self.conv1(x)
+        x = self.bn1(x)
+        x = self.relu(x)
+        x = self.maxpool(x)
+        x = self.avgpool(x)
+        x = torch.flatten(x, 1)
+        x = self.fc(x)
+        return x
+
+dataset = CIFAR10(root='./data', train=True)
+'''
 
         result = self.generator.generate_summary(pytorch_model_code, "resnet_model.py")
 
@@ -959,17 +959,17 @@ class TestASTSummaryGeneratorIntegration(unittest.TestCase):
     def test_error_handling_with_complex_invalid_syntax(self):
         """Test error handling with complex invalid syntax."""
         complex_bad_code = '''
-        import torch
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.layer1 = nn.Linear(10, 5
-                # Missing closing paren and more syntax errors
-                if True
-                    self.layer2 = nn.Linear(5, 1)
-                else
-                    self.layer3 = nn.Linear(5, 2)
-        '''
+import torch
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer1 = nn.Linear(10, 5
+        # Missing closing paren and more syntax errors
+        if True
+            self.layer2 = nn.Linear(5, 1)
+        else
+            self.layer3 = nn.Linear(5, 2)
+'''
 
         result = self.generator.generate_summary(complex_bad_code)
         self.assertIn("Failed to parse AST:", result)
