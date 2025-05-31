@@ -1,5 +1,6 @@
 import unittest
-from unittest.mock import Mock, patch
+
+from src.cli.cli_response_utils.thumbnail_table import ThumbnailTable
 
 
 class TestThumbnailTable(unittest.TestCase):
@@ -8,14 +9,13 @@ class TestThumbnailTable(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures before each test method."""
         # Import the class to test
-        from cli.cli_response_utils.thumbnail_table import ThumbnailTable
         self.ThumbnailTable = ThumbnailTable
 
     def test_init_search_result_table(self):
         """Test initialization for search result table."""
         table = self.ThumbnailTable(is_search_result=True)
 
-        # Check that rows are initialized as empty list
+        # Check that rows are initialized as an empty list
         self.assertEqual(table.rows, [])
 
         # Check search result headers
@@ -28,7 +28,7 @@ class TestThumbnailTable(unittest.TestCase):
         """Test initialization for regular (non-search result) table."""
         table = self.ThumbnailTable(is_search_result=False)
 
-        # Check that rows are initialized as empty list
+        # Check that rows are initialized as an empty list
         self.assertEqual(table.rows, [])
 
         # Check regular headers
@@ -40,7 +40,7 @@ class TestThumbnailTable(unittest.TestCase):
         """Test adding a row with thumbnail data to search result table."""
         table = self.ThumbnailTable(is_search_result=True)
 
-        # Test data for search result (7 fields before thumbnail insertion)
+        # Test data for the search result (7 fields before thumbnail insertion)
         row_data = [1, "img123", "model1", "2023-01-01", "2023-01-02", "10", "/path/to/image.jpg"]
         ascii_img = ["  ***  ", " ***** ", "*******"]
 
@@ -110,7 +110,7 @@ class TestThumbnailTable(unittest.TestCase):
         ascii_img1 = ["***", "***", "***"]
         table.add_row(row_data1, ascii_img1)
 
-        # Add second row without thumbnail
+        # Add second row without a thumbnail
         row_data2 = ["img2", "/path/to/image2.jpg"]
         table.add_row(row_data2, ascii_img=None)
 
@@ -121,7 +121,7 @@ class TestThumbnailTable(unittest.TestCase):
         expected_row1 = ["img1", ascii_img1, "/path/to/image1.jpg"]
         self.assertEqual(table.rows[0], expected_row1)
 
-        # Verify second row
+        # Verify the second row
         expected_row2 = ["img2", ["Thumbnail not available"], "/path/to/image2.jpg"]
         self.assertEqual(table.rows[1], expected_row2)
 
@@ -188,7 +188,7 @@ class TestThumbnailTable(unittest.TestCase):
         """Test string representation of table with placeholder thumbnail."""
         table = self.ThumbnailTable(is_search_result=False)
 
-        # Add a row without thumbnail
+        # Add a row without a thumbnail
         row_data = ["img123", "/path/to/image.jpg"]
         table.add_row(row_data, ascii_img=None)
 
@@ -222,7 +222,7 @@ class TestThumbnailTable(unittest.TestCase):
         self.assertIn("Thumbnail not available", result)
 
         # Check for multiple separators (one after each row)
-        separator_count = result.count("----")  # Part of separator line
+        separator_count = result.count("----")  # Part of the separator line
         self.assertGreaterEqual(separator_count, 3)  # At least 3 rows worth
 
     def test_column_width_calculation(self):

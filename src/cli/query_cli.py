@@ -30,7 +30,7 @@ class CLIInterface:
         self.user_id = "anonymous"
         self.components = None
 
-        # Display managers and processors, will be initialized in start_cli
+        # Display managers and processors will be initialized in start_cli
         self.model_display_manager = None
         self.image_display_manager = None
         self.notebook_generator = None
@@ -48,7 +48,8 @@ class CLIInterface:
             host: Hostname, kept for API compatibility, not used in CLI mode
             port: Port number, kept for API compatibility, not used in CLI mode
         """
-        print(f"Starting command line interface (Web UI will be developed later)...")
+        print("Starting command line interface (Web UI will be developed later)...")
+        print(f"Host: {host}. Port: {port}")
 
         # Store components reference
         self.components = components
@@ -136,7 +137,7 @@ class CLIInterface:
 
     def _handle_log(self, log_data):
         """Handle log callback"""
-        # Can format log output as needed
+        # Can a format log output as needed?
         level = log_data.get("level", "info")
         message = log_data.get("message", "")
 

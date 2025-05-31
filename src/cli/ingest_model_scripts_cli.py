@@ -509,6 +509,7 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
 class ScriptProcessorRunner:
 
     def __init__(self):
+        """empty"""
         pass
 
     def process_model_scripts(self, components, directory_path):

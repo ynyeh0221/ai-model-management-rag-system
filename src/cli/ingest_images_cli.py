@@ -291,15 +291,15 @@ class ImageProcessorRunner:
 
             # Check if embedding is valid and not empty
             if embedding is None:
-                logger.error(f"Failed to generate embedding: result is None")
+                logger.error("Failed to generate embedding: result is None")
                 # Use a random embedding as fallback
                 embedding = np.random.rand(384).astype(np.float32)  # Default embedding size
-                logger.info(f"Using random fallback embedding")
+                logger.info("Using random fallback embedding")
             elif isinstance(embedding, (list, np.ndarray)) and len(embedding) == 0:
-                logger.error(f"Failed to generate embedding: empty array")
+                logger.error("Failed to generate embedding: empty array")
                 # Use a random embedding as fallback
                 embedding = np.random.rand(384).astype(np.float32)  # Default embedding size
-                logger.info(f"Using random fallback embedding")
+                logger.info("Using random fallback embedding")
             else:
                 logger.info(f"Successfully generated embedding of shape: {np.array(embedding).shape}")
 
@@ -307,7 +307,7 @@ class ImageProcessorRunner:
             logger.error(f"Error generating embedding for {file_path}: {str(e)}")
             # Create a random embedding as fallback
             embedding = np.random.rand(384).astype(np.float32)  # Default embedding size
-            logger.info(f"Using random fallback embedding due to error")
+            logger.info("Using random fallback embedding due to error")
 
         # 9. Apply access control
         access_metadata = access_control.get_document_permissions(document)
@@ -341,7 +341,7 @@ class ImageProcessorRunner:
                 document=document,
                 embed_content=embedding  # Pass the actual embedding, not the file path
             ))
-            logger.info(f"Document added successfully")
+            logger.info("Document added successfully")
 
         except Exception as e:
             logger.error(f"Error adding document to Chroma: {str(e)}")
