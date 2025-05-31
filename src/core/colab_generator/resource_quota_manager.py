@@ -1,5 +1,5 @@
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 class ResourceQuotaManager:
@@ -53,7 +53,8 @@ class ResourceQuotaManager:
 
     def update_usage(self, user_id, resource_type, amount):
         """Update a user's usage by increasing the usage count."""
-        now = datetime.utcnow().isoformat()
+        # Use timezone-aware UTC timestamp instead of datetime.utcnow()
+        now = datetime.now(timezone.utc).isoformat()
 
         with self._get_connection() as conn:
             c = conn.cursor()
@@ -66,7 +67,8 @@ class ResourceQuotaManager:
             if row:
                 new_usage = row[0] + amount
                 c.execute("""
-                    UPDATE usage SET usage = ?, last_updated = ? 
+                    UPDATE usage
+                    SET usage = ?, last_updated = ?
                     WHERE user_id = ? AND resource_type = ?
                 """, (new_usage, now, user_id, resource_type))
             else:
