@@ -109,7 +109,7 @@ class NotebookGenerator:
             content = doc.get("document", "")
             metadata = doc.get("metadata", {})
 
-            # If document is a string, wrap it into a structured format
+            # If a document is a string, wrap it into a structured format
             if isinstance(content, str):
                 chunk_contents.append({
                     "text": content,

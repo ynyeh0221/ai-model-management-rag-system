@@ -411,7 +411,7 @@ class QueryParser:
             Dictionary of extracted parameters
         """
         if intent is None:
-            intent, reason = self.classify_intent(query_text)
+            intent, _ = self.classify_intent(query_text)
 
         parameters = {}
         query_lower = query_text.lower()

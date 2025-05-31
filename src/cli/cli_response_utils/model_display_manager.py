@@ -3,7 +3,7 @@ from datetime import datetime
 
 from prettytable import PrettyTable
 
-from cli.cli_response_utils.display_utils import DisplayUtils
+from src.cli.cli_response_utils.display_utils import DisplayUtils
 
 
 class ModelDisplayManager:

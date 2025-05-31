@@ -420,7 +420,7 @@ class DenseReranker:
             return []
 
         if self.model is None:
-            # Simply return original results if model is not available
+            # Simply return original results if the model is not available
             for i, result in enumerate(results):
                 # Preserve original scores
                 result["rerank_score"] = result.get("score", 1.0 - i * 0.01)

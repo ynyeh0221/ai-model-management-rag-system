@@ -1,5 +1,5 @@
 import ast
-from typing import List, Set, Dict, Any, TYPE_CHECKING
+from typing import List, Set, Dict, Any, TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from src.core.content_analyzer.model_script.ast_summary_generator import ASTSummaryGenerator
@@ -23,7 +23,7 @@ class CodeSummaryVisitor(ast.NodeVisitor):
 
         # Counters and context tracking
         self.call_counter: Dict[str, int] = {}
-        self.current_function: str = None
+        self.current_function: Optional[str]
         self.function_references: Dict[str, Set[str]] = {}
 
     # ---------------------- Visitor Methods ----------------------
