@@ -215,7 +215,7 @@ v
 │  Flags: re.DOTALL (multiline matching)                      │
 │                                                             │
 │  Before: "<thinking>Let me analyze...</thinking>{"key":...} │
-│  After:  {"key":...}                                        │
+│  After:  {"key": ...}                                        │
 └─────────────────────────────────────────────────────────────┘
 │
 v
@@ -513,9 +513,9 @@ def filter_model_architecture_from_ast_summary(summary: str) -> str:
     """
     Given an AST digest summary, return only the lines that
     contain:
-      - Import / From   (framework & dataset)
+      - Import / From   (framework and dataset)
       - Variable        (batch_size, lr, optimizer, epochs, device)
-      - Model Architecture and all subsequent lines
+      - Model Architecture and all later lines
     """
     lines = summary.splitlines()
     filtered: List[str] = []
@@ -536,51 +536,65 @@ def filter_model_architecture_from_ast_summary(summary: str) -> str:
 
     return "\n".join(filtered)
 
-def filter_ast_summary_for_metadata(summary: str, include_model_architecture: bool = True) -> str:
+def filter_ast_summary_for_metadata(
+    summary: str, include_model_architecture: bool = True
+) -> str:
     """
     Given an AST digest summary, return only the lines that
     contain:
-      - Import / From   (framework & dataset)
+      - Import / From   (framework and dataset)
       - Variable        (batch_size, lr, optimizer, epochs, device)
-      - Model Architecture and all subsequent lines
+      - Model Architecture and all later lines
     """
     lines = summary.splitlines()
     filtered: List[str] = []
     in_model_architecture = False
 
-    # what prefixes we always keep
+    # Prefixes we always keep (e.g., dataset declarations)
     keep_prefixes = ("Dataset:", "Images folder:")
-    # which variable names to keep
+    # Variable keys to look for (e.g., batch_size, lr, optimizer, ...)
     var_keys = ("batch", "lr", "epoch", "optimizer", "device")
+
+    def is_relevant_variable_line(text: str) -> bool:
+        """
+        Return True if this line starts with "Variable:" and the variable name
+        (the part before '=') contains one of var_keys.
+        """
+        if not text.startswith("Variable:"):
+            return False
+
+        m = re.match(r"Variable:\s*([^=]+)", text)
+        if not m:
+            return False
+
+        varname = m.group(1).strip().lower()
+        # Keep only if any keyword is in the variable name
+        return any(key in varname for key in var_keys)
 
     for line in lines:
         stripped = line.strip()
 
-        # Check if we've reached the Model Architecture section
+        # Once we hit "Model Architecture:", start capturing everything below
         if stripped.startswith("Model Architecture:"):
             in_model_architecture = True
             filtered.append(stripped)
             continue
 
-        # If we're in the Model Architecture section, keep all lines
+        # If already in the Model Architecture section, keep it (only if allowed)
         if in_model_architecture and include_model_architecture:
             filtered.append(stripped)
             continue
 
-        # For other lines, apply the original filtering logic
+        # Keep any line that starts with one of the always‐keep prefixes
         if any(stripped.startswith(pref) for pref in keep_prefixes):
             filtered.append(stripped)
             continue
 
-        # selectively keep Variable: lines
-        if stripped.startswith("Variable:"):
-            # extract the var name before the '='
-            m = re.match(r"Variable:\s*([^=]+)", stripped)
-            if m:
-                varname = m.group(1).strip().lower()
-                if any(key in varname for key in var_keys):
-                    filtered.append(stripped)
+        # Keep only relevant Variable: lines
+        if is_relevant_variable_line(stripped):
+            filtered.append(stripped)
 
+        # All other lines are dropped
     return "\n".join(filtered)
 
 def sanitize_json_string(json_str: str) -> str:
@@ -865,7 +879,7 @@ class LLMBasedCodeParser:
     Methods:
     -------
     parse(file_path):
-        Main entry point for parsing a file. Validates file type and delegates to appropriate parser.
+        Main entry point for parsing a file. Validates a file type and delegates to the appropriate parser.
 
     parse_file(file_path):
         Comprehensive parser for supported Python files (.py, .ipynb). Extracts metadata and info.
@@ -922,73 +936,82 @@ class LLMBasedCodeParser:
         with open(file_path, "r", encoding="utf-8") as f:
             file_content = f.read()
 
+        # Initialize base model_info with file timestamps
         model_info = {
             "creation_date": get_creation_date(file_path),
-            "last_modified_date": get_last_modified_date(file_path)
+            "last_modified_date": get_last_modified_date(file_path),
         }
 
+        # Extract any additional info and merge
         extracted_info = self.extract_model_info(file_content, file_path)
         model_info.update(extracted_info)
 
-        self.llm_metadata_cache = self.extract_metadata_by_llm(file_content, file_path, max_retries=15)
+        # Populate the LLM‐derived metadata cache
+        self.llm_metadata_cache = self.extract_metadata_by_llm(
+            file_content, file_path, max_retries=15
+        )
 
-        # Safely parse framework
-        framework = self.llm_metadata_cache.get("framework", {})
-        if isinstance(framework, dict):
-            model_info["framework"] = {
-                "name": framework.get("name") if isinstance(framework.get("name"), str) else None,
-                "version": framework.get("version") if isinstance(framework.get("version"), str) else None
-            }
-        else:
-            model_info["framework"] = {"name": None, "version": None}
+        # Helper to safely extract a dict of fields with type checks
+        def _extract_typed_dict(key: str, schema: dict, default: dict) -> dict:
+            raw = self.llm_metadata_cache.get(key)
+            if isinstance(raw, dict):
+                return {
+                    field: (raw.get(field) if isinstance(raw.get(field), typ) else None)
+                    for field, typ in schema.items()
+                }
+            return default
 
-        arch = self.llm_metadata_cache.get("architecture", {})
-        if isinstance(arch, dict):
-            model_info["architecture"] = arch
-        else:
-            model_info["architecture"] = {"type": None, "reason": None}
+        # Framework: expect {"name": str, "version": str}
+        model_info["framework"] = _extract_typed_dict(
+            "framework",
+            {"name": str, "version": str},
+            {"name": None, "version": None},
+        )
 
-        dataset = self.llm_metadata_cache.get("dataset", {})
-        if isinstance(dataset, dict):
-            model_info["dataset"] = {
-                "name": dataset.get("name") if isinstance(dataset.get("name"), str) else None
-            }
-        else:
-            model_info["dataset"] = {"name": None}
+        # Architecture: accept any dict, else default
+        arch_raw = self.llm_metadata_cache.get("architecture")
+        model_info["architecture"] = (
+            arch_raw if isinstance(arch_raw, dict) else {"type": None, "reason": None}
+        )
 
-        images_folder = self.llm_metadata_cache.get("images_folder", {})
-        if isinstance(images_folder, dict):
-            model_info["images_folder"] = {
-                "name": images_folder.get("name") if isinstance(images_folder.get("name"), str) else None
-            }
-        else:
-            model_info["images_folder"] = {"name": None}
+        # Dataset: expect {"name": str}
+        model_info["dataset"] = _extract_typed_dict(
+            "dataset", {"name": str}, {"name": None}
+        )
 
-        tc = self.llm_metadata_cache.get("training_config", {})
-        if isinstance(tc, dict):
-            model_info["training_config"] = {
-                "batch_size": tc.get("batch_size") if isinstance(tc.get("batch_size"), int) else None,
-                "learning_rate": tc.get("learning_rate") if isinstance(tc.get("learning_rate"), (int, float)) else None,
-                "optimizer": tc.get("optimizer") if isinstance(tc.get("optimizer"), str) else None,
-                "epochs": tc.get("epochs") if isinstance(tc.get("epochs"), int) else None,
-                "hardware_used": tc.get("hardware_used") if isinstance(tc.get("hardware_used"), str) else None
-            }
-        else:
-            model_info["training_config"] = {
+        # Images folder: expect {"name": str}
+        model_info["images_folder"] = _extract_typed_dict(
+            "images_folder", {"name": str}, {"name": None}
+        )
+
+        # Training config: multiple fields with different expected types
+        model_info["training_config"] = _extract_typed_dict(
+            "training_config",
+            {
+                "batch_size": int,
+                "learning_rate": (int, float),
+                "optimizer": str,
+                "epochs": int,
+                "hardware_used": str,
+            },
+            {
                 "batch_size": None,
                 "learning_rate": None,
                 "optimizer": None,
                 "epochs": None,
-                "hardware_used": None
-            }
+                "hardware_used": None,
+            },
+        )
 
-        desc = self.llm_metadata_cache.get("chunk_descriptions")
-        model_info["chunk_descriptions"] = desc if len(desc) > 0 else []
+        # Chunk descriptions: ensure it's a non‐empty list, else empty list
+        desc_raw = self.llm_metadata_cache.get("chunk_descriptions") or []
+        model_info["chunk_descriptions"] = desc_raw if isinstance(desc_raw, list) and desc_raw else []
 
+        # Other scalar fields (no deep validation needed)
         model_info["ast_summary"] = self.llm_metadata_cache.get("ast_summary")
-
         model_info["diagram_path"] = self.llm_metadata_cache.get("diagram_path")
 
+        # Static flags/content
         model_info["is_model_script"] = True
         model_info["content"] = file_content
 
@@ -997,7 +1020,7 @@ class LLMBasedCodeParser:
 
     @staticmethod
     def extract_filename_and_directory(file_path):
-        # Get the base filename (without directory)
+        # Get the base filename (without a directory)
         filename = os.path.basename(file_path)
 
         # Get the directory containing the file
