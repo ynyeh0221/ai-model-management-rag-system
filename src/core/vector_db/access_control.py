@@ -1,741 +1,574 @@
 import asyncio
 import json
 
-"""
-# AccessControlManager Documentation
+# ────────────────────────────────────────────────────────────────────────────────
+# Constants (to avoid duplicated string literals)
+# ────────────────────────────────────────────────────────────────────────────────
 
-## Overview
+_DB_CLIENT_REQUIRED_ERROR = "Database client is required to modify access control"
+_DEFAULT_ACCESS_CONTROL_JSON = '{"view": [], "edit": []}'
+_METADATA_ACCESS_CONTROL = "metadata.access_control"
+_CONTAINS_OPERATOR = "$contains"
 
-The `AccessControlManager` is a Python component that provides fine-grained access control for document-based systems. It allows you to manage who can view or edit documents by attaching permission metadata to documents and enforcing these permissions when accessing documents.
 
-## Key Features
-
-- Permission-based access control (view, edit)
-- Support for user-level and group-level permissions
-- Public access capabilities
-- Query filtering based on permissions
-- Support for both synchronous and asynchronous database operations
-
-## Core Concepts
-
-### Permission Hierarchy
-
-The system uses a hierarchical permission model:
-- `view`: Basic access to read a document
-- `edit`: Advanced access that includes viewing and modifying a document
-
-### Access Control Storage
-
-Access permissions are stored in document metadata as a JSON structure:
-```json
-{
-  "view": ["user1", "group1", "public"],
-  "edit": ["user2", "group2"]
-}
-```
-
-## Usage Examples
-
-### Initializing the Manager
-
-```python
-from your_db_client import DatabaseClient
-from access_control import AccessControlManager
-
-# Initialize with a database client
-db_client = DatabaseClient(connection_string="your_connection_string")
-acm = AccessControlManager(db_client=db_client)
-```
-
-### Checking Access
-
-```python
-# Check if a user can view a document
-has_access = acm.check_access(document, user_id="user123", permission_type="view")
-
-# Check if a user can edit a document
-can_edit = acm.check_access(document, user_id="user123", permission_type="edit")
-```
-
-### Managing Permissions
-
-```python
-# Grant view access to a user
-acm.grant_access(document_id="doc123", user_id="user456", permission_type="view")
-
-# Revoke edit access from a user
-acm.revoke_access(document_id="doc123", user_id="user789", permission_type="edit")
-
-# Make a document publicly viewable
-acm.set_public_access(document_id="doc123", permission_type="view", public_access=True)
-
-# Make a document private
-acm.set_public_access(document_id="doc123", permission_type="view", public_access=False)
-```
-
-### Filtering Queries
-
-```python
-# Create a filter for database queries to only return documents the user can access
-filter_dict = acm.create_access_filter(user_id="user123")
-
-# Use the filter in a database query
-accessible_documents = db_client.query(filter=filter_dict)
-```
-
-### Getting Accessible Content
-
-```python
-# Get all models accessible to a user
-accessible_models = acm.get_accessible_models(user_id="user123")
-
-# Get all image_processing accessible to a user
-accessible_images = acm.get_accessible_images(user_id="user123")
-```
-
-## Working with Permissions
-
-### Access Control Logic
-
-1. A user has access if they are directly listed in the permission
-2. A user has access if any of their groups are listed in the permission
-3. Everyone has access if "public" is listed in the permission
-4. The "edit" permission automatically includes "view" permission
-
-### Handling Group Memberships
-
-The component checks user group memberships through the `_get_user_groups` method. In a real implementation, this would query a user/group database.
-
-## Handling Asynchronous Operations
-
-The component automatically detects and handles both synchronous and asynchronous database operations:
-
-```python
-# Using with an asynchronous client
-async def main():
-    async_client = AsyncDatabaseClient()
-    acm = AccessControlManager(db_client=async_client)
-    
-    # The component will handle the async nature internally
-    await some_function_that_uses_acm(acm)
-```
-
-## Error Handling
-
-The component includes comprehensive error handling for database operations, JSON parsing errors, and other potential issues.
-
-## Best Practices
-
-1. Always initialize with a database client for full functionality
-2. Use the appropriate permission type for the access level needed
-3. Consider using group permissions for easier management of multiple users
-4. Use public access cautiously, typically only for view permissions
-5. Utilize the access filter for efficient querying of accessible documents
-
-This documentation should help you understand and implement the `AccessControlManager` in your document-based system.
-"""
 class AccessControlManager:
+    """
+    Manages fine‐grained access control for document‐based systems.
+    """
+
     def __init__(self, db_client=None):
         """
-        Initialize the AccessControlManager with a simplified permission format.
+        Initialize the AccessControlManager with a DB client.
 
         Args:
-            db_client: A client connection to the database that stores access control information.
+            db_client: A client connection to the database that stores access control info.
         """
         self.db_client = db_client
-        # Define permission hierarchy - higher levels include lower levels
+
+        # Permission hierarchy: higher levels include lower levels
         self.permission_hierarchy = {
-            "edit": ["view", "edit"],  # edit permission includes view permission
-            "view": ["view"]  # view permission only includes itself
+            "edit": ["view", "edit"],  # 'edit' implies 'view'
+            "view": ["view"]
         }
+
+    # ────────────────────────────────────────────────────────────────────────────────
+    # Public: Check / Grant / Revoke / Public‐access methods
+    # ────────────────────────────────────────────────────────────────────────────────
 
     def check_access(self, document, user_id, permission_type="view"):
         """
-        Check if a user has access to a document.
+        Check if a user has a given permission on a document.
 
         Args:
-            document: Document object or dict containing access_control metadata
-            user_id: The ID of the user requesting access
-            permission_type: Type of permission to check ("view", "edit")
+            document: Document object or dict (must have 'metadata.access_control').
+            user_id: The ID of the user requesting access.
+            permission_type: "view" or "edit".
 
         Returns:
-            bool: True if user has the required permission, False otherwise
+            bool: True if the user has the required permission; False otherwise.
         """
-        # Get access control information
         access_control = self._get_access_control(document)
-        if not access_control:
+        if access_control is None:
             return False
 
-        # Check all permission types that would include the requested permission
-        for higher_perm, included_perms in self.permission_hierarchy.items():
-            if permission_type in included_perms and higher_perm in access_control:
-                permission_list = access_control[higher_perm]
+        for higher_perm, includes in self.permission_hierarchy.items():
+            # Only consider permission branches that include requested permission_type
+            if permission_type in includes and higher_perm in access_control:
+                perm_list = access_control[higher_perm]
 
-                # Check if user is in the permission list
-                if user_id in permission_list:
+                # Direct user check
+                if user_id in perm_list:
                     return True
 
-                # Check if any of the user's groups are in the permission list
-                user_groups = self._get_user_groups(user_id)
-                if any(group in permission_list for group in user_groups):
-                    return True
+                # Group membership check
+                for group in self._get_user_groups(user_id):
+                    if group in perm_list:
+                        return True
 
-                # Check if "public" is in the permission list, which grants access to everyone
-                if "public" in permission_list:
+                # Public access check
+                if "public" in perm_list:
                     return True
 
         return False
 
     def grant_access(self, document_id, user_id, permission_type="view"):
         """
-        Grant access to a document for a user.
+        Grant a permission (view/edit) to a user on a document.
 
         Args:
-            document_id: The ID of the document
-            user_id: The ID of the user to grant access to
-            permission_type: Type of permission to grant ("view", "edit")
+            document_id: The ID of the document.
+            user_id: The ID of the user to grant access to.
+            permission_type: "view" or "edit".
 
         Returns:
-            bool: True if access was granted successfully, False otherwise
+            bool: True if granted successfully; False otherwise.
         """
         if not self.db_client:
-            raise ValueError("Database client is required to modify access control")
+            raise ValueError(_DB_CLIENT_REQUIRED_ERROR)
 
-        # Retrieve the document
         document = self._get_document(document_id)
-        if not document:
+        if document is None:
             return False
 
-        # Get current access control or initialize
         metadata = document.get("metadata", {})
-        access_control_str = metadata.get("access_control", '{"view": [], "edit": []}')
+        access_control_str = metadata.get("access_control", _DEFAULT_ACCESS_CONTROL_JSON)
 
         try:
             access_control = json.loads(access_control_str)
         except json.JSONDecodeError:
             access_control = {"view": [], "edit": []}
 
-        # Ensure the permission type exists
-        if permission_type not in access_control:
-            access_control[permission_type] = []
+        # Ensure the permission_type key exists
+        access_control.setdefault(permission_type, [])
 
-        # Add user to the permission list if not already there
         if user_id not in access_control[permission_type]:
             access_control[permission_type].append(user_id)
 
-        # Update the document's metadata
         metadata["access_control"] = json.dumps(access_control)
         return self._update_document_metadata(document_id, metadata)
 
     def revoke_access(self, document_id, user_id, permission_type="view"):
         """
-        Revoke access to a document for a user.
+        Revoke a permission (view/edit) from a user on a document.
 
         Args:
-            document_id: The ID of the document
-            user_id: The ID of the user to revoke access from
-            permission_type: Type of permission to revoke ("view", "edit")
+            document_id: The ID of the document.
+            user_id: The ID of the user to revoke access from.
+            permission_type: "view" or "edit".
 
         Returns:
-            bool: True if access was revoked successfully, False otherwise
+            bool: True if revoked successfully; False otherwise.
         """
         if not self.db_client:
-            raise ValueError("Database client is required to modify access control")
+            raise ValueError(_DB_CLIENT_REQUIRED_ERROR)
 
-        # Retrieve the document
         document = self._get_document(document_id)
-        if not document:
+        if document is None:
             return False
 
-        # Get current access control
         metadata = document.get("metadata", {})
-        access_control_str = metadata.get("access_control", '{"view": [], "edit": []}')
+        access_control_str = metadata.get("access_control", _DEFAULT_ACCESS_CONTROL_JSON)
 
         try:
             access_control = json.loads(access_control_str)
         except json.JSONDecodeError:
-            return False  # Invalid access_control format
+            return False
 
-        # Remove user from the permission list if they're in it
         if permission_type in access_control and user_id in access_control[permission_type]:
             access_control[permission_type].remove(user_id)
 
-        # Update the document's metadata
         metadata["access_control"] = json.dumps(access_control)
         return self._update_document_metadata(document_id, metadata)
 
     def set_public_access(self, document_id, permission_type="view", public_access=True):
         """
-        Set or remove public access for a document.
+        Toggle public access for a permission type on a document.
 
         Args:
-            document_id: The ID of the document
-            permission_type: Type of permission to set public access for ("view", "edit")
-            public_access: True to grant public access, False to revoke it
+            document_id: The ID of the document.
+            permission_type: "view" or "edit".
+            public_access: True to grant public access; False to revoke it.
 
         Returns:
-            bool: True if public access was set/revoked successfully, False otherwise
+            bool: True if the operation succeeded; False otherwise.
         """
         if not self.db_client:
-            raise ValueError("Database client is required to modify access control")
+            raise ValueError(_DB_CLIENT_REQUIRED_ERROR)
 
-        # Retrieve the document
         document = self._get_document(document_id)
-        if not document:
+        if document is None:
             return False
 
-        # Get current access control or initialize
         metadata = document.get("metadata", {})
-        access_control_str = metadata.get("access_control", '{"view": [], "edit": []}')
+        access_control_str = metadata.get("access_control", _DEFAULT_ACCESS_CONTROL_JSON)
 
         try:
             access_control = json.loads(access_control_str)
         except json.JSONDecodeError:
             access_control = {"view": [], "edit": []}
 
-        # Ensure the permission type exists
-        if permission_type not in access_control:
-            access_control[permission_type] = []
+        access_control.setdefault(permission_type, [])
 
-        # Add or remove "public" from the permission list
-        if public_access and "public" not in access_control[permission_type]:
-            access_control[permission_type].append("public")
-        elif not public_access and "public" in access_control[permission_type]:
-            access_control[permission_type].remove("public")
+        if public_access:
+            if "public" not in access_control[permission_type]:
+                access_control[permission_type].append("public")
+        else:
+            if "public" in access_control[permission_type]:
+                access_control[permission_type].remove("public")
 
-        # Update the document's metadata
         metadata["access_control"] = json.dumps(access_control)
         return self._update_document_metadata(document_id, metadata)
 
-    def _get_access_control(self, document):
+    def get_document_permissions(self, document):
         """
-        Get access control information from a document.
+        Return the access control permissions for a document, or default if none set.
 
         Args:
-            document: Document object or dict
+            document (dict): The document whose permissions to retrieve.
 
         Returns:
-            dict: Access control information, or None if it cannot be retrieved
+            dict: Permissions dict, e.g. {"view": ["public"], "edit": []}.
+        """
+        access_control = self._get_access_control(document)
+        if access_control:
+            return access_control
+        return {"view": ["public"], "edit": []}
+
+    # ────────────────────────────────────────────────────────────────────────────────
+    # Public: Access‐filter and retrieving accessible resources
+    # ────────────────────────────────────────────────────────────────────────────────
+
+    def create_access_filter(self, user_id):
+        """
+        Create a Mongo‐style filter dict restricting query results to documents the user can view.
+
+        Args:
+            user_id: The ID of the user making the query.
+
+        Returns:
+            dict: A filter dictionary suitable for passing to the DB query method.
+        """
+        user_groups = self._get_user_groups(user_id)
+
+        # Base filter conditions: user OR public
+        or_conditions = [
+            { _METADATA_ACCESS_CONTROL: { _CONTAINS_OPERATOR: f'\"{user_id}\"' }},
+            { _METADATA_ACCESS_CONTROL: { _CONTAINS_OPERATOR: '\"public\"' }}
+        ]
+
+        # Add group conditions if applicable
+        for group in user_groups:
+            or_conditions.append({ _METADATA_ACCESS_CONTROL: { _CONTAINS_OPERATOR: f'\"{group}\"' }})
+
+        return { "$or": or_conditions }
+
+    def get_accessible_models(self, user_id):
+        """
+        Return a list of model metadata dicts that the user has 'view' access to.
+
+        Args:
+            user_id: The ID of the user.
+
+        Returns:
+            list of dict: Each dict contains consolidated metadata for an accessible model.
+        """
+        if not self.db_client:
+            return []
+
+        # Step 1: Fetch raw model entries from 'model_date' collection
+        all_models = self._fetch_all_model_metadata()
+
+        # Step 2: Determine which model_ids the user can view
+        accessible_ids = self._filter_accessible_model_ids(all_models, user_id)
+        if not accessible_ids:
+            return []
+
+        # Step 3: For each accessible model_id, gather consolidated metadata
+        result = []
+        for model_id in accessible_ids:
+            info = self._consolidate_model_info(model_id)
+            if info:
+                result.append(info)
+
+        return result
+
+    def get_accessible_images(self, user_id):
+        """
+        Return a list of image entries that the user has 'view' access to.
+
+        Args:
+            user_id: The ID of the user.
+
+        Returns:
+            list of dict: Each dict contains 'id', 'prompt', 'filepath', and other metadata.
+        """
+        if not self.db_client:
+            return []
+
+        # Step 1: Fetch all 'generated_images' entries
+        all_images = self._fetch_all_images()
+
+        # Step 2: Filter them by access_control
+        return self._filter_accessible_images(all_images, user_id)
+
+    # ────────────────────────────────────────────────────────────────────────────────
+    # Private: Low‐level helpers (each kept simple to reduce complexity)
+    # ────────────────────────────────────────────────────────────────────────────────
+
+    def _get_access_control(self, document):
+        """
+        Extract and parse the access_control JSON from a document.
+
+        Args:
+            document: Document object or dict.
+
+        Returns:
+            dict or None: Parsed access_control, or None if missing/invalid.
         """
         if not document or "metadata" not in document:
             return None
 
         metadata = document["metadata"]
-        if "access_control" not in metadata:
+        raw = metadata.get("access_control")
+        if raw is None:
             return None
 
+        if isinstance(raw, dict):
+            return raw
+
         try:
-            if isinstance(metadata["access_control"], dict):
-                return metadata["access_control"]
-            else:
-                return json.loads(metadata["access_control"])
+            return json.loads(raw)
         except (json.JSONDecodeError, TypeError):
             return None
 
     def _get_user_groups(self, user_id):
         """
-        Get the groups a user belongs to.
+        Retrieve the list of group IDs for a given user.
 
         Args:
-            user_id: The ID of the user
+            user_id: The ID of the user.
 
         Returns:
-            list: List of group IDs the user belongs to
+            list: List of group IDs (empty list if none or on error).
         """
-        # In a real implementation, this would query a user/group database
-        # For now, we'll return a placeholder implementation
-
         if not self.db_client:
             return []
 
         try:
-            # Example implementation - adapt based on actual storage mechanism
-            if hasattr(self.db_client, 'get_user'):
+            if hasattr(self.db_client, "get_user"):
                 user_record = self.db_client.get_user(user_id)
                 if user_record and "groups" in user_record:
                     return user_record["groups"]
-        except Exception as e:
-            print(f"Error retrieving user groups: {e}")
+        except Exception:
+            pass
 
         return []
 
-    def create_access_filter(self, user_id):
-        """
-        Create a filter for access control in queries.
-        This generates a filter that can be applied to database queries to only return
-        documents the user has permission to view.
-
-        Args:
-            user_id: The ID of the user making the query
-
-        Returns:
-            dict: A filter dictionary that can be passed to the database query method
-        """
-        user_groups = self._get_user_groups(user_id)
-
-        # Create a filter that matches documents where:
-        # 1. The user is explicitly in any permission list
-        # 2. Any of the user's groups are in any permission list
-        # 3. The document is public (has "public" in any permission list)
-
-        filter_dict = {
-            "$or": [
-                {"metadata.access_control": {"$contains": f'"{user_id}"'}},  # User in any permission list
-                {"metadata.access_control": {"$contains": '"public"'}}  # Public access
-            ]
-        }
-
-        # Add group permissions if user belongs to any groups
-        if user_groups:
-            for group in user_groups:
-                filter_dict["$or"].append(
-                    {"metadata.access_control": {"$contains": f'"{group}"'}}
-                )
-
-        return filter_dict
-
     def _get_document(self, document_id):
         """
-        Retrieve a document by ID.
+        Retrieve a document by ID, handling both async and sync DB clients.
 
         Args:
-            document_id: The ID of the document
+            document_id: The ID of the document.
 
         Returns:
-            dict: The document if found, None otherwise
+            dict or None: The document if found, else None.
         """
-        if not self.db_client:
-            return None
-
         try:
-            # Check if the get method is asynchronous
-            if hasattr(self.db_client, 'get') and asyncio.iscoroutinefunction(self.db_client.get):
-                # Handle asynchronous get
+            if hasattr(self.db_client, "get") and asyncio.iscoroutinefunction(self.db_client.get):
                 try:
-                    # Get or create event loop
-                    try:
-                        loop = asyncio.get_event_loop()
-                    except RuntimeError:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
 
-                    # Run the async method
-                    coro = self.db_client.get(ids=[document_id])
-                    return loop.run_until_complete(coro)
-                except Exception as e:
-                    print(f"Error running async get document: {e}")
-                    return None
+                coro = self.db_client.get(ids=[document_id])
+                return loop.run_until_complete(coro)
             else:
-                # Synchronous get
                 return self.db_client.get(ids=[document_id])
-        except Exception as e:
-            print(f"Error retrieving document: {e}")
+        except Exception:
             return None
 
     def _update_document_metadata(self, document_id, metadata):
         """
-        Update a document's metadata.
+        Update only the metadata of a document, handling async vs. sync.
 
         Args:
-            document_id: The ID of the document
-            metadata: The new metadata
+            document_id: The ID of the document.
+            metadata: Dict of metadata to set.
 
         Returns:
-            bool: True if update was successful, False otherwise
+            bool: True if successful; False otherwise.
         """
-        if not self.db_client:
-            return False
-
         try:
-            # Check if the update method is asynchronous
-            if hasattr(self.db_client, 'update') and asyncio.iscoroutinefunction(self.db_client.update):
-                # Handle asynchronous update
+            if hasattr(self.db_client, "update") and asyncio.iscoroutinefunction(self.db_client.update):
                 try:
-                    # Get or create event loop
-                    try:
-                        loop = asyncio.get_event_loop()
-                    except RuntimeError:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
+                    loop = asyncio.get_event_loop()
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
 
-                    # Run the async method
-                    coro = self.db_client.update(
-                        ids=[document_id],
-                        metadatas=[metadata]
-                    )
-                    loop.run_until_complete(coro)
-                    return True
-                except Exception as e:
-                    print(f"Error running async update document: {e}")
-                    return False
-            else:
-                # Synchronous update
-                self.db_client.update(
-                    ids=[document_id],
-                    metadatas=[metadata]
-                )
+                coro = self.db_client.update(ids=[document_id], metadatas=[metadata])
+                loop.run_until_complete(coro)
                 return True
-        except Exception as e:
-            print(f"Error updating document metadata: {e}")
+            else:
+                self.db_client.update(ids=[document_id], metadatas=[metadata])
+                return True
+        except Exception:
             return False
 
-    def get_document_permissions(self, document):
-        """
-        Determine and return the access control metadata for the document.
+    # ────────────────────────────────────────────────────────────────────────────────
+    # Private: get_accessible_models helpers
+    # ────────────────────────────────────────────────────────────────────────────────
 
-        Args:
-            document (dict): The document for which to determine permissions.
+    def _fetch_all_model_metadata(self):
+        """
+        Fetch all entries from 'model_date' collection, including their metadatas.
 
         Returns:
-            dict: A dictionary representing access control permissions.
-                  For example, {"view": ["public"], "edit": []}
+            dict: Raw result from the DB (expected to have a 'results' list of dicts).
         """
-        # Try to get access control from document metadata
-        access_control = self._get_access_control(document)
-        if access_control:
-            return access_control
-
-        # If not found, return default permissions
-        return {"view": ["public"], "edit": []}
-
-    def get_accessible_models(self, user_id):
-        """
-        Get a list of models that the user has access to by first getting all model IDs from
-        the model_date table and then fetching metadata for each accessible model.
-
-        Args:
-            user_id: The ID of the user
-
-        Returns:
-            list: List of models the user can access with their metadata
-        """
-        if not self.db_client:
-            return []
-
         try:
-            # Step 1: Get all model IDs from model_date table
-            try:
-                # Check if db_client.get is an async method
-                if hasattr(self.db_client, 'get') and asyncio.iscoroutinefunction(self.db_client.get):
-                    try:
-                        try:
-                            loop = asyncio.get_event_loop()
-                        except RuntimeError:
-                            loop = asyncio.new_event_loop()
-                            asyncio.set_event_loop(loop)
-
-                        coro = self.db_client.get(
-                            collection_name="model_date",
-                            include=["metadatas"]
-                        )
-                        all_models = loop.run_until_complete(coro)
-                    except Exception as e:
-                        print(f"Error running async db call: {e}")
-                        return []
-                else:
-                    all_models = self.db_client.get(
-                        collection_name="model_date",
-                        include=["metadatas"]
-                    )
-
-                # Define metadata tables to fetch (excluding model_descriptions)
-                metadata_tables = [
-                    "model_architectures",
-                    "model_frameworks",
-                    "model_datasets",
-                    "model_training_configs",
-                    "model_file",
-                    "model_git",
-                    "model_images_folder"
-                ]
-
-                # Process results to collect model IDs
-                all_model_ids = set()
-                if isinstance(all_models, dict) and 'results' in all_models:
-                    for model in all_models['results']:
-                        metadata = model.get('metadata', {})
-                        model_id = metadata.get('model_id')
-
-                        # Skip if no model_id or not accessible to user
-                        if not model_id:
-                            continue
-
-                        # Check access control
-                        if self.check_access({'metadata': metadata}, user_id, "view"):
-                            all_model_ids.add(model_id)
-
-                # Step 2: Fetch complete metadata for accessible models
-                accessible_models = []
-                seen_model_ids = set()
-
-                for model_id in all_model_ids:
-                    try:
-                        # Skip if already processed
-                        if model_id in seen_model_ids:
-                            continue
-
-                        # Initialize consolidated metadata
-                        consolidated_metadata = {'model_id': model_id}
-
-                        # Fetch metadata from each table for this model
-                        for table_name in metadata_tables:
-                            try:
-                                # Check if db_client.get is an async method
-                                if hasattr(self.db_client, 'get') and asyncio.iscoroutinefunction(self.db_client.get):
-                                    try:
-                                        try:
-                                            loop = asyncio.get_event_loop()
-                                        except RuntimeError:
-                                            loop = asyncio.new_event_loop()
-                                            asyncio.set_event_loop(loop)
-
-                                        coro = self.db_client.get(
-                                            collection_name=table_name,
-                                            where={"model_id": {"$eq": model_id}},
-                                            include=["metadatas"]
-                                        )
-                                        table_results = loop.run_until_complete(coro)
-                                    except Exception as e:
-                                        print(
-                                            f"Error running async get for model {model_id} in table {table_name}: {e}")
-                                        continue
-                                else:
-                                    # Synchronous call
-                                    table_results = self.db_client.get(
-                                        collection_name=table_name,
-                                        where={"model_id": {"$eq": model_id}},
-                                        include=["metadatas"]
-                                    )
-
-                                # Extract and add metadata
-                                if table_results and 'results' in table_results and table_results['results']:
-                                    metadata = table_results['results'][0].get('metadata', {})
-
-                                    # Add metadata to consolidated record (exclude description field if present)
-                                    if 'description' in metadata:
-                                        # Create a copy without the description
-                                        metadata_without_desc = {k: v for k, v in metadata.items() if
-                                                                 k != 'description'}
-                                        consolidated_metadata.update(metadata_without_desc)
-                                    else:
-                                        consolidated_metadata.update(metadata)
-                            except Exception as table_e:
-                                print(f"Error processing table {table_name} for model {model_id}: {table_e}")
-
-                        # Process file info if available
-                        if 'file' in consolidated_metadata and 'images_folder' in consolidated_metadata:
-                            try:
-                                file_info = json.loads(consolidated_metadata.get('file', '{}'))
-                                images_folder_info = json.loads(consolidated_metadata.get('images_folder', '{}'))
-                                model_info = {
-                                    'model_id': model_id,
-                                    'creation_date': file_info.get('creation_date'),
-                                    'last_modified_date': file_info.get('last_modified_date'),
-                                    'total_chunks': consolidated_metadata.get('total_chunks'),
-                                    'absolute_path': file_info.get('absolute_path'),
-                                    'images_folder': images_folder_info.get('name'),
-                                }
-
-                                # Add other metadata
-                                if 'framework' in consolidated_metadata:
-                                    model_info['framework'] = consolidated_metadata['framework']
-                                if 'version' in consolidated_metadata:
-                                    model_info['version'] = consolidated_metadata['version']
-
-                                accessible_models.append(model_info)
-                                seen_model_ids.add(model_id)
-                            except Exception as inner_e:
-                                print(f"Error processing model file info for {model_id}: {inner_e}")
-                        else:
-                            # If no file info, create a basic model info entry
-                            model_info = {
-                                'model_id': model_id
-                            }
-                            # Add all consolidated metadata except large fields
-                            for key, value in consolidated_metadata.items():
-                                if key not in ['file', 'description', 'access_control']:
-                                    model_info[key] = value
-
-                            accessible_models.append(model_info)
-                            seen_model_ids.add(model_id)
-
-                    except Exception as e:
-                        print(f"Error processing model {model_id}: {e}")
-
-                return accessible_models
-
-            except Exception as e:
-                print(f"Error retrieving models from model_date table: {e}")
-                return []
-
-        except Exception as e:
-            print(f"Error retrieving accessible models: {e}")
-            return []
-
-    def get_accessible_images(self, user_id):
-        """
-        Get a list of image_processing that the user has access to.
-
-        Args:
-            user_id: The ID of the user
-
-        Returns:
-            list: List of image_processing the user can access
-        """
-        if not self.db_client:
-            return []
-
-        try:
-            # Check if db_client.get is an async method
-            if hasattr(self.db_client, 'get') and asyncio.iscoroutinefunction(self.db_client.get):
-                # Run async method in a synchronous context
-                try:
-                    # Get or create an event loop
-                    try:
-                        loop = asyncio.get_event_loop()
-                    except RuntimeError:
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
-
-                    # Create the coroutine
-                    coro = self.db_client.get(
-                        collection_name="generated_images",
-                        include=["metadatas"]
-                    )
-
-                    # Run it and get the result
-                    all_images = loop.run_until_complete(coro)
-                except Exception as e:
-                    print(f"Error running async db call: {e}")
-                    return []
+            if hasattr(self.db_client, "get") and asyncio.iscoroutinefunction(self.db_client.get):
+                loop = asyncio.get_event_loop()
+                coro = self.db_client.get(collection_name="model_date", include=["metadatas"])
+                return loop.run_until_complete(coro)
             else:
-                # Synchronous call
-                all_images = self.db_client.get(
-                    collection_name="generated_images",
-                    include=["metadatas"]
-                )
+                return self.db_client.get(collection_name="model_date", include=["metadatas"])
+        except Exception:
+            return {}
 
-            # Process results
-            accessible_images = []
-            if isinstance(all_images, dict) and 'results' in all_images:
-                for image in all_images['results']:
-                    if self.check_access(image, user_id, "view"):
-                        image_info = {
-                            "id": image.get("id", ""),
-                            "prompt": image.get("metadata", {}).get("prompt", "No prompt"),
-                            "filepath": image.get("metadata", {}).get("image_path", "No path")
-                        }
-                        # Add other metadata
-                        if "metadata" in image and image["metadata"]:
-                            metadata = image["metadata"]
-                            if "style_tags" in metadata:
-                                image_info["style_tags"] = metadata["style_tags"]
-                            if "clip_score" in metadata:
-                                image_info["clip_score"] = metadata["clip_score"]
+    def _filter_accessible_model_ids(self, all_models, user_id):
+        """
+        From raw 'model_date' entries, return a set of model_ids the user can 'view'.
 
-                        accessible_images.append(image_info)
+        Args:
+            all_models: Dict containing 'results': list of model entries.
+            user_id: The ID of the user.
 
-            return accessible_images
-        except Exception as e:
-            print(f"Error retrieving accessible image_processing: {e}")
-            return []
+        Returns:
+            set of str: model_id strings that the user can view.
+        """
+        accessible_ids = set()
+        if not isinstance(all_models, dict) or "results" not in all_models:
+            return accessible_ids
+
+        for entry in all_models["results"]:
+            metadata = entry.get("metadata", {})
+            model_id = metadata.get("model_id")
+            if not model_id:
+                continue
+
+            # Re‐use check_access by wrapping metadata in a pseudo‐document
+            pseudo_doc = {"metadata": metadata}
+            if self.check_access(pseudo_doc, user_id, "view"):
+                accessible_ids.add(model_id)
+
+        return accessible_ids
+
+    def _consolidate_model_info(self, model_id):
+        """
+        Build a consolidated metadata dict for a single model_id by querying related tables.
+
+        Args:
+            model_id: The model ID to fetch info for.
+
+        Returns:
+            dict: Consolidated metadata for that model, or None on error.
+        """
+        metadata_tables = [
+            "model_architectures",
+            "model_frameworks",
+            "model_datasets",
+            "model_training_configs",
+            "model_file",
+            "model_git",
+            "model_images_folder"
+        ]
+
+        consolidated = {"model_id": model_id}
+
+        # Fetch and merge metadata from each table
+        for table in metadata_tables:
+            try:
+                if hasattr(self.db_client, "get") and asyncio.iscoroutinefunction(self.db_client.get):
+                    loop = asyncio.get_event_loop()
+                    coro = self.db_client.get(
+                        collection_name=table,
+                        where={"model_id": {"$eq": model_id}},
+                        include=["metadatas"]
+                    )
+                    results = loop.run_until_complete(coro)
+                else:
+                    results = self.db_client.get(
+                        collection_name=table,
+                        where={"model_id": {"$eq": model_id}},
+                        include=["metadatas"]
+                    )
+            except Exception:
+                continue
+
+            if (
+                isinstance(results, dict)
+                and "results" in results
+                and results["results"]
+                and "metadata" in results["results"][0]
+            ):
+                meta = results["results"][0]["metadata"]
+                # If there's a 'description', exclude it from the consolidated dict
+                if "description" in meta:
+                    for key, val in meta.items():
+                        if key != "description":
+                            consolidated[key] = val
+                else:
+                    consolidated.update(meta)
+
+        # If 'file' and 'images_folder' keys exist, parse them for structured fields
+        file_raw = consolidated.get("file")
+        images_folder_raw = consolidated.get("images_folder")
+
+        if file_raw and images_folder_raw:
+            try:
+                file_info = json.loads(file_raw)
+                images_info = json.loads(images_folder_raw)
+
+                model_info = {
+                    "model_id": model_id,
+                    "creation_date": file_info.get("creation_date"),
+                    "last_modified_date": file_info.get("last_modified_date"),
+                    "total_chunks": consolidated.get("total_chunks"),
+                    "absolute_path": file_info.get("absolute_path"),
+                    "images_folder": images_info.get("name"),
+                }
+                # Append optional fields if present
+                for opt_field in ("framework", "version"):
+                    if opt_field in consolidated:
+                        model_info[opt_field] = consolidated[opt_field]
+
+                return model_info
+            except Exception:
+                pass
+
+        # If 'file' / 'images_folder' not present or parsing fails, return a simpler dict
+        basic_info = {"model_id": model_id}
+        for key, val in consolidated.items():
+            if key not in ("file", "description", "access_control"):
+                basic_info[key] = val
+
+        return basic_info
+
+    # ────────────────────────────────────────────────────────────────────────────────
+    # Private: get_accessible_images helpers
+    # ────────────────────────────────────────────────────────────────────────────────
+
+    def _fetch_all_images(self):
+        """
+        Fetch all entries from 'generated_images' collection, including their metadatas.
+
+        Returns:
+            dict: Raw result from the DB (expected to have a 'results' list).
+        """
+        try:
+            if hasattr(self.db_client, "get") and asyncio.iscoroutinefunction(self.db_client.get):
+                loop = asyncio.get_event_loop()
+                coro = self.db_client.get(collection_name="generated_images", include=["metadatas"]
+            )
+                return loop.run_until_complete(coro)
+            else:
+                return self.db_client.get(collection_name="generated_images", include=["metadatas"])
+        except Exception:
+            return {}
+
+    def _filter_accessible_images(self, all_images, user_id):
+        """
+        From raw 'generated_images' entries, return a list of those the user can 'view'.
+
+        Args:
+            all_images: Dict containing 'results': list of image entries.
+            user_id: The ID of the user.
+
+        Returns:
+            list of dict: Each dict has at least keys: 'id', 'prompt', 'filepath', plus any extra metadata.
+        """
+        accessible = []
+        if not isinstance(all_images, dict) or "results" not in all_images:
+            return accessible
+
+        for entry in all_images["results"]:
+            # Wrap each entry in a pseudo‐document to use check_access
+            if self.check_access(entry, user_id, "view"):
+                img_meta = entry.get("metadata", {})
+                info = {
+                    "id": entry.get("id", ""),
+                    "prompt": img_meta.get("prompt", "No prompt"),
+                    "filepath": img_meta.get("image_path", "No path")
+                }
+                # Optional fields
+                if "style_tags" in img_meta:
+                    info["style_tags"] = img_meta["style_tags"]
+                if "clip_score" in img_meta:
+                    info["clip_score"] = img_meta["clip_score"]
+
+                accessible.append(info)
+
+        return accessible
