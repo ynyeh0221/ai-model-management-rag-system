@@ -23,7 +23,7 @@ class ImageDisplayManager:
 
         Args:
             images (list): List of image dictionaries to display.
-            is_search_result (bool): Whether the image_processing are from search results.
+            is_search_result (bool): Whether the image_processing is from search results.
         """
         if not images:
             print("  No image_processing available")
