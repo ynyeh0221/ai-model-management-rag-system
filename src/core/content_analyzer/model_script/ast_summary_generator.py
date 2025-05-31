@@ -351,16 +351,38 @@ class ASTSummaryGenerator:
         If no used components are found, select the class with the most layers.
         """
         if not self.used_components:
-            main_class, max_layers = None, 0
-            for cname, layers in self.class_layers.items():
-                if len(layers) > max_layers:
-                    main_class, max_layers = cname, len(layers)
+            main_class = self._find_main_class()
             if main_class:
                 self.used_components.add(main_class)
-                for layer in self.model_layers:
-                    if layer["class"] == main_class and layer["layer_type"] in self.class_layers:
-                        self.used_components.add(layer["layer_type"])
+                self._add_main_class_layers(main_class)
+
         return self.used_components or set(self.class_layers.keys())
+
+    def _find_main_class(self) -> Optional[str]:
+        """
+        Find the class with the most layers. Return None if there are no classes.
+        """
+        main_class = None
+        max_layers = 0
+        for cname, layers in self.class_layers.items():
+            layer_count = len(layers)
+            if layer_count > max_layers:
+                main_class = cname
+                max_layers = layer_count
+        return main_class
+
+    def _add_main_class_layers(self, main_class: str) -> None:
+        """
+        For a given main_class, scan through self.model_layers and add any
+        layer["layer_type"] to used_components if it belongs to that class
+        and also appears as a component (i.e., is a key in self.class_layers).
+        """
+        for layer in self.model_layers:
+            if (
+                    layer.get("class") == main_class
+                    and layer.get("layer_type") in self.class_layers
+            ):
+                self.used_components.add(layer["layer_type"])
 
     def _build_component_tree(self) -> Tuple[Dict[str, List[str]], Dict[str, str], Optional[str]]:
         """
