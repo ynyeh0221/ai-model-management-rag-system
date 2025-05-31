@@ -6,7 +6,7 @@ A comprehensive framework for understanding, indexing, and retrieving machine le
 
 For ML engineers drowning in disparate model folders, Model-Insight-RAG transforms raw code into structured, searchable knowledge with powerful semantic understanding. Unlike traditional RAG systems, our agentic approach autonomously makes decisions about information gathering, result evaluation, and response generation to deliver comprehensive answers with minimal overhead.
 
-[DEMO](https://github.com/ynyeh0221/model-insight-rag/blob/main/DEMO.md)
+[DEMO link](https://github.com/ynyeh0221/model-insight-rag/blob/main/DEMO.md)
 
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ynyeh0221_model-insight-rag&metric=coverage)](https://sonarcloud.io/summary/new_code?id=ynyeh0221_model-insight-rag)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ynyeh0221/model-insight-rag)
