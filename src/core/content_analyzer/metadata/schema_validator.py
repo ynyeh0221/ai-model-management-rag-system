@@ -48,7 +48,7 @@ class SchemaValidator:
         """
         Load schemas from the registry.
         
-        Reads the schema registry JSON file and loads all schema definitions into memory.
+        Reads the schema registry JSON file and load all schema definitions into memory.
         Organizes schemas by ID and version for efficient lookup.
         
         Raises:
@@ -140,7 +140,7 @@ class SchemaValidator:
                 raise ValueError(f"Schema version '{requested_version}' not found for schema ID '{schema_id}'")
             schema_version = requested_version
         else:
-            # Default to latest version if not specified
+            # Default to the latest version if not specified
             schema_version = self._get_latest_version(schema_id)
             document = document.copy()  # Don't modify the original
             document["$schema_version"] = schema_version
@@ -167,7 +167,7 @@ class SchemaValidator:
         
         Args:
             schema_id: The ID of the schema to retrieve
-            version: The version of the schema to retrieve (defaults to latest)
+            version: The version of the schema to retrieve (default to latest)
             
         Returns:
             The schema definition
@@ -178,7 +178,7 @@ class SchemaValidator:
         if schema_id not in self.schemas:
             raise ValueError(f"Schema ID '{schema_id}' not found in registry")
         
-        # If version is not specified, use the latest
+        # If a version is not specified, use the latest
         if version is None:
             version = self._get_latest_version(schema_id)
         elif version not in self.schemas[schema_id]:
@@ -284,7 +284,7 @@ class SchemaValidator:
         
         compatibility_issues = []
         
-        # Check for required fields in target schema that are missing in document
+        # Check for required fields in target schema that are missing in a document
         if "required" in target_schema:
             for field in target_schema["required"]:
                 if field not in document and field != "$schema_version":

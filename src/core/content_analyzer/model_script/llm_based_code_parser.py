@@ -587,7 +587,7 @@ def sanitize_json_string(json_str: str) -> str:
     # Remove thinking tags and their contents
     json_str = re.sub(r"<think(ing)?>.*?</think(ing)?>", "", json_str, flags=re.DOTALL)
     # Remove JS-style comments
-    json_str = re.sub(r"//.*?$", "", json_str, flags=re.MULTILINE)
+    json_str = re.sub(r"//.*$", "", json_str, flags=re.MULTILINE)
     # Remove trailing commas
     json_str = re.sub(r",(\s*[}\]])", r"\1", json_str)
     return json_str

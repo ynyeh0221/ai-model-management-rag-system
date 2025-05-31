@@ -1,7 +1,7 @@
 import json
 
-from cli.cli_response_utils.display_utils import DisplayUtils
-from cli.cli_response_utils.thumbnail_table import ThumbnailTable
+from src.cli.cli_response_utils.display_utils import DisplayUtils
+from src.cli.cli_response_utils.thumbnail_table import ThumbnailTable
 
 
 class ImageDisplayManager:
