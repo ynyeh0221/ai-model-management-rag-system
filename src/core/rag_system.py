@@ -365,7 +365,7 @@ class RAGSystem:
     """
     RAG System Core Class - Encapsulating all core functionality into callable functions
 
-    This class provides all core functionality of the RAG system, including:
+    This class provides all the core functionality of the RAG system, including
     - Initializing system components
     - Processing user queries
     - Generating responses
@@ -455,7 +455,7 @@ class RAGSystem:
             if enable_clarity_check:
                 clarity_result = await self._check_query_clarity(query_text, llm_interface)
 
-                # If query is not clear, return a special result for the interface to handle
+                # If a query is not clear, return a special result for the interface to handle
                 if not clarity_result['is_clear']:
                     self._log(f"Query needs clarification: {clarity_result['reason']}")
                     self._update_status("needs_clarification")
@@ -484,7 +484,7 @@ class RAGSystem:
                 if is_comparison and retrieval_queries:
                     return await self._process_comparison_query(query_text, retrieval_queries, llm_interface)
 
-            # If not a comparison query or comparison detection is disabled, process as a regular query
+            # If not, a comparison query or comparison detection is disabled, process as a regular query
             return await self._process_regular_query(query_text)
 
         except Exception as e:
@@ -554,7 +554,7 @@ class RAGSystem:
         except Exception as e:
             self._log(f"Error parsing query clarity response: {str(e)}", level="error")
             return {
-                'is_clear': True,  # Default to assuming query is clear on error
+                'is_clear': True,  # Default to assuming a query is clear on error
                 'improved_query': query_text,
                 'suggestions': [],
                 'reason': f"Error analyzing query clarity: {str(e)}"
@@ -654,7 +654,7 @@ class RAGSystem:
         else:
             # Regular search processing
             all_reranked = self._process_search_results(
-                search_results, reranker, parsed_query, query_text, max_to_return=max_output_counts, rerank_threshold=0
+                search_results, reranker, parsed_query, query_text, rerank_threshold=0
             )
 
             pages_info = []
@@ -667,7 +667,7 @@ class RAGSystem:
 
                 current_page = all_reranked[page_id * page_size:(page_id + 1) * page_size]
 
-                # Build results text for current page
+                # Build result text for current page
                 results_text = self._build_results_text(current_page, page_id != len(all_reranked) - 1)
                 print(f"results_text: {results_text}")
 
@@ -679,7 +679,7 @@ class RAGSystem:
 
                 # Generate LLM response if requested
                 if generate_llm_response:
-                    # TODO Refactor this prompt to make it output response in desired format when INSUFFICIENT INFORMATION (MORE RESULTS NEEDED)
+                    # TODO Refactor this prompt to make it output response in desired format when INSUFFICIENT INFORMATION (MORE RESULTS NEEDED) #NOSONAR
                     system_prompt = QueryPathPromptManager.get_system_prompt_for_regular_response()
 
                     # Build user prompt
@@ -715,7 +715,7 @@ class RAGSystem:
                     # Skip LLM response generation
                     pages_info[-1]["page_summary"] = ""
 
-            # TODO make page_size and max_pages_to_fetch defined and passed-in from outside
+            # TODO make page_size and max_pages_to_fetch defined and passed-in from outside #NOSONAR
             process_paged_results(all_reranked, 0, 3, 3 if generate_llm_response else max_output_counts)
 
             result = {"type": "text_search" if generate_llm_response else "retrieval_only", "query": query_text,
@@ -808,7 +808,7 @@ class RAGSystem:
             if 'results_text' in result:
                 user_prompt += f"Search results:\n{result.get('results_text', 'N/A')}\n\n"
             else:
-                user_prompt += f"Search results: Available but not shown in detail\n\n"
+                user_prompt += "Search results: Available but not shown in detail\n\n"
 
         user_prompt += (
             "Please synthesize these search results into a comprehensive comparison that addresses "
@@ -875,7 +875,7 @@ class RAGSystem:
                 loop = asyncio.get_event_loop()
                 return loop.run_until_complete(self.process_query(command))
 
-            # Other command handling
+            # Another command handling
             return {
                 "type": "command",
                 "command": command,
@@ -892,8 +892,7 @@ class RAGSystem:
                 "error": str(e)
             }
 
-    def _process_search_results(self, search_results, reranker, parsed_query, query_text,
-                                max_to_return=10, rerank_threshold=0.1):
+    def _process_search_results(self, search_results, reranker, parsed_query, query_text, rerank_threshold=0.1):
         """Process and rerank search results"""
         if not isinstance(search_results, dict) or 'items' not in search_results:
             return []
