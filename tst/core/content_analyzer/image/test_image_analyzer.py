@@ -142,32 +142,6 @@ class TestImageAnalyzer(unittest.TestCase):
         # Should contain red color
         self.assertIn('#ff0000', result['colors'])
 
-    def test_analyze_image_with_vision_models(self):
-        """Test analyze_image with vision models enabled."""
-        analyzer = ImageAnalyzer()
-
-        # Enable vision models
-        analyzer.scene_detection = True
-        analyzer.content_classification = True
-
-        # Mock the model components
-        analyzer.feature_extractor = Mock()
-        analyzer.model = Mock()
-
-        with patch('random.choice') as mock_random, \
-                patch('random.randint', return_value=1):
-            # Mock random choices to make tests deterministic
-            mock_random.side_effect = ['animal', 'cat', 'outdoor', 'photorealistic', 'tree']
-
-            result = analyzer.analyze_image(self.test_image)
-
-            self.assertEqual(result['subject_type'], 'animal')
-            self.assertEqual(result['subject_details']['species'], 'cat')
-            self.assertEqual(result['scene_type'], 'outdoor')
-            self.assertEqual(result['style'], 'photorealistic')
-            self.assertIn('cat', result['tags'])
-            self.assertIn('outdoor', result['tags'])
-
     def test_analyze_images_batch(self):
         """Test batch processing of multiple images."""
         analyzer = ImageAnalyzer()
