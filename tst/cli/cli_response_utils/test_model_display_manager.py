@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import Mock, patch
 
+from src.cli.cli_response_utils.model_display_manager import ModelDisplayManager
+
 
 class TestModelDisplayManager(unittest.TestCase):
     """Test suite for ModelDisplayManager class."""
@@ -8,7 +10,6 @@ class TestModelDisplayManager(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures before each test method."""
         # Import the class to test
-        from cli.cli_response_utils.model_display_manager import ModelDisplayManager
         self.ModelDisplayManager = ModelDisplayManager
 
     def test_display_models_pretty_basic(self):

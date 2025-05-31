@@ -2,6 +2,8 @@ import json
 import unittest
 from unittest.mock import Mock, patch
 
+from src.cli.cli_response_utils.image_display_manager import ImageDisplayManager
+
 
 class TestImageDisplayManager(unittest.TestCase):
     """Test suite for ImageDisplayManager class."""
@@ -24,7 +26,6 @@ class TestImageDisplayManager(unittest.TestCase):
         self.mock_thumbnail_table_class.return_value = self.mock_table_instance
 
         # Import the class after setting up patches
-        from cli.cli_response_utils.image_display_manager import ImageDisplayManager
         self.ImageDisplayManager = ImageDisplayManager
 
     def tearDown(self):

@@ -1,6 +1,8 @@
 import unittest
 from datetime import datetime
 
+from src.cli.cli_response_utils.display_utils import DisplayUtils
+
 
 class TestDisplayUtils(unittest.TestCase):
     """Test suite for DisplayUtils class."""
@@ -8,7 +10,6 @@ class TestDisplayUtils(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures before each test method."""
         # Import the class to test
-        from cli.cli_response_utils.display_utils import DisplayUtils
         self.DisplayUtils = DisplayUtils
 
     def test_ascii_chars_constant(self):
