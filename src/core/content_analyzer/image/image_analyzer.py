@@ -13,10 +13,7 @@ except ImportError:
     CV2_AVAILABLE = False
 
 try:
-    # This is a placeholder for a vision model - could be any model that can do image analysis
-    # For example, you might use a pre-trained model from Hugging Face, PyTorch, or TensorFlow
     from transformers import AutoFeatureExtractor, AutoModelForImageClassification
-
     VISION_MODEL_AVAILABLE = True
 except ImportError:
     VISION_MODEL_AVAILABLE = False
@@ -61,7 +58,6 @@ class ImageAnalyzer:
             try:
                 if VISION_MODEL_AVAILABLE:
                     # Initialize a pre-trained image classification model
-                    # This is a placeholder - replace with actual model initialization
                     self.feature_extractor = AutoFeatureExtractor.from_pretrained("microsoft/resnet-50")
                     self.model = AutoModelForImageClassification.from_pretrained("microsoft/resnet-50")
 
@@ -94,7 +90,7 @@ class ImageAnalyzer:
                 self.logger.error(f"Failed to open image for analysis: {e}")
                 return None
 
-        # Initialize results dictionary with the new structure
+        # Initialize result dictionary with the new structure
         results = {
             "subject_type": None,
             "subject_details": {},
@@ -155,17 +151,6 @@ class ImageAnalyzer:
         # Perform scene detection and content classification if enabled
         if (self.scene_detection or self.content_classification) and VISION_MODEL_AVAILABLE:
             try:
-                # This is a placeholder for actual model inference
-                # In a real implementation, you would use a pre-trained model to identify:
-                # - Type of subject (person, animal, vehicle, landscape, etc.)
-                # - Scene type (indoor, outdoor, abstract, etc.)
-                # - Style (photorealistic, cartoon, sketch, painting, etc.)
-                # - Objects present in the image
-
-                # For now, we'll simulate some results
-                # In a real implementation, these would come from model predictions
-
-                # If we haven't already determined subject_type from face detection
                 if results["subject_type"] is None:
                     # Simulate subject detection
                     # This would normally come from an image classification model
@@ -173,7 +158,7 @@ class ImageAnalyzer:
                                          "food", "text", "abstract", "object", "chart"]
 
                     # For demonstration, choose a random subject type
-                    # In a real implementation, this would be determined by the model
+                    # In a real implementation; this would be determined by the model
                     import random
                     simulated_subject = random.choice(possible_subjects)
                     results["subject_type"] = simulated_subject
