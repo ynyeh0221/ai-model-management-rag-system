@@ -8,6 +8,7 @@ from datetime import datetime
 from src.core.content_analyzer.model_script.llm_based_code_parser import split_code_chunks_via_ast
 from src.core.content_analyzer.utils.model_id_utils import ModelIdUtils
 
+schema_version_str = "$schema_version"
 
 def _clean_iso_timestamp(ts: str) -> str:
     """Remove microseconds from ISO format like 2025-03-02T10:53:24.620782 -> 2025-03-02T10:53:24"""
@@ -59,7 +60,7 @@ def _process_and_store_chunks(chunks, model_id, metadata_doc_id, schema_validato
 
         chunk_document = {
             "id": f"model_chunk_{model_id}_{i}",
-            "$schema_version": "1.0.0",
+            schema_version_str: "1.0.0",
             "content": chunk_text,
             "metadata": {
                 "model_id": model_id,
@@ -95,7 +96,7 @@ def _process_and_store_chunks(chunks, model_id, metadata_doc_id, schema_validato
 
 
 def _create_metadata_content_for_type(doc_type, document):
-    """Create metadata content for embedding based on document type.
+    """Create metadata content for embedding based on a document type.
 
     Args:
         doc_type: Type of the document (e.g., 'model_file', 'model_date')
@@ -372,7 +373,7 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
         # 1. Model file information
         "model_file": {
             "id": f"model_file_{model_id}",
-            "$schema_version": "1.0.0",
+            schema_version_str: "1.0.0",
             "content": f"Model file: {model_id}",
             "metadata": {
                 "model_id": model_id,
@@ -383,7 +384,7 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
         # 2. Model date information
         "model_date": {
             "id": f"model_date_{model_id}",
-            "$schema_version": "1.0.0",
+            schema_version_str: "1.0.0",
             "content": f"Model date: {model_id}",
             "metadata": {
                 "model_id": model_id,
@@ -398,7 +399,7 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
         # 3. Model git information
         "model_git": {
             "id": f"model_git_{model_id}",
-            "$schema_version": "1.0.0",
+            schema_version_str: "1.0.0",
             "content": f"Model git: {model_id}",
             "metadata": {
                 "model_id": model_id,
@@ -409,7 +410,7 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
         # 4. Model frameworks information
         "model_frameworks": {
             "id": f"model_frameworks_{model_id}",
-            "$schema_version": "1.0.0",
+            schema_version_str: "1.0.0",
             "content": f"Model frameworks: {model_id}",
             "metadata": {
                 "model_id": model_id,
@@ -420,7 +421,7 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
         # 5. Model datasets information
         "model_datasets": {
             "id": f"model_datasets_{model_id}",
-            "$schema_version": "1.0.0",
+            schema_version_str: "1.0.0",
             "content": f"Model datasets: {model_id}",
             "metadata": {
                 "model_id": model_id,
@@ -431,7 +432,7 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
         # 6. Model training configs information
         "model_training_configs": {
             "id": f"model_training_configs_{model_id}",
-            "$schema_version": "1.0.0",
+            schema_version_str: "1.0.0",
             "content": f"Model training configs: {model_id}",
             "metadata": {
                 "model_id": model_id,
@@ -439,10 +440,10 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
             }
         },
 
-        # 7. Model architectures information
+        # 7. Model architecture information
         "model_architectures": {
             "id": f"model_architectures_{model_id}",
-            "$schema_version": "1.0.0",
+            schema_version_str: "1.0.0",
             "content": f"Model architectures: {model_id}",
             "metadata": {
                 "model_id": model_id,
@@ -456,7 +457,7 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
         # 9. Model AST summaries information
         "model_ast_summaries": {
             "id": f"model_ast_summaries_{model_id}",
-            "$schema_version": "1.0.0",
+            schema_version_str: "1.0.0",
             "content": f"Model AST summaries: {model_id}",
             "metadata": {
                 "model_id": model_id,
@@ -467,7 +468,7 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
         # 10. Model images folder information
         "model_images_folder": {
             "id": f"model_images_folder_{model_id}",
-            "$schema_version": "1.0.0",
+            schema_version_str: "1.0.0",
             "content": f"Model images folder: {model_id}",
             "metadata": {
                 "model_id": model_id,
@@ -478,7 +479,7 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
         # 11. Model diagram path information
         "model_diagram_path": {
             "id": f"model_diagram_path_{model_id}",
-            "$schema_version": "1.0.0",
+            schema_version_str: "1.0.0",
             "content": f"Model diagram path: {model_id}",
             "metadata": {
                 "model_id": model_id,
@@ -492,7 +493,7 @@ def _extract_and_prepare_metadata(metadata_extractor, parse_result, file_path):
         doc_id = f"model_descriptions_{model_id}_chunk_{i}"
         metadata_documents["model_descriptions"].append({
             "id": doc_id,
-            "$schema_version": "1.0.0",
+            schema_version_str: "1.0.0",
             "content": f"Description for chunk {i} of model {model_id}",
             "metadata": {
                 "model_id": model_id,
@@ -589,7 +590,7 @@ class ScriptProcessorRunner:
             logging.basicConfig(level=logging.INFO)
             logger = logging.getLogger("model_script_processor")
 
-        # Check if file exists
+        # Check if the file exists
         if not os.path.isfile(file_path):
             logger.error(f"File {file_path} does not exist")
             return None
