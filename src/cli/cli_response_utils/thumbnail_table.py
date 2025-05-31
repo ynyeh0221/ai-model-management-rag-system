@@ -41,13 +41,13 @@ class ThumbnailTable:
                 self._format_single_row(row, col_widths, thumbnail_idx, separator)
             )
 
-        # join header + separator + all row‐blocks
+        # join header + separator and all row‐blocks
         return "\n".join([header_line, separator] + body_lines)
 
     def _calculate_column_widths(self, thumbnail_idx):
         """
         Return a list of maximum widths for every non‐thumbnail column.
-        E.g. if headers = ["#", "Name", "Thumbnail", "Path"], and there are 3 rows,
+        E.g., if headers = ["#", "Name", "Thumbnail", "Path"], and there are 3 rows,
         we compute the width of "#" vs. digits, "Name" vs. names, skip Thumbnail, "Path" vs. paths.
         """
         widths = []
@@ -132,7 +132,7 @@ class ThumbnailTable:
             lines.append(f"{indent}| {thumb_line}")
 
         # 5) add the final "path" (or other trailing data) under the same indentation
-        #    i.e. indent + "|" + second_part
+        #    i.e., indent + "|" + second_part
         lines.append(f"{indent}| {second_part}")
 
         # 6) finally append the separator
