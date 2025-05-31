@@ -155,82 +155,130 @@ class CLIInterface:
             pass
 
     def _handle_result(self, result):
-        """Handle result callback"""
-        if result.get("type") == "text_search":
+        """Route the result to the appropriate handler based on its type."""
+        result_type = result.get("type")
 
-            # Display full response
-            print("\nLLM Final Response:")
-            self.llm_response_processor.print_llm_content(result.get("final_response", ""))
+        if result_type == "text_search":
+            self._handle_text_search(result)
 
-            # Display text search results
-            print("\nRetrieving and displaying reranked search results:\n")
-            self.model_display_manager.display_reranked_results_pretty(result.get("search_results", []))
+        elif result_type == "image_search":
+            self._handle_image_search(result)
 
-        elif result.get("type") == "image_search":
-            # Display image search results
-            print("\nImage search results:")
-            self.image_display_manager.display_image_search_results(result.get("results", []))
+        elif result_type == "command":
+            self._handle_command(result)
 
-        elif result.get("type") == "command":
-            # Display command results
-            if isinstance(result.get("result"), dict):
-                # Format dictionary results
-                if "available_commands" in result["result"]:
-                    print("\nAvailable commands:")
-                    for cmd in result["result"]["available_commands"]:
-                        print(f"  {cmd}")
-                else:
-                    # Generic dictionary formatting
-                    for key, value in result["result"].items():
-                        print(f"{key}: {value}")
+        elif result_type == "needs_clarification":
+            self._handle_needs_clarification(result)
+
+        else:
+            # You could optionally log or print unknown‐type results here
+            print(f"Unknown result type: {result_type}")
+
+    def _handle_text_search(self, result):
+        """Display LLM response and any reranked text‐search results."""
+        # Display full LLM response
+        print("\nLLM Final Response:")
+        full_resp = result.get("final_response", "")
+        self.llm_response_processor.print_llm_content(full_resp)
+
+        # Display reranked search results (if any)
+        print("\nRetrieving and displaying reranked search results:\n")
+        reranked = result.get("search_results", [])
+        self.model_display_manager.display_reranked_results_pretty(reranked)
+
+    def _handle_image_search(self, result):
+        """Display image‐search results."""
+        print("\nImage search results:")
+        images = result.get("results", [])
+        self.image_display_manager.display_image_search_results(images)
+
+    def _handle_command(self, result):
+        """Format and display a 'command'‐type result."""
+        cmd_res = result.get("result")
+
+        if isinstance(cmd_res, dict):
+            # If there is an "available_commands" key, list them
+            if "available_commands" in cmd_res:
+                print("\nAvailable commands:")
+                for cmd in cmd_res["available_commands"]:
+                    print(f"  {cmd}")
             else:
-                # Simple string result
-                print(result.get("result", ""))
+                # Otherwise, print each key/value pair in the dictionary
+                for key, value in cmd_res.items():
+                    print(f"{key}: {value}")
+        else:
+            # If it's not a dict, treat it as a simple string
+            print(cmd_res or "")
 
-        elif result.get("type") == "needs_clarification":
-            # Handle query that needs clarification
-            query = result.get("query", "")
-            clarity_result = result.get("clarity_result", {})
+    def _handle_needs_clarification(self, result):
+        """Ask the user to pick (or type) a clarified query, then re‐run it."""
+        query = result.get("query", "")
+        clarity_result = result.get("clarity_result", {})
 
-            print("\nYour query could be clearer:")
-            print(f"Reason: {clarity_result.get('reason', 'No reason provided')}")
+        # 1) Print out why clarification is needed
+        self._print_clarification_prompt(query, clarity_result)
 
-            improved_query = clarity_result.get('improved_query', query)
-            suggestions = clarity_result.get('suggestions', [])
+        # 2) Loop until the user picks a valid option (0 = improved, 1.N = suggestions,
+        #    N+1 = original, N+2 = custom)
+        new_query = self._resolve_clarification_choice(query, clarity_result)
 
-            print("\nSuggestions:")
-            print(f"0. Improved query: {improved_query}")
+        # 3) Re‐run the RAG system on whatever new_query was chosen
+        asyncio.run(self.rag_system.process_query(new_query))
 
-            for i, suggestion in enumerate(suggestions, 1):
-                print(f"{i}. {suggestion}")
+    def _print_clarification_prompt(self, original_query, clarity_result):
+        """Print the “needs clarification” text and suggested queries."""
+        print("\nYour query could be clearer:")
+        reason = clarity_result.get("reason", "No reason provided")
+        print(f"Reason: {reason}")
 
-            print(f"{len(suggestions) + 1}. Use original query: {query}")
-            print(f"{len(suggestions) + 2}. Enter a new query")
+        improved_query = clarity_result.get("improved_query", original_query)
+        suggestions = clarity_result.get("suggestions", [])
 
-            while True:
-                try:
-                    choice = input("Select an option (number): ")
-                    choice_num = int(choice)
+        print("\nSuggestions:")
+        print(f"0. Improved query: {improved_query}")
 
-                    if choice_num == 0:
-                        new_query = improved_query
-                        break
-                    elif 1 <= choice_num <= len(suggestions):
-                        new_query = suggestions[choice_num - 1]
-                        break
-                    elif choice_num == len(suggestions) + 1:
-                        new_query = query
-                        break
-                    elif choice_num == len(suggestions) + 2:
-                        new_query = input("Enter your new query: ")
-                        break
-                    else:
-                        print("Invalid selection. Please try again.")
-                except ValueError:
-                    print("Please enter a number.")
+        for i, suggestion in enumerate(suggestions, 1):
+            print(f"{i}. {suggestion}")
 
-            # Process the new query
-            asyncio.run(self.rag_system.process_query(new_query))
+        print(f"{len(suggestions) + 1}. Use original query: {original_query}")
+        print(f"{len(suggestions) + 2}. Enter a new query")
+
+    def _resolve_clarification_choice(self, original_query, clarity_result):
+        """
+        Prompt the user to pick one of the suggested queries (or enter a new one).
+        Returns the chosen query string.
+        """
+        improved_query = clarity_result.get("improved_query", original_query)
+        suggestions = clarity_result.get("suggestions", [])
+
+        max_option = len(suggestions) + 2
+
+        while True:
+            choice = input("Select an option (number): ")
+
+            try:
+                choice_num = int(choice)
+            except ValueError:
+                print("Please enter a number.")
+                continue
+
+            # 0 => improved_query
+            if choice_num == 0:
+                return improved_query
+
+            # 1..len(suggestions) => pick from suggestions
+            if 1 <= choice_num <= len(suggestions):
+                return suggestions[choice_num - 1]
+
+            # len(suggestions)+1 => original query
+            if choice_num == len(suggestions) + 1:
+                return original_query
+
+            # len(suggestions)+2 => custom (prompt the user)
+            if choice_num == max_option:
+                return input("Enter your new query: ")
+
+            print("Invalid selection. Please try again.")
 
     def _handle_error(self, error):
         """Handle error callback"""
@@ -403,34 +451,80 @@ class CommandHandler:
         asyncio.run(self.rag_system.process_query(query_text))
 
     def _handle_generate_notebook_command(self, cmd):
-        """Handle the generate-notebook command."""
-        notebook_type = "evaluation"
-
-        if cmd.lower() == "generate-notebook":
-            model_id = input("Enter model ID: ")
-            output_path = input(
-                f"Enter output path [default: ./notebooks/{model_id}.ipynb]: ") or f"./notebooks/{model_id}.ipynb"
+        """
+        Handle the “generate-notebook” command. Delegates argument parsing
+        to helper methods, then calls the notebook generator and prints the result.
+        """
+        # 1) If the user just typed “generate-notebook” (no flags/arguments),
+        #    prompt them for model_id and output_path.
+        if cmd.strip().lower() == "generate-notebook":
+            model_id, _, output_path = self._prompt_notebook_defaults()
         else:
-            parts = cmd.split(maxsplit=3)
-            model_id = parts[1] if len(parts) > 1 else input("Enter model ID: ")
+            # 2) Otherwise, parse out model_id, --type (or -t), and --output (or -o)
+            model_id, _, output_path = self._extract_notebook_args(cmd)
 
-            if len(parts) > 2:
-                if parts[2].startswith("--type=") or parts[2].startswith("-t="):
-                    notebook_type = parts[2].split("=", 1)[1]
-                else:
-                    notebook_type = parts[2]
+        # 3) Invoke the generator
+        result = self.notebook_generator.generate_notebook(
+            self.components, model_id, output_path
+        )
 
-            if len(parts) > 3:
-                if parts[3].startswith("--output=") or parts[3].startswith("-o="):
-                    output_path = parts[3].split("=", 1)[1]
-                else:
-                    output_path = parts[3]
-            else:
-                output_path = f"./notebooks/{model_id}_{notebook_type}.ipynb"
-
-        result = self.notebook_generator.generate_notebook(self.components, model_id, output_path)
-
+        # 4) Print success / failure
         if result:
             print(f"Notebook generated successfully: {result}")
         else:
             print("Failed to generate notebook")
+
+    def _prompt_notebook_defaults(self):
+        """
+        Prompt the user for model_id and output_path when they only typed
+        “generate-notebook” with no additional arguments.
+        Returns a tuple: (model_id, notebook_type, output_path).
+        """
+        # Default notebook_type for the bare command is “evaluation”
+        notebook_type = "evaluation"
+
+        model_id = input("Enter model ID: ")
+        default_path = f"./notebooks/{model_id}.ipynb"
+        output_path = input(f"Enter output path [default: {default_path}]: ") or default_path
+
+        return model_id, notebook_type, output_path
+
+    def _extract_notebook_args(self, cmd):
+        """
+        Parse a command string of the form:
+            generate-notebook <model_id> [--type=<type> | -t=<type>] [--output=<path> | -o=<path>]
+        or positional arguments in place of flags.
+        Returns (model_id, notebook_type, output_path).
+        """
+        parts = cmd.split(maxsplit=3)
+
+        # 1) Model ID is either the second token, or prompt if missing
+        if len(parts) > 1:
+            model_id = parts[1]
+        else:
+            model_id = input("Enter model ID: ")
+
+        # 2) Default type is “evaluation”
+        notebook_type = "evaluation"
+        if len(parts) > 2:
+            raw_type = parts[2]
+            if raw_type.startswith("--type=") or raw_type.startswith("-t="):
+                notebook_type = raw_type.split("=", 1)[1]
+            else:
+                # If they passed something like “generate-notebook ID customType …”
+                notebook_type = raw_type
+
+        # 3) Default output path (if no --output/-o given)
+        default_path = f"./notebooks/{model_id}_{notebook_type}.ipynb"
+
+        if len(parts) > 3:
+            raw_output = parts[3]
+            if raw_output.startswith("--output=") or raw_output.startswith("-o="):
+                output_path = raw_output.split("=", 1)[1]
+            else:
+                # If they passed something like “generate-notebook ID type /some/path.ipynb”
+                output_path = raw_output
+        else:
+            output_path = default_path
+
+        return model_id, notebook_type, output_path
