@@ -118,7 +118,7 @@ def forward(self, x):
 
         self.visitor.visit_FunctionDef(node)
 
-        self.assertNone(self.visitor.current_function)  # Should reset after a visit
+        self.assertIsNone(self.visitor.current_function)  # Should reset after a visit
         forward_info = self.mock_parent_generator.function_calls.get("forward", {})
         self.assertEqual(forward_info.get("class"), "TestModel")
 

@@ -14,124 +14,173 @@ class ImageProcessor:
         """Process an image and extract metadata."""
         try:
             with Image.open(image_path) as img:
-                # Extract basic image properties
-                image_dimensions = img.size  # This is a tuple (width, height)
-                # Convert tuple to list for proper JSON serialization
-                image_size = list(image_dimensions)
-
-                image_info = {
-                    "format": img.format,
-                    "mode": img.mode,
-                    "size": image_size,  # Now this is a list [width, height]
-                    "image_path": image_path,
-                    "thumbnail_path": None,  # Will be set later if needed
-                    "exif": self.extract_exif_data(image_path)
-                }
-
-                # Extract dates and format them properly
-                creation_date = self._get_creation_date(image_path)
-                last_modified_date = self._get_last_modified_date(image_path)
-
-                # Parse dates into components
-                dates = {
-                    "creation_date": creation_date,
-                    "created_at": creation_date,  # Duplicate field for compatibility
-                    "last_modified_date": last_modified_date,
-                    "date_taken": None
-                }
-
-                # Add month and year information
-                if creation_date:
-                    try:
-                        dt = datetime.datetime.fromisoformat(creation_date)
-                        dates["created_month"] = dt.strftime("%m")
-                        dates["created_year"] = dt.strftime("%Y")
-                        # Keep old field names for backward compatibility
-                        dates["creation_month"] = dt.strftime("%m")
-                        dates["creation_year"] = dt.strftime("%Y")
-                    except ValueError:
-                        pass
-
-                if last_modified_date:
-                    try:
-                        dt = datetime.datetime.fromisoformat(last_modified_date)
-                        dates["last_modified_month"] = dt.strftime("%m")
-                        dates["last_modified_year"] = dt.strftime("%Y")
-                    except ValueError:
-                        pass
-
-                # Try to get date taken from EXIF if available
-                if "DateTimeOriginal" in image_info["exif"]:
-                    try:
-                        # Parse the EXIF date format (typically "YYYY:MM:DD HH:MM:SS")
-                        date_str = image_info["exif"]["DateTimeOriginal"]
-                        # Convert to ISO format for consistency with other dates
-                        parsed_date = datetime.datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
-                        dates["date_taken"] = parsed_date.isoformat()
-                    except Exception:
-                        # If date parsing fails, fall back to file creation date
-                        pass
-
-                # Add extracted dates to image info
+                image_info = self._build_basic_info(img, image_path)
+                dates = self._build_dates(image_path, image_info["exif"])
                 image_info["dates"] = dates
 
-                # Initialize image content information with the new structure
-                image_info["image_content"] = {
-                    "subject_type": None,
-                    "subject_details": {},
-                    "scene_type": None,
-                    "style": None,
-                    "tags": [],
-                    "colors": [],
-                    "objects": []
-                }
-
-                # Analyze image content if image analyzer is available
+                image_info["image_content"] = self._init_content_struct()
                 if self.image_analyzer:
-                    content_analysis = self.image_analyzer.analyze_image(img)
-                    if content_analysis:
-                        # Update image_content with analysis results
-                        for key, value in content_analysis.items():
-                            if key == "description":
-                                image_info["description"] = value
-                            elif key in image_info["image_content"]:
-                                image_info["image_content"][key] = value
+                    self._populate_content(image_info, img)
 
-                # Extract epoch information from the filename or metadata
-                # Format could be: model_name_epoch_X.png or similar
-                filename = os.path.basename(image_path)
-                try:
-                    # Try to extract epoch from filename
-                    # Common patterns include: something_epoch_42.png or something_e42.png
-                    parts = os.path.splitext(filename)[0].split('_')
-                    for i, part in enumerate(parts):
-                        if part.lower() == "epoch" and i + 1 < len(parts):
-                            image_info["epoch"] = int(parts[i + 1])
-                            break
-                        elif part.lower().startswith('e') and part[1:].isdigit():
-                            image_info["epoch"] = int(part[1:])
-                            break
-                except (ValueError, IndexError):
-                    # If we can't extract epoch from filename, set to null
-                    image_info["epoch"] = None
-
-                # Merge additional metadata if provided
+                image_info["epoch"] = self._extract_epoch_from_filename(image_path)
                 if metadata:
                     image_info.update(metadata)
-
-                # Generate a default ID if not provided (needed by schema)
                 if "id" not in image_info:
-                    # Create an ID from the filename
-                    base_name = os.path.splitext(os.path.basename(image_path))[0]
-                    image_info["id"] = f"image_{base_name}"
+                    image_info["id"] = self._generate_default_id(image_path)
 
-                # Optionally validate the extracted metadata against a schema
                 if self.schema_validator:
                     self.schema_validator.validate(image_info, "generated_image_schema")
 
                 return {"metadata": image_info}
+
         except Exception as e:
             raise ValueError(f"Error processing image {image_path}: {e}")
+
+    def _build_basic_info(self, img, image_path):
+        """Extract basic properties (format, mode, size, EXIF)."""
+        width, height = img.size
+        return {
+            "format": img.format,
+            "mode": img.mode,
+            "size": [width, height],
+            "image_path": image_path,
+            "thumbnail_path": None,
+            "exif": self.extract_exif_data(image_path),
+        }
+
+    def _build_dates(self, image_path, exif_data):
+        """
+        Extract creation, last modified, and date taken,
+        and derive month/year fields.
+        """
+        creation = self._get_creation_date(image_path)
+        modified = self._get_last_modified_date(image_path)
+        dates = {
+            "creation_date": creation,
+            "created_at": creation,
+            "last_modified_date": modified,
+            "date_taken": None,
+        }
+
+        # Add month/year for creation
+        self._add_month_year(dates, "creation", creation)
+        # Add month/year for last modified
+        self._add_month_year(dates, "last_modified", modified)
+
+        # Try to pull date_taken from EXIF DateTimeOriginal
+        dto = exif_data.get("DateTimeOriginal")
+        if dto:
+            try:
+                parsed = datetime.datetime.strptime(dto, "%Y:%m:%d %H:%M:%S")
+                dates["date_taken"] = parsed.isoformat()
+            except Exception:
+                pass
+
+        return dates
+
+    def _add_month_year(self, dates_dict, prefix, iso_str):
+        """Given a date string in ISO format, add prefix_month and prefix_year."""
+        if not iso_str:
+            return
+        try:
+            dt = datetime.datetime.fromisoformat(iso_str)
+            dates_dict[f"{prefix}_month"] = dt.strftime("%m")
+            dates_dict[f"{prefix}_year"] = dt.strftime("%Y")
+            # For backward compatibility: mirror 'creation' into 'created'
+            if prefix == "creation":
+                dates_dict["created_month"] = dates_dict["creation_month"]
+                dates_dict["created_year"] = dates_dict["creation_year"]
+        except ValueError:
+            pass
+
+    def _init_content_struct(self):
+        """Create the empty image_content structure."""
+        return {
+            "subject_type": None,
+            "subject_details": {},
+            "scene_type": None,
+            "style": None,
+            "tags": [],
+            "colors": [],
+            "objects": [],
+        }
+
+    def _populate_content(self, image_info, img):
+        """
+        Run the image analyzer and insert description or other fields
+        into image_info and image_content.
+        """
+        analysis = self.image_analyzer.analyze_image(img)
+        if not analysis:
+            return
+
+        for key, value in analysis.items():
+            if key == "description":
+                image_info["description"] = value
+            elif key in image_info["image_content"]:
+                image_info["image_content"][key] = value
+
+    def _extract_epoch_from_filename(self, image_path):
+        """
+        Look for patterns like: <name>_epoch_<number>.* or <name>_e<number>.*
+        Return integer epoch or None.
+        """
+        filename = os.path.splitext(os.path.basename(image_path))[0]
+        parts = filename.split("_")
+        for i, part in enumerate(parts):
+            lower = part.lower()
+            if lower == "epoch" and i + 1 < len(parts):
+                try:
+                    return int(parts[i + 1])
+                except (ValueError, IndexError):
+                    return None
+            if lower.startswith("e") and lower[1:].isdigit():
+                try:
+                    return int(lower[1:])
+                except ValueError:
+                    return None
+        return None
+
+    def _generate_default_id(self, image_path):
+        """Create a fallback ID based on filename (without extension)."""
+        base_name = os.path.splitext(os.path.basename(image_path))[0]
+        return f"image_{base_name}"
+
+    def extract_exif_data(self, image_path):
+        """
+        Return a dictionary of EXIF tags (including 'DateTimeOriginal' if available).
+        """
+        exif_data_named = {}
+        try:
+            with Image.open(image_path) as img:
+                raw_exif = img._getexif()
+                if raw_exif:
+                    for tag_id, value in raw_exif.items():
+                        tag = ExifTags.TAGS.get(tag_id, tag_id)
+                        exif_data_named[tag] = value
+        except Exception:
+            pass
+        return exif_data_named
+
+    def _get_creation_date(self, image_path):
+        """
+        Return creation date as ISO-formatted string, or None on failure.
+        """
+        try:
+            ts = os.path.getctime(image_path)
+            return datetime.datetime.fromtimestamp(ts).isoformat()
+        except Exception:
+            return None
+
+    def _get_last_modified_date(self, image_path):
+        """
+        Return last modified date as ISO-formatted string, or None on failure.
+        """
+        try:
+            ts = os.path.getmtime(image_path)
+            return datetime.datetime.fromtimestamp(ts).isoformat()
+        except Exception:
+            return None
 
     def _get_creation_date(self, file_path):
         """Get file creation date, preferring git history if available."""
