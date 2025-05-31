@@ -45,8 +45,13 @@ class TextEmbedder:
 
             # Detect device if not specified
             if self.device is None:
-                self.device = (
-                    "mps" if torch.backends.mps.is_available() else ("cuda" if torch.cuda.is_available() else "cpu"))
+                # Extract nested conditional into separate statements
+                if torch.backends.mps.is_available():
+                    self.device = "mps"
+                elif torch.cuda.is_available():
+                    self.device = "cuda"
+                else:
+                    self.device = "cpu"
 
             # Load the model
             self.model = SentenceTransformer(self.model_name, device=self.device)
@@ -54,12 +59,15 @@ class TextEmbedder:
             # Store embedding dimension
             self.embedding_dim = self.model.get_sentence_embedding_dimension()
 
-            self.logger.info(f"Initialized TextEmbedder with model {self.model_name} "
-                             f"(dimension: {self.embedding_dim}) on {self.device}")
+            self.logger.info(
+                f"Initialized TextEmbedder with model {self.model_name} "
+                f"(dimension: {self.embedding_dim}) on {self.device}"
+            )
 
         except ImportError:
-            self.logger.error("sentence-transformers package not found. Install with: "
-                              "pip install sentence-transformers")
+            self.logger.error(
+                "sentence-transformers package not found. Install with: pip install sentence-transformers"
+            )
             raise
         except Exception as e:
             self.logger.error(f"Error initializing embedding model: {e}", exc_info=True)
@@ -91,8 +99,13 @@ class TextEmbedder:
             # Return zero vector in case of error
             return np.zeros(self.embedding_dim)
 
-    def embed_batch(self, texts: List[str], batch_size: int = 32,
-                    normalize: bool = True, show_progress_bar: bool = False) -> np.ndarray:
+    def embed_batch(
+        self,
+        texts: List[str],
+        batch_size: int = 32,
+        normalize: bool = True,
+        show_progress_bar: bool = False
+    ) -> np.ndarray:
         """
         Generate embeddings for a batch of texts.
 
@@ -124,11 +137,15 @@ class TextEmbedder:
             return embeddings
 
         except Exception as e:
-            self.logger.error(f"Error embedding batch of {len(texts)} texts: {e}", exc_info=True)
-            # Return empty array in case of error
+            self.logger.error(
+                f"Error embedding batch of {len(texts)} texts: {e}", exc_info=True
+            )
+            # Return zero matrix in case of error
             return np.zeros((len(texts), self.embedding_dim))
 
-    def embed_mixed_content(self, content: Dict[str, Any], normalize: bool = True) -> np.ndarray:
+    def embed_mixed_content(
+        self, content: Dict[str, Any], normalize: bool = True
+    ) -> np.ndarray:
         """
         Generate embeddings for mixed content with different sections.
 
@@ -212,9 +229,12 @@ class TextEmbedder:
             self.logger.error(f"Error computing similarity: {e}", exc_info=True)
             return 0.0
 
-    def find_most_similar(self, query_embedding: np.ndarray,
-                          embeddings: np.ndarray,
-                          top_k: int = 5) -> List[Dict[str, Any]]:
+    def find_most_similar(
+        self,
+        query_embedding: np.ndarray,
+        embeddings: np.ndarray,
+        top_k: int = 5
+    ) -> List[Dict[str, Any]]:
         """
         Find the most similar embeddings to a query embedding.
 
@@ -234,7 +254,9 @@ class TextEmbedder:
 
             # Ensure embeddings are normalized
             norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-            valid_indices = np.where(norms.flatten() > 0)[0]
+            # Use np.nonzero when only condition parameter is provided
+            valid_mask = (norms.flatten() > 0)
+            valid_indices = np.nonzero(valid_mask)[0]
 
             if len(valid_indices) == 0:
                 return []
@@ -323,6 +345,7 @@ class TextEmbedder:
     def __call__(self, input: List[str]) -> List[List[float]]:
         """
         Make TextEmbedder compatible with ChromaDB's embedding_function interface.
+
         Args:
             input: List of strings to embed
 

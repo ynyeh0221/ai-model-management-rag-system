@@ -8,7 +8,7 @@ import numpy as np
 from src.core.vector_db.text_embedder import TextEmbedder
 
 
-# Create a dummy model to replace SentenceTransformer
+# Create a fake model to replace SentenceTransformer
 class DummyModel:
     def __init__(self, embedding_dim=10):
         self._dim = embedding_dim
@@ -30,7 +30,7 @@ class TestTextEmbedder(unittest.TestCase):
         with patch.object(TextEmbedder, '_initialize_model'):
             self.embedder = TextEmbedder(model_name="dummy-model", device="cpu")
 
-        # Set up the embedder with our dummy model directly
+        # Set up the embedder with our fake model directly
         self.embedder.model = DummyModel(embedding_dim=10)
         self.embedder.embedding_dim = self.embedder.model.get_sentence_embedding_dimension()
 
@@ -40,7 +40,7 @@ class TestTextEmbedder(unittest.TestCase):
         np.testing.assert_array_equal(embedding, np.zeros(self.embedder.embedding_dim))
 
     def test_embed_text_normal(self):
-        """Embedding a normal text should return the dummy model's vector."""
+        """Embedding a normal text should return the fake model's vector."""
         text = "Hello world"
         embedding = self.embedder.embed_text(text)
         expected = np.full(self.embedder.embedding_dim, 1)
@@ -55,7 +55,7 @@ class TestTextEmbedder(unittest.TestCase):
         """Batch embedding should process each text (including empty ones) correctly."""
         texts = ["Hello", "world", ""]
         embeddings = self.embedder.embed_batch(texts)
-        # All three texts should return vectors of ones because of our DummyModel
+        # All three texts should return vectors of ones because of our DummyModel,
         # which returns ones for any input, including a single space (which is what
         # empty strings are replaced with)
         expected = np.array([np.full(self.embedder.embedding_dim, 1) for _ in range(len(texts))])
@@ -63,7 +63,7 @@ class TestTextEmbedder(unittest.TestCase):
 
     def test_embed_mixed_content_empty(self):
         """
-        Providing empty content (i.e. an empty dict) should result in a zero vector.
+        Providing empty content (i.e., an empty dict) should result in a zero vector.
         """
         embedding = self.embedder.embed_mixed_content({})
         np.testing.assert_array_equal(embedding, np.zeros(self.embedder.embedding_dim))
