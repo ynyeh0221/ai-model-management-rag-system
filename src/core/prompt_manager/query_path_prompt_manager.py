@@ -152,10 +152,10 @@ class QueryPathPromptManager:
         )
         return prompt
 
-    # TODO Refactor this prompt to make it output response in desired format when INSUFFICIENT INFORMATION (MORE RESULTS NEEDED)
+    # TODO Refactor this prompt to make it output response in desired format when INSUFFICIENT INFORMATION (MORE RESULTS NEEDED) #NOSONAR
     @staticmethod
     def get_system_prompt_for_regular_response():
-        return f"""### ML TECHNICAL REPORT GENERATOR: ROLE AND CONTEXT
+        return """### ML TECHNICAL REPORT GENERATOR: ROLE AND CONTEXT
 
         You are a senior machine learning architect creating a comprehensive technical report in response to user query.
 

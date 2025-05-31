@@ -63,7 +63,7 @@ class ModelDiagramGenerator:
 
     def _extract_architecture_section(self, text: str) -> str:
         """Extract the Model Architecture section from summary."""
-        match = re.search(r'Model Architecture:(.*?)$', text, re.DOTALL)
+        match = re.search(r'Model Architecture:(.*)$', text, re.DOTALL)
         return match.group(0).strip() if match else ""
 
     def _parse_architecture(
@@ -185,7 +185,7 @@ def draw_model_architecture(
     fmt = output_path.rsplit('.', 1)[-1]
     generator = ModelDiagramGenerator(show_dimensions=show_dimensions, output_format=fmt)
 
-    # Apply provided component tree
+    # Apply a provided component tree
     if component_tree is not None:
         deps: Dict[str, Set[str]] = {}
         for comp, deps_list in component_tree.items():

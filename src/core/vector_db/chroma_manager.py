@@ -38,7 +38,7 @@ class ChromaManager:
     def _initialize_client(self):
         """
         Initialize the Chroma client and embedding functions.
-        Sets up persistent storage and prepares embedding models.
+        Sets up persistent storage and prepare embedding models.
         """
         try:
             # Ensure persistence directory exists
@@ -243,7 +243,7 @@ class ChromaManager:
             The collection object
         """
         try:
-            # Check if collection exists
+            # Check if a collection exists
             try:
                 collection = self.client.get_collection(
                     name=name,
@@ -252,7 +252,7 @@ class ChromaManager:
                 self.logger.debug(f"Retrieved existing collection: {name}")
 
             except (ValueError, chromadb.errors.NotFoundError) as e:
-                # Collection doesn't exist, create it
+                # Collection doesn't exist, creates it
                 # The specific error type is chromadb.errors.NotFoundError for newer versions
                 collection = self.client.create_collection(
                     name=name,
@@ -272,7 +272,7 @@ class ChromaManager:
     
     def get_collection(self, name: str):
         """
-        Get a collection by name, using cached version if available.
+        Get a collection by name, using a cached version if available.
         
         Args:
             name: Name of the collection
@@ -283,7 +283,7 @@ class ChromaManager:
         if name in self.collections:
             return self.collections[name]
         
-        # Determine appropriate embedding function
+        # Determine the appropriate embedding function
         if "image" in name.lower():
             embedding_function = self.image_embedding_function
         else:
@@ -340,7 +340,7 @@ class ChromaManager:
             collection = self.get_collection(collection_name)
             embeddings = await self._generate_embeddings(content, collection_name, embed_content)
 
-            # Add document to collection
+            # Add a document to a collection
             await self._upsert_document(
                 collection,
                 doc_id,
@@ -456,7 +456,7 @@ class ChromaManager:
     async def _upsert_document(self, collection, doc_id: str, content, embeddings,
                                flat_metadata: Dict[str, Any], collection_name: str,
                                document: Dict[str, Any]) -> None:
-        """Upsert document into collection with appropriate fields."""
+        """Upsert document into a collection with appropriate fields."""
         if collection_name == "generated_images":
             add_kwargs = self._prepare_image_upsert_args(doc_id, flat_metadata, embeddings, document)
         else:
@@ -797,7 +797,7 @@ class ChromaManager:
             bool: Success status
         """
         try:
-            # Check if document exists and user has access
+            # Check if a document exists and user has access
             existing_doc = await self.get_document(
                 doc_id=doc_id,
                 collection_name=collection_name,
@@ -875,7 +875,7 @@ class ChromaManager:
             bool: Success status
         """
         try:
-            # Check if document exists and user has access
+            # Check if a document exists and user has access
             if user_id:
                 existing_doc = await self.get_document(
                     doc_id=doc_id,

@@ -738,7 +738,7 @@ def run_streamlit_app(components):
             st.header("Search Models")
             query_text = st.text_area("Enter your query:", key="query_text", height=100)
 
-            col1, col2 = st.columns([1, 6])
+            col1, _ = st.columns([1, 6])
             with col1:
                 process_btn = st.button("Search")
 

@@ -507,6 +507,8 @@ from src.core.content_analyzer.model_script.ast_summary_generator import ASTSumm
 from src.core.content_analyzer.utils.model_id_utils import ModelIdUtils
 from src.core.prompt_manager.ingestion_path_prompt_manager import IngestionPathPromptManager
 
+unknown_str = "<unknown>"
+
 def filter_model_architecture_from_ast_summary(summary: str) -> str:
     """
     Given an AST digest summary, return only the lines that
@@ -531,7 +533,6 @@ def filter_model_architecture_from_ast_summary(summary: str) -> str:
         # If we're in the Model Architecture section, keep all lines
         if in_model_architecture:
             filtered.append(stripped)
-            continue
 
     return "\n".join(filtered)
 
@@ -1007,7 +1008,7 @@ class LLMBasedCodeParser:
 
         return lowest_directory + "_" + filename
 
-    def extract_metadata_by_llm(self, code_str: str, file_path: str = "<unknown>", max_retries: int = 15) -> dict:
+    def extract_metadata_by_llm(self, code_str: str, file_path: str = unknown_str, max_retries: int = 15) -> dict:
         # STEP 1: Generate AST digest/summary
         ast_digest = clean_empty_lines(self.ast_summary_generator.generate_summary(code_str=code_str, file_path=file_path))
         print(f"Total AST digest: {ast_digest}")
@@ -1114,7 +1115,7 @@ class LLMBasedCodeParser:
         # Replace matched sections with an empty string
         return pattern.sub('', text)
 
-    def generate_architecture_metadata_from_ast_summary(self, summary: str, max_retries: int = 3, file_path: str = "<unknown>") -> dict:
+    def generate_architecture_metadata_from_ast_summary(self, summary: str, max_retries: int = 3, file_path: str = unknown_str) -> dict:
         """Generate structured JSON metadata from AST digest summary."""
         if not self.llm_interface_natural_language_summary:
             return create_default_architecture_llm_metadata()
@@ -1171,7 +1172,7 @@ class LLMBasedCodeParser:
         # After all retries, return default metadata
         return create_default_architecture_llm_metadata()
 
-    def generate_other_metadata_from_ast_summary(self, summary: str, max_retries: int = 3, file_path: str = "<unknown>") -> dict:
+    def generate_other_metadata_from_ast_summary(self, summary: str, max_retries: int = 3, file_path: str = unknown_str) -> dict:
         """Generate structured JSON metadata from AST digest summary."""
         if not self.llm_interface:
             return create_default_other_llm_metadata()

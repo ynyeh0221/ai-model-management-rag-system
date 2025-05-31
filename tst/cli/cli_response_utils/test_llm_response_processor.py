@@ -1,8 +1,8 @@
-import unittest
 import json
+import unittest
 from unittest.mock import Mock, patch
-from io import StringIO
-import sys
+
+from src.cli.cli_response_utils.llm_response_processor import LLMResponseProcessor
 
 
 class TestLLMResponseProcessor(unittest.TestCase):
@@ -11,7 +11,6 @@ class TestLLMResponseProcessor(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures before each test method."""
         # Import the class to test
-        from cli.cli_response_utils.llm_response_processor import LLMResponseProcessor
         self.LLMResponseProcessor = LLMResponseProcessor
 
     def test_print_llm_content_dict_with_content(self):

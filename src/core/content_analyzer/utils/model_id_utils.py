@@ -25,7 +25,7 @@ class ModelIdUtils:
             "resnet50_config"
 
         Args:
-            file_path (str): The path to the file. Must not be None.
+            file_path (str): The path to the file. There must not be None.
 
         Returns:
             str: The generated model ID in the format
@@ -35,7 +35,7 @@ class ModelIdUtils:
             ValueError: If `file_path` is None.
         """
         if file_path is None:
-            raise Exception('file_path is None')
+            raise ValueError('file_path is None')
         # Prepare model ID
         file_path_obj = Path(file_path)
         folder_name = file_path_obj.parent.name
