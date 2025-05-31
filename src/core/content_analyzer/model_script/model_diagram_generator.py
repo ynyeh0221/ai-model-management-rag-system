@@ -124,55 +124,103 @@ class ModelDiagramGenerator:
     def _build_diagram(self) -> Digraph:
         """Assemble the Graphviz Digraph."""
         dot = Digraph(comment='Model Architecture', format=self.format)
-        dot.attr('graph', rankdir='TB', splines='ortho')
-        dot.attr('node', shape='box', style='filled', color='lightblue', fontname='Arial', fontsize='10', margin='0.1,0.1')
-        dot.attr('edge', fontname='Arial', fontsize='8')
+        self._configure_graph_attributes(dot)
 
-        # Create component subgraphs
-        nodes: Set[str] = set()
-        for comp in self.components:
-            with dot.subgraph(name=f'cluster_{comp}') as c:
-                c.attr(label=comp, style='filled', color='lightgrey', fontname='Arial', fontsize='12')
-                if comp in self.root_components:
-                    c.attr(color='darkgreen', penwidth='2.0')
-                for name, ltype, dims in self.component_layers.get(comp, []):
-                    node_id = f"{comp}_{name}"
-                    label = f"{name}\n{ltype}" + (f"\n({dims})" if self.show_dimensions and dims else "")
-                    c.node(node_id, label=label)
-                    nodes.add(node_id)
-
-        # Dependency edges
-        if self.dependencies:
-            for comp, deps in self.dependencies.items():
-                for dep in deps:
-                    if dep in self.components:
-                        # Only connect if both components have layers
-                        if self.component_layers.get(comp) and self.component_layers.get(dep):
-                            src = f"{comp}_{self.component_layers[comp][0][0]}"
-                            dst = f"{dep}_{self.component_layers[dep][0][0]}"
-                            dot.edge(src, dst, style='dashed', color='blue', label='uses')
-                        else:
-                            print(f"Skipping dependency edge {comp}->{dep}: missing layers in source or target")
-        else:
-            print("Skipping dependency edges: no dependencies defined.")
-
-        # Layer-type reference edges
-        for comp, layers in self.component_layers.items():
-            for name, ltype, _ in layers:
-                if ltype in self.components:
-                    if self.component_layers.get(ltype):
-                        src = f"{comp}_{name}"
-                        dst = f"{ltype}_{self.component_layers[ltype][0][0]}"
-                        dot.edge(src, dst, style='dashed', color='red', label='instance')
-                    else:
-                        print(f"Skipping reference edge {comp}_{name}->{ltype}: target missing layers")
+        nodes = set()
+        self._add_component_subgraphs(dot, nodes)
+        self._add_dependency_edges(dot)
+        self._add_reference_edges(dot)
 
         if not nodes:
-            print("WARNING: No nodes created, adding dummy node")
             dot.node("empty", "Empty Model Architecture", shape="box", style="filled", color="orange")
 
         return dot
 
+    def _configure_graph_attributes(self, dot: Digraph) -> None:
+        """Set top‐level graph, node, and edge attributes."""
+        dot.attr('graph', rankdir='TB', splines='ortho')
+        dot.attr(
+            'node',
+            shape='box',
+            style='filled',
+            color='lightblue',
+            fontname='Arial',
+            fontsize='10',
+            margin='0.1,0.1'
+        )
+        dot.attr('edge', fontname='Arial', fontsize='8')
+
+    def _add_component_subgraphs(self, dot: Digraph, nodes: Set[str]) -> None:
+        """
+        Create a subgraph (cluster) for each component,
+        add layer‐nodes under it, and track all node IDs in `nodes`.
+        """
+        for comp in self.components:
+            with dot.subgraph(name=f'cluster_{comp}') as c:
+                c.attr(
+                    label=comp,
+                    style='filled',
+                    color='lightgrey',
+                    fontname='Arial',
+                    fontsize='12'
+                )
+                if comp in self.root_components:
+                    c.attr(color='darkgreen', penwidth='2.0')
+
+                for name, ltype, dims in self.component_layers.get(comp, []):
+                    node_id = f"{comp}_{name}"
+                    label = f"{name}\n{ltype}"
+                    if self.show_dimensions and dims:
+                        label += f"\n({dims})"
+                    c.node(node_id, label=label)
+                    nodes.add(node_id)
+
+    def _add_dependency_edges(self, dot: Digraph) -> None:
+        """
+        For each component‐to‐component dependency, add a dashed blue edge
+        between their first layers (if both have at least one layer).
+        """
+        if not self.dependencies:
+            print("Skipping dependency edges: no dependencies defined.")
+            return
+
+        for comp, deps in self.dependencies.items():
+            # early exit if a source has no layers
+            if not self.component_layers.get(comp):
+                continue
+
+            src_layer_name = self.component_layers[comp][0][0]
+            src = f"{comp}_{src_layer_name}"
+
+            for dep in deps:
+                # skip if a target component doesn't exist or has no layers
+                if dep not in self.components or not self.component_layers.get(dep):
+                    print(f"Skipping dependency edge {comp}->{dep}: missing layers in source or target")
+                    continue
+
+                dst_layer_name = self.component_layers[dep][0][0]
+                dst = f"{dep}_{dst_layer_name}"
+                dot.edge(src, dst, style='dashed', color='blue', label='uses')
+
+    def _add_reference_edges(self, dot: Digraph) -> None:
+        """
+        For each layer whose type is another component name, draw a dashed red edge
+        from this layer to the first layer of the referenced component.
+        """
+        for comp, layers in self.component_layers.items():
+            for name, ltype, _ in layers:
+                # only proceed if ltype is exactly the name of some component
+                if ltype not in self.components:
+                    continue
+
+                if not self.component_layers.get(ltype):
+                    print(f"Skipping reference edge {comp}_{name}->{ltype}: target missing layers")
+                    continue
+
+                src = f"{comp}_{name}"
+                dst_layer_name = self.component_layers[ltype][0][0]
+                dst = f"{ltype}_{dst_layer_name}"
+                dot.edge(src, dst, style='dashed', color='red', label='instance')
 
 def draw_model_architecture(
     ast_summary: str,
