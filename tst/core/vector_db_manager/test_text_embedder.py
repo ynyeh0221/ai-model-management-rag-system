@@ -1,7 +1,17 @@
 import os
+import sys
 import tempfile
+import types
 import unittest
 from unittest.mock import patch
+
+# Insert a fake 'sentence_transformers' module into sys.modules so that
+# patch('sentence_transformers.SentenceTransformer') won't fail if the real
+# package is not installed.
+# Also add a placeholder attribute so that patching SentenceTransformer does not raise an AttributeError.
+dummy_st = types.ModuleType("sentence_transformers")
+dummy_st.SentenceTransformer = None
+sys.modules['sentence_transformers'] = dummy_st
 
 import numpy as np
 
