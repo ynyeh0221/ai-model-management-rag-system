@@ -33,6 +33,7 @@ langchain_core = "*"
 langchain_ollama = "*"
 graphviz="*"
 pandas="*"
+prettytable="*"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "*"
