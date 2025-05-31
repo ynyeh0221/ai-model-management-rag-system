@@ -1,246 +1,3 @@
-"""
-AST Summary Generator - Machine Learning Model Code Analyzer
-
-This module parses Python ML model code using Abstract Syntax Trees (AST) to extract
-and summarize model architecture, datasets, and component relationships.
-
-OVERALL ARCHITECTURE FLOW:
-========================
-
-    Input Python File
-           |
-           v
-    ┌─────────────────┐
-    │  AST Parser     │ ── SyntaxError ──> Return Error Message
-    │  (ast.parse)    │
-    └─────────────────┘
-           |
-           v
-    ┌─────────────────┐
-    │  Reset State    │ ── Initialize tracking variables
-    │ (_reset_state)  │    (model_layers, class_hierarchy, etc.)
-    └─────────────────┘
-           |
-           v
-    ┌─────────────────┐
-    │   CodeSummary   │
-    │     Visitor     │ ── Traverses AST nodes to collect:
-    │    (visitor)    │    • Function definitions
-    │                 │    • Class definitions  
-    │                 │    • Variable assignments
-    │                 │    • Import statements
-    └─────────────────┘
-           |
-           v
-    ┌─────────────────────────────────────────────────────────┐
-    │              DATASET DETECTION (Two-Tier)               │
-    │                                                         │
-    │  ┌─────────────────┐    Found?    ┌─────────────────┐   │
-    │  │ PRIMARY METHOD  │ ────No────>  │ FALLBACK METHOD │   │
-    │  │KeywordBasedVisitor│            │ (3 Strategies)  │   │
-    │  │• Fast scanning  │              │• DataLoader     │   │
-    │  │• Known keywords │              │• Class patterns │   │
-    │  │• Direct matches │              │• Import patterns│   │
-    │  └─────────────────┘              └─────────────────┘   │
-    │           │                               │             │
-    │          Yes                              │             │
-    │           │                               │             │
-    │           └─────────────┬─────────────────┘             │
-    └─────────────────────────┼───────────────────────────────┘
-                              │
-                              v
-    ┌─────────────────────────────────────────────────────────┐
-    │              MODEL ARCHITECTURE BUILDING                │
-    │                                                         │
-    │  ┌─────────────────┐    ┌─────────────────┐             │
-    │  │ Identify Used   │───>│ Filter Unused   │             │
-    │  │ Components      │    │ Components      │             │
-    │  │• Layer refs     │    │• Keep only used │             │
-    │  │• Forward calls  │    │• Fallback logic │             │
-    │  └─────────────────┘    └─────────────────┘             │
-    │           │                       │                     │
-    │           v                       v                     │
-    │  ┌─────────────────┐    ┌─────────────────┐             │
-    │  │ Order Layers    │    │ Extract Dims    │             │
-    │  │• Definition     │    │• Important args │             │
-    │  │  order          │    │• Trim to limit  │             │
-    │  │• Preserve extra │    │• Sequential     │             │
-    │  └─────────────────┘    └─────────────────┘             │
-    └─────────────────────────────────────────────────────────┘
-                              │
-                              v
-    ┌─────────────────────────────────────────────────────────┐
-    │                 OUTPUT GENERATION                       │
-    │                                                         │
-    │  Summary Text:                                          │
-    │  • Dataset: [detected datasets]                         │
-    │  • Model Architecture:                                  │
-    │    - Component: ClassName                               │
-    │      - layer1: LayerType(dims)                          │
-    │      - layer2: LayerType(dims)                          │
-    │  • Component Dependencies:                              │
-    │    - ClassA depends on: ClassB, ClassC                  │
-    └─────────────────────────────────────────────────────────┘
-
-DATASET DETECTION STRATEGIES:
-============================
-
-Strategy 1: PRIMARY (KeywordBasedDatasetVisitor)
-┌──────────────────────────────────────────────────┐
-│ Fast keyword scanning:                           │
-│ • Scans imports for dataset libraries            │
-│ • Checks variable names for dataset patterns     │
-│ • Looks for string literals with dataset names   │
-│ • Highly precise, low computational cost         │
-│                                                  │
-│ Keywords: 'CIFAR', 'MNIST', 'ImageNet',          │
-│          'dataset', 'data_loader', etc.          │
-└──────────────────────────────────────────────────┘
-                        │
-                   No datasets found?
-                        │
-                        v
-Strategy 2: FALLBACK (3 specialized visitors)
-┌──────────────────────────────────────────────────┐
-│ A) DataLoaderVisitor:                            │
-│    • Finds DataLoader constructors               │
-│    • Extracts dataset from loader arguments      │
-│    • Analyzes variable context                   │
-│                                                  │
-│ B) DatasetClassVisitor:                          │
-│    • Detects custom dataset classes              │
-│    • Analyzes inheritance patterns               │
-│    • Filters common words                        │
-│                                                  │
-│ C) DatasetImportVisitor:                         │
-│    • Scans library imports                       │
-│    • Identifies dataset-specific patterns        │
-│    • Detects custom dataset modules              │
-└──────────────────────────────────────────────────┘
-
-COMPONENT TRACKING DATA STRUCTURES:
-==================================
-
-self.model_layers: List[Dict]
-┌─────────────────────────────────────┐
-│ [{'name': 'conv1',                  │
-│   'layer_type': 'Conv2d',           │
-│   'class': 'MyModel',               │
-│   'args': [3, 64, 3, 1]}, ...]      │
-└─────────────────────────────────────┘
-
-self.class_layers: Dict[str, List[str]]
-┌─────────────────────────────────────┐
-│ {'MyModel': ['conv1', 'relu1',      │
-│              'conv2', 'pool1'],     │
-│  'Encoder': ['linear1', 'dropout']} │
-└─────────────────────────────────────┘
-
-self.class_hierarchy: Dict[str, List[str]]
-┌─────────────────────────────────────┐
-│ {'MyModel': ['nn.Module'],          │
-│  'CustomLayer': ['nn.Linear']}      │
-└─────────────────────────────────────┘
-
-LAYER ORDERING LOGIC:
-====================
-
-Input: layer_names = ['conv2', 'conv1', 'pool1']
-self.layer_order = ['conv1', 'conv2', 'relu1', 'pool1']
-
-_get_ordered_layers() process:
-┌─────────────────────────────────────┐
-│ Step 1: Follow definition order     │
-│ ordered = []                        │
-│ seen = set()                        │
-│                                     │
-│ For each name in self.layer_order:  │
-│   if name in layer_names and        │
-│      name not in seen:              │
-│     ordered.append(name)            │
-│     seen.add(name)                  │
-│                                     │
-│ Result: ordered = ['conv1', 'conv2',│
-│                    'pool1']         │
-│                                     │
-│ Step 2: Add any remaining           │
-│ For each name in layer_names:       │
-│   if name not in seen:              │
-│     ordered.append(name)            │
-│                                     │
-│ Final: ['conv1', 'conv2', 'pool1']  │
-└─────────────────────────────────────┘
-
-DIMENSION EXTRACTION LOGIC:
-==========================
-
-_extract_important_dimensions() decision tree:
-
-Input: layer = {'layer_type': 'Conv2d', 'args': [3, 64, 3, 1]}
-
-┌─────────────────┐
-│ Is Sequential?  │ ──Yes──> Extract input→output dims
-└─────────────────┘           from first and last layers
-         │ No
-         v
-┌─────────────────┐
-│ In class_       │ ──Yes──> Return layer_type
-│ hierarchy?      │
-└─────────────────┘
-         │ No
-         v
-┌─────────────────┐
-│ Extract numeric │ ──> Filter args for int/float
-│ dimensions      │     Keep only first max_dims_to_show
-└─────────────────┘     
-                        Result: "3, 64" (first 2 dimensions)
-
-VISITOR PATTERN USAGE:
-=====================
-
-CodeSummaryVisitor traverses AST nodes:
-
-ast.FunctionDef ──> Records function signatures
-                   Records parameters and defaults
-                   
-ast.ClassDef ────> Tracks class hierarchy
-                   Sets current_class context
-                   
-ast.Assign ──────> Extracts variable assignments
-                   Records literal values
-                   
-ast.Call ────────> Records function calls
-                   Captures arguments and context
-                   Detects layer instantiations
-
-The visitor pattern allows systematic traversal of the AST while
-maintaining state and context across different node types.
-
-ERROR HANDLING FLOW:
-===================
-
-Input Code
-    │
-    v
-┌─────────────┐
-│ AST Parse   │ ──SyntaxError──> Return "# Failed to parse AST: {error}"
-└─────────────┘
-    │ Success
-    v
-┌─────────────┐
-│ Visitor     │ ──Exception──> Continue processing
-│ Processing  │               (graceful degradation)
-└─────────────┘
-    │
-    v
-┌─────────────┐
-│ Summary     │ ──Always returns a string──> Success or partial results
-│ Generation  │
-└─────────────┘
-
-The system is designed to be fault-tolerant, providing partial results
-even when encountering parsing errors or incomplete information.
-"""
 import ast
 import os
 import re
@@ -286,17 +43,25 @@ class ASTSummaryGenerator:
         self.component_instantiations: Dict[str, Any] = {}
         self.used_components: Set[str] = set()
 
-        # Dataset tracking - Add these two lines to fix the attribute error
+        # Dataset tracking
         self.detected_datasets: Set[str] = set()
         self.dataset_classes: Set[str] = set()
 
         # Diagram settings
         self.important_layer_types: Set[str] = {
-            "AdaptiveAvgPool2d", "Attention", "Conv2d", "ConvTranspose2d",
-            "Embedding", "GRU", "Linear", "LSTM", "MultiheadAttention",
-            "Sequential", "Transformer",
+            "AdaptiveAvgPool2d",
+            "Attention",
+            "Conv2d",
+            "ConvTranspose2d",
+            "Embedding",
+            "GRU",
+            "Linear",
+            "LSTM",
+            "MultiheadAttention",
+            "Sequential",
+            "Transformer",
         }
-        self.max_dims_to_show: int = 2 # Keep it low to make llm more focus on important information when parsing
+        self.max_dims_to_show: int = 2  # Keep it low to make llm more focus on important information
 
     def generate_summary(self, code_str: str, file_path: str = "<unknown>") -> str:
         """
@@ -307,47 +72,27 @@ class ASTSummaryGenerator:
         except SyntaxError as e:
             return f"# Failed to parse AST: {e}"
 
-        # Initialize context for this file
         self._reset_state(file_path)
 
+        # Phase 1: Collect raw summary data
         lines: List[str] = []
         literal_vars: Dict[str, Any] = {}
         image_folders: Set[str] = set()
         default_paths: Set[str] = set()
 
-        # Collect code summary entries
         visitor = CodeSummaryVisitor(self, lines, literal_vars, image_folders, default_paths)
         visitor.visit(tree)
 
-        # Resolve actual argument values in function definitions
+        # Phase 2: Update function signatures with actual call values
         self._process_function_calls(lines)
 
-        # Detect dataset usage
+        # Phase 3: Detect datasets and append to summary
         dataset_info = self._detect_datasets(tree)
         lines.append(f"Dataset: {dataset_info or 'unknown'}")
 
-        # Build model architecture section
-        lines.append("\nModel Architecture:")
-        self._identify_used_components()
-        components = self._filter_unused_components()
-
-        # Append component and layer details
-        for class_name in sorted(components):
-            lines.append(f"Component: {class_name}")
-            layer_names = self.class_layers.get(class_name, [])
-            ordered = self._get_ordered_layers(layer_names)
-            self._add_component_layers(lines, ordered, class_name)
-
-        # Append dependencies
-        lines.append("\nComponent Dependencies:")
-        for class_name in sorted(components):
-            deps = [
-                layer["layer_type"] for layer in self.model_layers
-                if layer["class"] == class_name and layer["layer_type"] in components
-            ]
-            if deps:
-                unique = sorted(set(deps))
-                lines.append(f"{class_name} depends on: {', '.join(unique)}")
+        # Phase 4: Build model architecture and dependencies
+        self._append_model_architecture(lines)
+        self._append_component_dependencies(lines)
 
         return "\n".join(lines)
 
@@ -367,7 +112,7 @@ class ASTSummaryGenerator:
         generator = ASTSummaryGenerator()
         summary = generator.generate_summary(code, python_file_path)
 
-        tree, dims, root = generator._build_component_tree()
+        tree, _, root = generator._build_component_tree()
         diagram_msg = draw_model_architecture(
             summary,
             output_diagram_path,
@@ -396,156 +141,150 @@ class ASTSummaryGenerator:
         Update function signature lines in summary with actual argument values
         extracted from recorded calls.
         """
-        func_defs: Dict[str, int] = {}
-        for idx, line in enumerate(lines):
-            stripped = line.lstrip()  # strip leading whitespace
-            if stripped.startswith("Function: "):
-                match = re.match(r"Function: (\w+)\(.*\)", stripped)
-                if match:
-                    func_defs[match.group(1)] = idx
-
+        func_defs = self._collect_function_definitions(lines)
         for fname, def_idx in func_defs.items():
-            if fname not in self.function_calls:
+            call_info = self.function_calls.get(fname)
+            if not call_info or not isinstance(call_info, dict):
                 continue
-            sig_info = self.function_calls[fname]
-            calls = [info for info in self.function_calls.values()
-                     if isinstance(info, dict) and info.get('function') == fname]
+            params, defaults = call_info.get('params', []), call_info.get('defaults', {})
+            calls = [
+                info for info in self.function_calls.values()
+                if isinstance(info, dict) and info.get('function') == fname
+            ]
             if not calls:
                 continue
             last_call = calls[-1]
-            params = sig_info.get('params', [])
-            defaults = sig_info.get('defaults', {})
-            actual = last_call.get('args', {})
-            omitted = last_call.get('omitted_args', [])
-
-            parts: List[str] = []
-            for p in params:
-                if p in actual:
-                    parts.append(f"{p}={actual[p]}")
-                elif p in defaults and p in omitted:
-                    parts.append(f"{p}={defaults[p]}")
-                else:
-                    parts.append(p)
-
-            prefix = lines[def_idx][:lines[def_idx].find("Function:")]
+            parts, annotations = self._format_signature_parts(params, defaults, last_call)
+            prefix = lines[def_idx][: lines[def_idx].find("Function:")]
             lines[def_idx] = f"{prefix}Function: {fname}({', '.join(parts)})"
+            self._insert_signature_annotations(lines, annotations, def_idx + 1)
 
-            insert_pos = def_idx + 1
-            for p in params:
-                if p in actual:
-                    val = actual[p]
-                    lines.insert(insert_pos, f"Variable: {p} = {val} (from call `{fname}`)")
-                    insert_pos += 1
-                elif p in defaults and p in omitted:
-                    val = defaults[p]
-                    lines.insert(insert_pos, f"Variable: {p} = {val} (default for `{fname}`)")
-                    insert_pos += 1
+    def _collect_function_definitions(self, lines: List[str]) -> Dict[str, int]:
+        """Collect indices of lines that define a function signature."""
+        func_defs: Dict[str, int] = {}
+        pattern = re.compile(r"Function:\s*(\w+)\(.*\)")
+        for idx, line in enumerate(lines):
+            stripped = line.lstrip()
+            match = pattern.match(stripped)
+            if match:
+                func_defs[match.group(1)] = idx
+        return func_defs
+
+    def _format_signature_parts(
+        self,
+        params: List[str],
+        defaults: Dict[str, Any],
+        call_info: Dict[str, Any],
+    ) -> Tuple[List[str], List[Tuple[str, Any, bool]]]:
+        """
+        Return formatted signature parts and annotations given parameters, defaults,
+        and the last call's info.
+        """
+        actual = call_info.get('args', {})
+        omitted = call_info.get('omitted_args', [])
+        parts: List[str] = []
+        annotations: List[Tuple[str, Any, bool]] = []  # (param, value, is_default)
+
+        for p in params:
+            if p in actual:
+                parts.append(f"{p}={actual[p]}")
+                annotations.append((p, actual[p], False))
+            elif p in defaults and p in omitted:
+                parts.append(f"{p}={defaults[p]}")
+                annotations.append((p, defaults[p], True))
+            else:
+                parts.append(p)
+        return parts, annotations
+
+    def _insert_signature_annotations(
+        self, lines: List[str], annotations: List[Tuple[str, Any, bool]], insert_pos: int
+    ) -> None:
+        """Insert lines describing variable assignments under a function definition."""
+        for param, value, is_default in annotations:
+            if is_default:
+                lines.insert(insert_pos, f"Variable: {param} = {value} (default)")
+            else:
+                lines.insert(insert_pos, f"Variable: {param} = {value} (from call)")
+            insert_pos += 1
 
     def _detect_datasets(self, tree: ast.AST) -> str:
         """
         Return a comma-separated list of datasets found in the AST.
-
-        This method implements a two-tiered detection strategy:
-
-        1. PRIMARY DETECTION (DatasetVisitor):
-           - Faster and more direct approach
-           - Looks for known dataset keywords and explicit dataset mentions
-           - Scans imports, variable names, and string literals
-           - Highly precise but may miss custom or non-standard datasets
-
-        2. SECONDARY DETECTION (Fallback Methods):
-           - Only triggered if primary detection finds nothing
-           - More thorough but potentially more computationally expensive
-           - Uses specialized visitors to detect datasets through:
-             a) DataLoader usage patterns
-             b) Dataset class inheritance hierarchies
-             c) Common dataset import patterns from various libraries
-           - Better at finding custom datasets and implicit references
-
-        WHY TWO APPROACHES:
-        - Primary detection is efficient but may miss complex cases
-        - Secondary detection is more comprehensive but could be overkill for simple cases
-        - Two-tiered approach balances speed and thoroughness
-        - Ensures both explicit and implicit dataset references are found
-
-        Args:
-            tree: The AST tree of the Python code to analyze
-
-        Returns:
-            A comma-separated string of dataset names found in the code.
-            Returns an empty string if no datasets are detected.
+        Implements primary and fallback detection.
         """
+        primary = self._primary_dataset_detection(tree)
+        if primary:
+            return ", ".join(sorted(primary))
+
+        fallback = self._detect_datasets_from_fallback_methods(tree)
+        return ", ".join(sorted(fallback)) if fallback else ""
+
+    def _primary_dataset_detection(self, tree: ast.AST) -> Set[str]:
+        """Use keyword-based visitor to quickly detect common dataset names."""
         visitor = KeywordBasedDatasetVisitor()
         visitor.visit(tree)
-
-        # Store detected datasets for other methods to use
         self.detected_datasets.update(visitor.datasets)
-
-        # If primary detection found datasets, return them
-        if visitor.datasets:
-            return ", ".join(sorted(visitor.datasets))
-
-        # If nothing found, try secondary detection methods
-        dataset_names = self._detect_datasets_from_fallback_methods(tree)
-        if dataset_names:
-            self.detected_datasets.update(dataset_names)
-            return ", ".join(sorted(dataset_names))
-
-        return ""
+        return visitor.datasets
 
     def _detect_datasets_from_fallback_methods(self, tree: ast.AST) -> Set[str]:
         """
-        Apply secondary (fallback) strategies to detect datasets when primary detection fails.
-
-        This method implements three specialized approaches that go beyond basic keyword
-        matching to find datasets through structural patterns in the code:
-
-        1. DATALOADER DETECTION (DataLoaderVisitor):
-           - Identifies DataLoader constructor calls
-           - Extracts dataset information from the loader's arguments
-           - Analyzes variable names for context clues
-           - Effective for finding datasets used with standard data loading patterns
-
-        2. DATASET CLASS DETECTION (DatasetClassVisitor):
-           - Recognizes custom dataset classes through inheritance patterns
-           - Analyzes class names and docstrings for dataset references
-           - Filters out common words to avoid false positives
-           - Excellent for identifying project-specific dataset implementations
-
-        3. IMPORT DETECTION (DatasetImportVisitor):
-           - Scans for imports from common dataset libraries
-           - Identifies dataset-specific import patterns
-           - Detects imports of custom dataset modules
-           - Useful for finding datasets referenced through standard libraries
-
-        These methods are more thorough than primary detection but may take more
-        processing time, which is why they're only used as a fallback.
-
-        Args:
-            tree: The AST tree of the Python code to analyze
-
-        Returns:
-            A set of dataset names detected through fallback methods
+        Apply secondary strategies to detect datasets:
+          1. DataLoader usage
+          2. Custom Dataset classes
+          3. Imports of known dataset libraries
         """
-        dataset_names = set()
+        dataset_names: Set[str] = set()
 
-        # Method 1: Scan for DataLoader and similar constructs
+        # (1) DataLoader usage
         loader_visitor = DataLoaderVisitor()
         loader_visitor.visit(tree)
         dataset_names.update(loader_visitor.detected_datasets)
 
-        # Method 2: Look for common dataset class patterns and inheritance
+        # (2) Custom Dataset classes
         class_visitor = DatasetClassVisitor()
         class_visitor.visit(tree)
         dataset_names.update(class_visitor.detected_datasets)
         self.dataset_classes.update(class_visitor.dataset_classes)
 
-        # Method 3: Check imports of common datasets
+        # (3) Imports of datasets
         import_visitor = DatasetImportVisitor()
         import_visitor.visit(tree)
         dataset_names.update(import_visitor.detected_datasets)
 
+        self.detected_datasets.update(dataset_names)
         return dataset_names
+
+    def _append_model_architecture(self, lines: List[str]) -> None:
+        """
+        Append the "Model Architecture" section to lines. Identifies used components,
+        filters unused, and adds layer details.
+        """
+        lines.append("\nModel Architecture:")
+        self._identify_used_components()
+        components = self._filter_unused_components()
+
+        for class_name in sorted(components):
+            lines.append(f"Component: {class_name}")
+            layer_names = self.class_layers.get(class_name, [])
+            ordered = self._get_ordered_layers(layer_names)
+            self._add_component_layers(lines, ordered)
+
+    def _append_component_dependencies(self, lines: List[str]) -> None:
+        """
+        Append the "Component Dependencies" section to lines, listing dependencies
+        for each used component.
+        """
+        lines.append("\nComponent Dependencies:")
+        components = self._filter_unused_components()
+        for class_name in sorted(components):
+            deps = [
+                layer["layer_type"]
+                for layer in self.model_layers
+                if layer["class"] == class_name and layer["layer_type"] in components
+            ]
+            if deps:
+                unique = sorted(set(deps))
+                lines.append(f"{class_name} depends on: {', '.join(unique)}")
 
     def _get_ordered_layers(self, names: List[str]) -> List[str]:
         """Return layer names in definition order, preserving any extras."""
@@ -565,7 +304,6 @@ class ASTSummaryGenerator:
         self,
         lines: List[str],
         ordered_layers: List[str],
-        class_name: str,
     ) -> None:
         """Append formatted layer entries for a given component."""
         seen: Set[str] = set()
@@ -573,15 +311,11 @@ class ASTSummaryGenerator:
             if lname in seen:
                 continue
             seen.add(lname)
-            layer = next((l for l in self.model_layers if l['name'] == lname), None)
+            layer = next((l for l in self.model_layers if l["name"] == lname), None)
             if not layer:
                 continue
-            ltype = layer.get('layer_type', 'Unknown')
-            show = (
-                any(t in ltype for t in self.important_layer_types)
-                or ltype in self.class_layers
-            )
-            if not show:
+            ltype = layer.get("layer_type", "Unknown")
+            if not self._should_show_layer(ltype):
                 continue
             dims = self._extract_important_dimensions(layer)
             if dims:
@@ -589,54 +323,58 @@ class ASTSummaryGenerator:
             else:
                 lines.append(f"  {lname}: {ltype}")
 
+    def _should_show_layer(self, layer_type: str) -> bool:
+        """Determine if a layer should be shown based on type or component membership."""
+        if any(t in layer_type for t in self.important_layer_types):
+            return True
+        return layer_type in self.class_layers
+
     def _identify_used_components(self) -> None:
         """Mark components that appear in layers or forward calls as used."""
-        # Instantiated within layers
         for layer in self.model_layers:
-            lt = layer.get('layer_type', '')
+            lt = layer.get("layer_type", "")
             if lt in self.class_layers:
                 self.used_components.add(lt)
-        # Referenced in forward
-        for fname, info in self.function_calls.items():
-            if fname == 'forward' and isinstance(info, dict):
-                cls = info.get('class')
-                if cls and cls in self.class_layers:
-                    self.used_components.add(cls)
-                    for ref in info.get('references', []):
-                        if ref in self.class_layers:
-                            self.used_components.add(ref)
+
+        forward_info = self.function_calls.get("forward")
+        if isinstance(forward_info, dict):
+            cls = forward_info.get("class")
+            if cls and cls in self.class_layers:
+                self.used_components.add(cls)
+                for ref in forward_info.get("references", []):
+                    if ref in self.class_layers:
+                        self.used_components.add(ref)
 
     def _filter_unused_components(self) -> Set[str]:
-        """Return only those components deemed used, or fallback to main class."""
+        """
+        Return only those components deemed used, or fallback to the main class.
+        If no used components are found, select the class with the most layers.
+        """
         if not self.used_components:
-            # Pick class with most layers
-            main, count = None, 0
+            main_class, max_layers = None, 0
             for cname, layers in self.class_layers.items():
-                if len(layers) > count:
-                    main, count = cname, len(layers)
-            if main:
-                self.used_components.add(main)
+                if len(layers) > max_layers:
+                    main_class, max_layers = cname, len(layers)
+            if main_class:
+                self.used_components.add(main_class)
                 for layer in self.model_layers:
-                    if layer['class'] == main and layer['layer_type'] in self.class_layers:
-                        self.used_components.add(layer['layer_type'])
-        return (
-            self.used_components
-            if self.used_components
-            else set(self.class_layers.keys())
-        )
+                    if layer["class"] == main_class and layer["layer_type"] in self.class_layers:
+                        self.used_components.add(layer["layer_type"])
+        return self.used_components or set(self.class_layers.keys())
 
     def _build_component_tree(self) -> Tuple[Dict[str, List[str]], Dict[str, str], Optional[str]]:
         """
-        Build a tree of components and layers, plus dependency mapping, and identify root.
+        Build a tree of components and layers, plus a mapping of layer dimensions,
+        and identify the root component.
         """
         tree: Dict[str, List[str]] = {c: [] for c in self.class_layers}
         deps: Dict[str, Set[str]] = {c: set() for c in self.class_layers}
         dims: Dict[str, str] = {}
 
         for layer in self.model_layers:
-            name = layer['name']
-            ltype = layer['layer_type']
-            cls = layer['class']
+            name = layer["name"]
+            ltype = layer["layer_type"]
+            cls = layer["class"]
             if ltype in tree:
                 tree[cls].append(ltype)
                 deps[cls].add(ltype)
@@ -644,47 +382,47 @@ class ASTSummaryGenerator:
                 tree[cls].append(name)
                 dims[name] = self._extract_important_dimensions(layer)
 
-        # Function-call dependencies omitted for brevity
-
-        roots = [c for c in tree if c not in {d for subs in tree.values() for d in subs}]
+        roots = [c for c in tree if c not in {dep for subs in tree.values() for dep in subs}]
         root = roots[0] if roots else None
         return tree, dims, root
 
     def _extract_important_dimensions(self, layer: Dict) -> str:
         """Trim down layer args to the most meaningful dimension info."""
-        args = layer.get('args', [])
-        ltype = layer.get('layer_type', '')
-        # Sequential shortcut
-        if ltype == 'Sequential':
+        args = layer.get("args", [])
+        ltype = layer.get("layer_type", "")
+        if ltype == "Sequential":
             seq = self._get_sequential_dimensions(args)
-            return seq or '...'
+            return seq or "..."
         if ltype in self.class_hierarchy:
             return ltype
+
         dims: List[str] = []
         for arg in args:
             if isinstance(arg, (int, float)):
                 dims.append(str(arg))
-            elif isinstance(arg, str) and re.search(r'\d', arg):
+            elif isinstance(arg, str) and re.search(r"\d", arg):
                 dims.append(arg)
-        return ', '.join(dims[:self.max_dims_to_show])
+            if len(dims) >= self.max_dims_to_show:
+                break
+        return ", ".join(dims)
 
     def _get_sequential_dimensions(self, args: List[Any]) -> str:
         input_dim = output_dim = None
         for arg in args:
             s = str(arg)
-            m = re.search(r'(?:Conv\w*|Linear)\s*\(\s*(\d+)[^,]*,\s*(\d+)', s)
+            m = re.search(r"(?:Conv\w*|Linear)\s*\(\s*(\d+)[^,]*,\s*(\d+)", s)
             if m:
                 input_dim, _ = m.groups()
                 break
         for arg in reversed(args):
             s = str(arg)
-            m = re.search(r'(?:Conv\w*|Linear)\s*\(\s*\d+[^,]*,\s*(\d+)', s)
+            m = re.search(r"(?:Conv\w*|Linear)\s*\(\s*\d+[^,]*,\s*(\d+)", s)
             if m:
                 output_dim = m.group(1)
                 break
         if input_dim and output_dim:
             return f"{input_dim} → {output_dim}"
-        return input_dim or output_dim or ''
+        return input_dim or output_dim or ""
 
     def _eval_constant(self, node: ast.AST) -> Optional[Any]:
         if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, float, bool)):
@@ -701,10 +439,10 @@ class ASTSummaryGenerator:
                     parts.append(v.value)
                 else:
                     return None
-            return ''.join(parts)
+            return "".join(parts)
         return None
 
     def _determine_folder(self, path_str: str, base_dir: str) -> str:
         abs_path = os.path.abspath(path_str if os.path.isabs(path_str) else os.path.join(base_dir, path_str))
-        base, ext = os.path.splitext(abs_path)
+        _, ext = os.path.splitext(abs_path)
         return os.path.dirname(abs_path) if ext else abs_path

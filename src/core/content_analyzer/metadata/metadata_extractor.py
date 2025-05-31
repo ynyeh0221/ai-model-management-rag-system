@@ -245,7 +245,7 @@ class MetadataExtractor:
                 git_meta['creation_date'] = None
                 git_meta['last_modified_date'] = None
                 git_meta['commit_count'] = 0
-        except Exception as e:
+        except Exception:
             # If Git data isn't available, leave the fields as None or zero.
             git_meta['creation_date'] = None
             git_meta['last_modified_date'] = None
@@ -263,7 +263,7 @@ class MetadataExtractor:
             file_meta['last_modified_date'] = datetime.datetime.fromtimestamp(stat.st_mtime).isoformat()
             file_meta['file_extension'] = os.path.splitext(file_path)[1]
             file_meta['absolute_path'] = os.path.abspath(file_path)
-        except Exception as e:
+        except Exception:
             file_meta['size_bytes'] = None
             file_meta['creation_date'] = None
             file_meta['last_modified_date'] = None
