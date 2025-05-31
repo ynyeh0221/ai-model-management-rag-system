@@ -14,7 +14,7 @@ class ImageEmbedder:
     """
     Generates vector embeddings for image_processing using Open-CLIP models directly.
     Supports both global image embeddings and tiled embeddings for region-based search.
-    Also provides text embedding functionality to enable text-to-image search.
+    It also provides text embedding functionality to enable text-to-image search.
     """
 
     def __init__(self, model_name="ViT-B-32", pretrained="laion2b_s34b_b79k", device=None, target_dim=384):
@@ -31,11 +31,19 @@ class ImageEmbedder:
         """
         self.model_name = model_name
         self.pretrained = pretrained
-        self.device = device or ("mps" if torch.backends.mps.is_available() else
-                                 ("cuda" if torch.cuda.is_available() else "cpu"))
+        self.device = device or self._get_device_name()
         self.target_dim = target_dim
         self.logger = logging.getLogger(__name__)
         self._initialize_model()
+
+    @staticmethod
+    def _get_device_name():
+        if torch.backends.mps.is_available():
+            return "mps"
+        elif torch.cuda.is_available():
+            return "cuda"
+        else:
+            return "cpu"
 
     def _initialize_model(self):
         """Initialize the CLIP model for image embedding."""
@@ -46,7 +54,7 @@ class ImageEmbedder:
                 pretrained=self.pretrained
             )
 
-            # Move model to the appropriate device
+            # Move the model to the appropriate device
             self.model = self.model.to(self.device)
 
             # Set model to evaluation mode
@@ -161,7 +169,7 @@ class ImageEmbedder:
             elif isinstance(image_path_or_array, str):
                 if not os.path.exists(image_path_or_array):
                     raise FileNotFoundError(f"Image not found: {image_path_or_array}")
-                # Open image and convert to RGB (in case it's grayscale or has alpha channel)
+                # Open image and convert to RGB (in case it's grayscale or has an alpha channel)
                 image = Image.open(image_path_or_array).convert('RGB')
             else:
                 raise ValueError(f"Unsupported image input type: {type(image_path_or_array)}")
@@ -243,7 +251,7 @@ class ImageEmbedder:
             # L2 normalize the embeddings
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
 
-            # Convert to numpy array
+            # Convert to a numpy array
             embeddings = image_features.cpu().numpy()
 
         # Resize each embedding to match the target dimension
@@ -294,7 +302,7 @@ class ImageEmbedder:
         Returns:
             Tuple[np.ndarray, Tuple[int, int]]:
                 - Array of embeddings for each tile
-                - Tile grid dimensions
+                - Tile grid dimension
         """
         # Set default tile config if not provided
         if tile_config is None:
@@ -335,7 +343,7 @@ class ImageEmbedder:
         # Calculate the effective stride (tile_size - overlap)
         stride = tile_size - overlap
 
-        # Calculate number of tiles in each dimension
+        # Calculate the number of tiles in each dimension
         n_tiles_width = max(1, (width - tile_size) // stride + 1)
         n_tiles_height = max(1, (height - tile_size) // stride + 1)
 
@@ -382,7 +390,7 @@ class ImageEmbedder:
             # L2 normalize the embeddings
             tile_features = tile_features / tile_features.norm(dim=-1, keepdim=True)
 
-            # Convert to numpy array
+            # Convert to a numpy array
             tile_embeddings = tile_features.cpu().numpy()
 
         return tile_embeddings, (n_tiles_width, n_tiles_height)
@@ -394,7 +402,7 @@ class ImageEmbedder:
         Args:
             image_path (str): Path to the image file
             tile_size (int): Size of the tiles in pixels
-            overlap (int): Overlap between adjacent tiles in pixels
+            overlaps (int): Overlap between adjacent tiles in pixels
 
         Returns:
             dict: Tile configuration metadata
@@ -405,7 +413,7 @@ class ImageEmbedder:
         # Calculate the effective stride
         stride = tile_size - overlap
 
-        # Calculate number of tiles in each dimension
+        # Calculate the number of tiles in each dimension
         n_tiles_width = max(1, (width - tile_size) // stride + 1)
         n_tiles_height = max(1, (height - tile_size) // stride + 1)
 
