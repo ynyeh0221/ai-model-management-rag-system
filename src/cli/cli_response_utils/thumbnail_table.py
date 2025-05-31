@@ -26,65 +26,116 @@ class ThumbnailTable:
         if not self.rows:
             return "No rows to display"
 
-        # Calculate thumbnail index
         thumbnail_idx = self.headers.index("Thumbnail")
 
-        # Calculate column widths for text columns (excluding thumbnail)
-        col_widths = [
-            max([len(str(row[i])) for row in self.rows] + [len(self.headers[i])])
-            for i in range(len(self.headers)) if i != thumbnail_idx
-        ]
+        # 1) calculate all column widths (excluding thumbnail column)
+        col_widths = self._calculate_column_widths(thumbnail_idx)
 
-        # Create header line
-        header_parts = []
-        col_idx = 0
-        for i, header in enumerate(self.headers):
-            if i != thumbnail_idx:
-                width = col_widths[col_idx]
-                # Right align first column if it's a number (#)
-                if i == 0 and header == "#":
-                    header_parts.append(f"{header:>{width}}")
-                else:
-                    header_parts.append(f"{header:<{width}}")
-                col_idx += 1
-            else:
-                header_parts.append(header)
+        # 2) build header line and its separator
+        header_line, separator = self._build_header_and_separator(col_widths, thumbnail_idx)
 
-        header = " | ".join(header_parts)
-        separator = "-" * len(header)
-
-        # Build the table string
-        result = [header, separator]
-
+        # 3) build body lines (for each row)
+        body_lines = []
         for row in self.rows:
-            # Format each non-thumbnail column
-            formatted_row = []
-            col_idx = 0
-            for i in range(len(row)):
-                if i != thumbnail_idx:
-                    width = col_widths[col_idx]
-                    # Right align first column if it's a number (#)
-                    if i == 0 and self.headers[0] == "#":
-                        formatted_row.append(f"{row[i]:>{width}}")
-                    else:
-                        formatted_row.append(f"{str(row[i]):<{width}}")
-                    col_idx += 1
+            body_lines.extend(
+                self._format_single_row(row, col_widths, thumbnail_idx, separator)
+            )
 
-            # Calculate where to split the row (before thumbnail)
-            first_part = " | ".join(formatted_row[:thumbnail_idx])
-            second_part = " | ".join(formatted_row[thumbnail_idx:])
+        # join header + separator + all row‐blocks
+        return "\n".join([header_line, separator] + body_lines)
 
-            # Add the row header
-            result.append(f"{first_part} |")
+    def _calculate_column_widths(self, thumbnail_idx):
+        """
+        Return a list of maximum widths for every non‐thumbnail column.
+        E.g. if headers = ["#", "Name", "Thumbnail", "Path"], and there are 3 rows,
+        we compute the width of "#" vs. digits, "Name" vs. names, skip Thumbnail, "Path" vs. paths.
+        """
+        widths = []
+        for i in range(len(self.headers)):
+            if i == thumbnail_idx:
+                continue
 
-            # Add thumbnail lines
-            for line in row[thumbnail_idx]:
-                result.append(f"{' ' * (len(first_part) + 2)}| {line}")
+            # find max length among all rows in column i, plus the header length
+            max_content_len = max((len(str(row[i])) for row in self.rows), default=0)
+            header_len = len(self.headers[i])
+            widths.append(max(max_content_len, header_len))
+        return widths
 
-            # Add the file path
-            result.append(f"{' ' * (len(first_part) + 2)}| {second_part}")
+    def _build_header_and_separator(self, col_widths, thumbnail_idx):
+        """
+        Build the header line (with proper left/right alignment) and its underline separator.
+        Returns (header_line_str, separator_str).
+        """
+        parts = []
+        non_thumb_col = 0
 
-            # Add separator
-            result.append(separator)
+        for idx, header in enumerate(self.headers):
+            if idx == thumbnail_idx:
+                # keep the literal header "Thumbnail" in place
+                parts.append(header)
+            else:
+                width = col_widths[non_thumb_col]
+                # if it’s the very first column AND it's labeled "#", right‐align
+                if idx == 0 and header == "#":
+                    parts.append(f"{header:>{width}}")
+                else:
+                    parts.append(f"{header:<{width}}")
+                non_thumb_col += 1
 
-        return "\n".join(result)
+        header_line = " | ".join(parts)
+        separator = "-" * len(header_line)
+        return header_line, separator
+
+    def _format_single_row(self, row, col_widths, thumbnail_idx, separator):
+        """
+        Given one `row` (a list), produce a block of lines:
+          - First line: all non‐thumbnail columns joined by " | ", followed by " |"
+          - Then: each line of the thumbnail (row[thumbnail_idx]) indented under the " |"
+          - Then: the final path (or whatever data follows thumbnail) indented the same way
+          - Finally: a separator line
+        Returns a list of strings.
+        """
+        # 1) format all non‐thumbnail cells into a list of strings
+        formatted_cells = []
+        non_thumb_col = 0
+        for i, cell in enumerate(row):
+            if i == thumbnail_idx:
+                continue
+
+            width = col_widths[non_thumb_col]
+            # if the first column is "#", right‐align; else left‐align
+            if i == 0 and self.headers[0] == "#":
+                formatted_cells.append(f"{row[i]:>{width}}")
+            else:
+                formatted_cells.append(f"{str(row[i]):<{width}}")
+            non_thumb_col += 1
+
+        # 2) split the formatted_cells at the index matching thumbnail_idx
+        #    (because formatted_cells has one entry per non‐thumbnail column,
+        #     so its length == len(self.headers) - 1).
+        #    We want "first_part" to contain everything _before_ thumbnail_idx,
+        #    and "second_part" to contain everything _after_ thumbnail_idx.
+        #
+        #    In effect, if thumbnail_idx = 2 and headers = [0,1,2,3],
+        #    then non-thumb columns are [0, 1, 3], so formatted_cells = [col0, col1, col3].
+        #    We want first_part = formatted_cells[:2], second_part = formatted_cells[2:].
+        first_part = " | ".join(formatted_cells[:thumbnail_idx])
+        second_part = " | ".join(formatted_cells[thumbnail_idx:])
+
+        lines = []
+        # 3) line for "first part" + an orphaned separator pipe at the end
+        lines.append(f"{first_part} |")
+
+        # 4) add one line per thumbnail‐text (thumbnail is assumed to be a list of strings)
+        indent = " " * (len(first_part) + 2)  # 2 for the "|"
+        for thumb_line in row[thumbnail_idx]:
+            lines.append(f"{indent}| {thumb_line}")
+
+        # 5) add the final "path" (or other trailing data) under the same indentation
+        #    i.e. indent + "|" + second_part
+        lines.append(f"{indent}| {second_part}")
+
+        # 6) finally append the separator
+        lines.append(separator)
+
+        return lines
