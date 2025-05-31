@@ -26,7 +26,7 @@ class DataLoaderVisitor(ast.NodeVisitor):
         train_loader = DataLoader(Flowers102Dataset(root='./data', split='train'), batch_size=32)
 
         # This visitor would detect:
-        # detected_datasets = {"FLOWERS102"}
+        # detected_datasets = {"FLOWERS102" }
         ```
     """
 
@@ -36,13 +36,7 @@ class DataLoaderVisitor(ast.NodeVisitor):
 
     def visit_Call(self, node: ast.Call):
         # Check for DataLoader constructor calls
-        if isinstance(node.func, ast.Name) and node.func.id == 'DataLoader':
-            # DataLoader's first argument is typically a dataset
-            if node.args and len(node.args) > 0:
-                self._extract_dataset_from_arg(node.args[0])
-
-        # Check for torch.utils.data.DataLoader
-        elif (isinstance(node.func, ast.Attribute) and
+        if isinstance(node.func, ast.Name) and node.func.id == 'DataLoader'or (isinstance(node.func, ast.Attribute) and
               node.func.attr == 'DataLoader' and
               isinstance(node.func.value, ast.Attribute) and
               node.func.value.attr == 'data'):

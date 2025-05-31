@@ -1,5 +1,7 @@
 import logging
 import os
+from random import random
+from typing import Dict, Any, List, Optional
 
 from PIL import Image
 
@@ -26,7 +28,12 @@ class ImageAnalyzer:
     computer vision models based on your specific needs.
     """
 
-    def __init__(self, face_detection=True, scene_detection=True, content_classification=True):
+    def __init__(
+        self,
+        face_detection: bool = True,
+        scene_detection: bool = True,
+        content_classification: bool = True
+    ):
         """
         Initialize the ImageAnalyzer with the specified capabilities.
 
@@ -36,43 +43,69 @@ class ImageAnalyzer:
             content_classification (bool): Whether to enable content classification
         """
         self.logger = logging.getLogger("image_analyzer")
+
+        # Determine capability flags based on availability and user request
         self.face_detection = face_detection and CV2_AVAILABLE
         self.scene_detection = scene_detection and VISION_MODEL_AVAILABLE
         self.content_classification = content_classification and VISION_MODEL_AVAILABLE
 
-        # Initialize models and classifiers based on enabled capabilities
-        if self.face_detection:
-            try:
-                # Load a pre-trained face detection model from OpenCV
-                face_cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-                if os.path.exists(face_cascade_path):
-                    self.face_cascade = cv2.CascadeClassifier(face_cascade_path)
-                else:
-                    self.logger.warning(f"Face cascade file not found at {face_cascade_path}")
-                    self.face_detection = False
-            except Exception as e:
-                self.logger.error(f"Error initializing face detection: {e}")
+        # Placeholders for models/classifiers
+        self.face_cascade = None
+        self.feature_extractor = None
+        self.model = None
+        self.scene_types: list[str] = []
+        self.content_categories: list[str] = []
+
+        # Initialize subsystems
+        self._init_face_detection()
+        self._init_vision_models()
+
+    def _init_face_detection(self) -> None:
+        """
+        Load the OpenCV Haar Cascade for face detection if face_detection is enabled.
+        Disable the face_detection flag if initialization fails.
+        """
+        if not self.face_detection:
+            return
+
+        try:
+            face_cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+            if os.path.exists(face_cascade_path):
+                self.face_cascade = cv2.CascadeClassifier(face_cascade_path)
+            else:
+                self.logger.warning(f"Face cascade file not found at {face_cascade_path}")
                 self.face_detection = False
+        except Exception as e:
+            self.logger.error(f"Error initializing face detection: {e}")
+            self.face_detection = False
 
-        if self.scene_detection or self.content_classification:
-            try:
-                if VISION_MODEL_AVAILABLE:
-                    # Initialize a pre-trained image classification model
-                    self.feature_extractor = AutoFeatureExtractor.from_pretrained("microsoft/resnet-50")
-                    self.model = AutoModelForImageClassification.from_pretrained("microsoft/resnet-50")
+    def _init_vision_models(self) -> None:
+        """
+        Load a pre-trained vision model (e.g., ResNet-50) for scene detection
+        and content classification if either capability is enabled.
+        If loading fails or models are unavailable, disable related flags.
+        """
+        if not (self.scene_detection or self.content_classification):
+            return
 
-                    # Define common scene types and content categories
-                    self.scene_types = ["indoor", "outdoor", "urban", "natural", "abstract"]
-                    self.content_categories = ["people", "animals", "buildings", "nature", "objects", "text"]
-                else:
-                    self.scene_detection = False
-                    self.content_classification = False
-            except Exception as e:
-                self.logger.error(f"Error initializing vision models: {e}")
+        try:
+            if VISION_MODEL_AVAILABLE:
+                self.feature_extractor = AutoFeatureExtractor.from_pretrained("microsoft/resnet-50")
+                self.model = AutoModelForImageClassification.from_pretrained("microsoft/resnet-50")
+
+                # Define categories for simulated or downstream usage
+                self.scene_types = ["indoor", "outdoor", "urban", "natural", "abstract"]
+                self.content_categories = ["people", "animals", "buildings", "nature", "objects", "text"]
+            else:
+                self.logger.warning("Vision models not available. Disabling scene and content classification.")
                 self.scene_detection = False
                 self.content_classification = False
+        except Exception as e:
+            self.logger.error(f"Error initializing vision models: {e}")
+            self.scene_detection = False
+            self.content_classification = False
 
-    def analyze_image(self, image):
+    def analyze_image(self, image: Any) -> Optional[Dict[str, Any]]:
         """
         Analyze the content of an image and return descriptive metadata.
 
@@ -80,18 +113,14 @@ class ImageAnalyzer:
             image: A PIL Image object or path to an image file
 
         Returns:
-            dict: A dictionary containing image content analysis results
+            dict: A dictionary containing image content analysis results, or None if loading fails
         """
-        # Ensure we have a PIL Image
-        if not isinstance(image, Image.Image):
-            try:
-                image = Image.open(image)
-            except Exception as e:
-                self.logger.error(f"Failed to open image for analysis: {e}")
-                return None
+        pil_img = self._ensure_pil_image(image)
+        if pil_img is None:
+            return None
 
-        # Initialize result dictionary with the new structure
-        results = {
+        # Initialize result structure
+        results: Dict[str, Any] = {
             "subject_type": None,
             "subject_details": {},
             "scene_type": None,
@@ -99,121 +128,206 @@ class ImageAnalyzer:
             "tags": [],
             "colors": [],
             "objects": [],
-            "description": None
+            "description": None,
         }
 
-        # Extract dominant colors (simple implementation)
+        # 1) Extract dominant colors
+        self._extract_colors(pil_img, results)
+
+        # 2) Detect faces (if enabled)
+        if self.face_detection:
+            self._detect_faces(pil_img, results)
+
+        # 3) Perform scene and content classification (if enabled)
+        if (self.scene_detection or self.content_classification) and self._vision_model_available():
+            self._perform_scene_and_content(results)
+
+        # 4) Clean up duplicates
+        self._cleanup_tags_and_objects(results)
+
+        return results
+
+    def _ensure_pil_image(self, image: Any) -> Optional[Image.Image]:
+        """
+        Return a PIL Image object if 'image' is already a PIL Image, or
+        load it from disk if 'image' is a path.
+        Logs an error and returns None on failure.
+        """
+        if isinstance(image, Image.Image):
+            return image
+
         try:
-            # Resize image for faster processing
-            small_image = image.copy()
-            small_image.thumbnail((100, 100))
+            return Image.open(image)
+        except Exception as e:
+            self.logger.error(f"Failed to open image for analysis: {e}")
+            return None
 
-            # Convert to RGB if not already
-            if small_image.mode != "RGB":
-                small_image = small_image.convert("RGB")
+    def _extract_colors(self, pil_img: Image.Image, results: Dict[str, Any]) -> None:
+        """
+        Resize to thumbnail, convert to RGB, gather all colors, and store
+        the top 5 hex codes into results["colors"].
+        Logs a warning on error.
+        """
+        try:
+            small_img = pil_img.copy()
+            small_img.thumbnail((100, 100))
+            if small_img.mode != "RGB":
+                small_img = small_img.convert("RGB")
 
-            # Get color data
-            colors = small_image.getcolors(10000)  # Get all colors
-            if colors:
-                # Sort colors by count (most frequent first)
-                colors.sort(reverse=True, key=lambda x: x[0])
+            colors = small_img.getcolors(maxcolors=10000) or []
+            if not colors:
+                return
 
-                # Convert RGB values to hex codes for the top 5 colors
-                top_colors = []
-                for count, color in colors[:5]:
-                    hex_color = f"#{color[0]:02x}{color[1]:02x}{color[2]:02x}"
-                    top_colors.append(hex_color)
+            # Sort by count descending
+            colors.sort(key=lambda pair: pair[0], reverse=True)
+            top_five: List[str] = []
+            for count, rgb in colors[:5]:
+                hex_code = f"#{rgb[0]:02x}{rgb[1]:02x}{rgb[2]:02x}"
+                top_five.append(hex_code)
 
-                results["colors"] = top_colors
+            results["colors"] = top_five
         except Exception as e:
             self.logger.warning(f"Error extracting colors: {e}")
 
-        # Detect faces if enabled
-        if self.face_detection:
-            try:
-                # Convert PIL image to format usable by OpenCV
-                cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-                gray = cv2.cvtColor(cv_image, cv2.COLOR_BGR2GRAY)
+    def _detect_faces(self, pil_img: Image.Image, results: Dict[str, Any]) -> None:
+        """
+        Convert PIL image to BGR OpenCV format, run face detection,
+        and update results if any faces are found.
+        Logs an error on failure.
+        """
+        try:
+            cv_img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+            gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
 
-                # Detect faces
-                faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+            faces = self.face_cascade.detectMultiScale(
+                gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30)
+            )
 
-                if len(faces) > 0:
-                    results["subject_type"] = "person"
-                    results["subject_details"]["has_faces"] = True
-                    results["subject_details"]["face_count"] = len(faces)
-                    results["tags"].append("faces")
-                    results["tags"].append("people")
-                    results["objects"].append("person")
-            except Exception as e:
-                self.logger.error(f"Error during face detection: {e}")
+            if len(faces) > 0:
+                results["subject_type"] = "person"
+                results["subject_details"]["has_faces"] = True
+                results["subject_details"]["face_count"] = len(faces)
+                results["tags"].extend(["faces", "people"])
+                results["objects"].append("person")
+        except Exception as e:
+            self.logger.error(f"Error during face detection: {e}")
 
-        # Perform scene detection and content classification if enabled
-        if (self.scene_detection or self.content_classification) and VISION_MODEL_AVAILABLE:
-            try:
-                if results["subject_type"] is None:
-                    # Simulate subject detection
-                    # This would normally come from an image classification model
-                    possible_subjects = ["person", "animal", "vehicle", "landscape", "building",
-                                         "food", "text", "abstract", "object", "chart"]
+    def _perform_scene_and_content(self, results: Dict[str, Any]) -> None:
+        """
+        Simulate (or run) scene detection and content classification to populate:
+          - subject_type + subject_details
+          - scene_type
+          - style
+          - objects
+          - description
+        Logs errors on any failure.
+        """
+        try:
+            # 1) Subject detection (if not already a person from face detection)
+            if results["subject_type"] is None:
+                self._simulate_subject_detection(results)
 
-                    # For demonstration, choose a random subject type
-                    # In a real implementation; this would be determined by the model
-                    import random
-                    simulated_subject = random.choice(possible_subjects)
-                    results["subject_type"] = simulated_subject
+            # 2) Scene type
+            simulated_scene = random.choice(
+                ["indoor", "outdoor", "urban", "natural", "abstract", "studio"]
+            )
+            results["scene_type"] = simulated_scene
+            results["tags"].append(simulated_scene)
 
-                    # Add subject-specific details
-                    if simulated_subject == "animal":
-                        results["subject_details"]["species"] = random.choice(
-                            ["cat", "dog", "horse", "bird", "elephant"])
-                        results["tags"].append(results["subject_details"]["species"])
-                        results["objects"].append(results["subject_details"]["species"])
-                    elif simulated_subject == "text":
-                        results["subject_details"]["text_type"] = random.choice(
-                            ["handwritten", "printed", "digital"])
-                        results["tags"].append(results["subject_details"]["text_type"])
+            # 3) Style detection
+            simulated_style = random.choice(
+                ["photorealistic", "cartoon", "sketch", "painting", "3d_render", "digital_art"]
+            )
+            results["style"] = simulated_style
+            results["tags"].append(simulated_style)
 
-                # Simulate scene detection
-                scene_types = ["indoor", "outdoor", "urban", "natural", "abstract", "studio"]
-                simulated_scene = random.choice(scene_types)
-                results["scene_type"] = simulated_scene
-                results["tags"].append(simulated_scene)
+            # 4) Object detection (only if none already detected)
+            if not results["objects"]:
+                self._simulate_object_detection(results)
 
-                # Simulate style detection
-                styles = ["photorealistic", "cartoon", "sketch", "painting", "3d_render", "digital_art"]
-                simulated_style = random.choice(styles)
-                results["style"] = simulated_style
-                results["tags"].append(simulated_style)
+            # 5) Build a human-readable description
+            self._compose_description(results)
+        except Exception as e:
+            self.logger.error(f"Error during image content analysis: {e}")
 
-                # Simulate object detection
-                if not results["objects"]:  # Only add objects if none detected so far
-                    common_objects = ["chair", "table", "car", "tree", "building", "cloud", "computer"]
-                    # Add 1-3 random objects
-                    for _ in range(random.randint(1, 3)):
-                        obj = random.choice(common_objects)
-                        if obj not in results["objects"]:
-                            results["objects"].append(obj)
-                            results["tags"].append(obj)
+    def _simulate_subject_detection(self, results: Dict[str, Any]) -> None:
+        """
+        Randomly choose a subject_type if none detected.
+        If "animal" or "text", fill in additional details and tags/objects accordingly.
+        """
+        possible_subjects = [
+            "person", "animal", "vehicle", "landscape", "building",
+            "food", "text", "abstract", "object", "chart"
+        ]
+        chosen = random.choice(possible_subjects)
+        results["subject_type"] = chosen
 
-                # Generate a description based on the detected elements
-                subject_str = results["subject_type"]
-                if "species" in results["subject_details"]:
-                    subject_str = results["subject_details"]["species"]
+        if chosen == "animal":
+            species = random.choice(["cat", "dog", "horse", "bird", "elephant"])
+            results["subject_details"]["species"] = species
+            results["tags"].append(species)
+            results["objects"].append(species)
+        elif chosen == "text":
+            text_type = random.choice(["handwritten", "printed", "digital"])
+            results["subject_details"]["text_type"] = text_type
+            results["tags"].append(text_type)
 
-                scene_str = results["scene_type"] if results["scene_type"] else "scene"
-                style_str = results["style"] if results["style"] else "image"
+    def _simulate_object_detection(self, results: Dict[str, Any]) -> None:
+        """
+        Randomly pick 1–3 objects from a predefined list, ensuring no duplicates,
+        and append them to results["objects"] and results["tags"].
+        """
+        common_objects = ["chair", "table", "car", "tree", "building", "cloud", "computer"]
+        count = random.randint(1, 3)
+        chosen_objects: List[str] = []
+        while len(chosen_objects) < count:
+            obj = random.choice(common_objects)
+            if obj not in chosen_objects:
+                chosen_objects.append(obj)
 
-                results["description"] = f"A {style_str} of {subject_str} in a {scene_str} setting."
+        results["objects"].extend(chosen_objects)
+        results["tags"].extend(chosen_objects)
 
-            except Exception as e:
-                self.logger.error(f"Error during image content analysis: {e}")
+    def _compose_description(self, results: Dict[str, Any]) -> None:
+        """
+        Build a simple description string based on subject_type, scene_type, and style.
+        If subject_details contains a 'species', use that instead of 'subject_type'.
+        """
+        subject_str = results["subject_type"]
+        if "species" in results["subject_details"]:
+            subject_str = results["subject_details"]["species"]
 
-        # Remove duplicates from tags and objects
+        scene_str = results["scene_type"] or "scene"
+        style_str = results["style"] or "image"
+        results["description"] = f"A {style_str} of {subject_str} in a {scene_str} setting."
+
+    def _cleanup_tags_and_objects(self, results: Dict[str, Any]) -> None:
+        """
+        Remove duplicate entries from results["tags"] and results["objects"].
+        """
         results["tags"] = list(set(results["tags"]))
         results["objects"] = list(set(results["objects"]))
 
-        return results
+    def _vision_model_available(self) -> bool:
+        """
+        Return True if a vision model is available for scene/content classification.
+        Adjust this method in the future to check real model availability.
+        """
+        # For now, always return True to simulate availability
+        return True
+
+    def _get_logger(self):
+        """
+        Return a simple logger; in a real implementation, this might be Python's logging.Logger.
+        """
+        class SimpleLogger:
+            def error(self, msg: str):
+                print(f"[ERROR] {msg}")
+
+            def warning(self, msg: str):
+                print(f"[WARNING] {msg}")
+
+        return SimpleLogger()
 
     def analyze_images_batch(self, images):
         """

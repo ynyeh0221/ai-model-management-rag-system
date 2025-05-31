@@ -82,7 +82,7 @@ class StreamlitInterface:
         """
         Display results in a streamlit-appropriate way
         Using AgGrid for clickable search results, with safe emptiness checks,
-        and moving the description into the details pane.
+        and moving the description into the details' pane.
         """
         import pandas as pd
 
@@ -673,129 +673,214 @@ class CommandHandler:
             }
 
 
-def run_streamlit_app(components):
-    """
-    Run the Streamlit app with pre-initialized components
+class StreamlitApp:
+    def __init__(self, components: dict):
+        """
+        Initialize the StreamlitApp wrapper with the provided system components.
+        """
+        self.components = components
 
-    Args:
-        components: Dictionary containing initialized system components
-    """
-    # ── reuse the same interface across reruns ──
-    if "interface" not in st.session_state:
-        st.session_state.interface = StreamlitInterface()
-    interface = st.session_state.interface
+    def run(self):
+        """
+        Main entry point for the Streamlit app. Manages session state,
+        renders the sidebar, and routes to appropriate command handlers.
+        """
+        self._ensure_interface()
+        self._ensure_command_handler()
+        self._render_sidebar()
 
-    # Create command handler once interface is logged in
-    if "command_handler" not in st.session_state and st.session_state.get('logged_in', False):
-        st.session_state.command_handler = CommandHandler(interface)
+        if not st.session_state.logged_in:
+            st.info("Please login to the system using the sidebar")
+        else:
+            self._handle_main_area()
 
-    # Sidebar for settings and controls
-    with st.sidebar:
-        st.header("System Login")
+        # Render results, status, and logs as needed
+        st.session_state.interface.render()
+        self._render_debug_logs()
 
-        # User ID input
-        user_id = st.text_input("User ID", value=st.session_state.user_id)
-        if user_id != st.session_state.user_id:
+    def _ensure_interface(self):
+        """
+        Ensure a single StreamlitInterface instance is stored in session_state.
+        """
+        if "interface" not in st.session_state:
+            st.session_state.interface = StreamlitInterface()
+
+    def _ensure_command_handler(self):
+        """
+        Once logged in, create a CommandHandler tied to the interface.
+        """
+        if (
+            "command_handler" not in st.session_state
+            and st.session_state.get("logged_in", False)
+        ):
+            st.session_state.command_handler = CommandHandler(st.session_state.interface)
+
+    def _render_sidebar(self):
+        """
+        Render the sidebar, including login controls, command selection,
+        and advanced options.
+        """
+        with st.sidebar:
+            st.header("System Login")
+            self._sidebar_user_id_input()
+            self._sidebar_login_button()
+
+            st.header("Commands")
+            st.radio(
+                "Select Command",
+                ["query", "list-models", "list-images", "generate-notebook", "help"],
+                key="selected_command",
+            )
+
+            st.header("Advanced Options")
+            st.checkbox(
+                "Enable Query Clarity Check", value=True, key="enable_clarity_check"
+            )
+            st.checkbox(
+                "Enable Comparison Detection", value=True, key="enable_comparison_detection"
+            )
+
+            st.checkbox("Show Debug Logs", value=False, key="show_logs")
+
+    def _sidebar_user_id_input(self):
+        """
+        Render the User ID input text box and update session_state if changed.
+        """
+        user_id = st.text_input("User ID", value=st.session_state.get("user_id", ""))
+        if user_id != st.session_state.get("user_id", ""):
             st.session_state.user_id = user_id
 
-        # System login
-        if not st.session_state.logged_in:
+    def _sidebar_login_button(self):
+        """
+        If not already logged in, show a Login button. If clicked, attempt login.
+        """
+        if not st.session_state.get("logged_in", False):
             if st.button("Login System"):
                 with st.spinner("Logging into system..."):
-                    success = interface.login(components)
+                    success = st.session_state.interface.login(self.components)
                     if success:
-                        st.session_state.command_handler = CommandHandler(interface)
+                        st.session_state.command_handler = CommandHandler(
+                            st.session_state.interface
+                        )
+                        st.session_state.logged_in = True
                         st.success("System logged in successfully")
                     else:
                         st.error("Failed to login system")
         else:
             st.success("System is logged in")
 
-        # Command selection
-        st.header("Commands")
-        command = st.radio(
-            "Select Command",
-            ["query", "list-models", "list-images", "generate-notebook", "help"]
-        )
-        st.session_state.selected_command = command
+    def _handle_main_area(self):
+        """
+        Render the main content area based on the selected command.
+        """
+        command = st.session_state.selected_command
+        handler = st.session_state.command_handler
 
-        # Advanced options
-        st.header("Advanced Options")
-        st.checkbox("Enable Query Clarity Check", value=True, key="enable_clarity_check")
-        st.checkbox("Enable Comparison Detection", value=True, key="enable_comparison_detection")
+        if command == "query":
+            self._handle_query(handler)
+        elif command == "list-models":
+            self._handle_list_models(handler)
+        elif command == "list-images":
+            self._handle_list_images(handler)
+        elif command == "generate-notebook":
+            self._handle_generate_notebook(handler)
+        elif command == "help":
+            self._handle_help(handler)
 
-        # Debug mode
-        show_logs = st.checkbox("Show Debug Logs", value=False)
+        self._render_status()
 
-    # Main content area
-    if not st.session_state.logged_in:
-        st.info("Please login to the system using the sidebar")
-    else:
-        # Handle different commands
-        command_handler = st.session_state.command_handler
+    def _handle_query(self, handler: "CommandHandler"):
+        """
+        Process the 'query' command: show a text area and Search button.
+        """
+        st.header("Search Models")
+        query_text = st.text_area("Enter your query:", key="query_text", height=100)
+        col1, _ = st.columns([1, 6])
+        with col1:
+            process_btn = st.button("Search")
 
-        if st.session_state.selected_command == "query":
-            st.header("Search Models")
-            query_text = st.text_area("Enter your query:", key="query_text", height=100)
+        if process_btn and query_text:
+            with st.spinner("Processing query..."):
+                asyncio.run(
+                    handler._handle_query_command(
+                        query_text, st.session_state.get("enable_clarity_check", True)
+                    )
+                )
 
-            col1, _ = st.columns([1, 6])
-            with col1:
-                process_btn = st.button("Search")
-
-            if process_btn and query_text:
-                with st.spinner("Processing query..."):
-                    asyncio.run(interface.process_query(query_text, st.session_state.get('enable_clarity_check', True)))
-
-        elif st.session_state.selected_command == "list-models":
-            st.header("Available Models")
-            if st.button("Refresh Model List"):
-                with st.spinner("Loading models..."):
-                    # Use CommandHandler like in CLI
-                    result = command_handler._handle_list_models_command()
-                    st.session_state.results = result
-
-        elif st.session_state.selected_command == "list-images":
-            st.header("Available Images")
-            if st.button("Refresh Image List"):
-                with st.spinner("Loading images..."):
-                    # Use CommandHandler like in CLI
-                    result = command_handler._handle_list_images_command()
-                    st.session_state.results = result
-
-        elif st.session_state.selected_command == "generate-notebook":
-            st.header("Generate Notebook")
-            model_id = st.text_input("Model ID")
-            notebook_type = st.selectbox("Notebook Type", ["evaluation", "training", "inference"])
-            output_path = st.text_input("Output Path", value=f"./notebooks/{model_id}_{notebook_type}.ipynb")
-
-            if st.button("Generate Notebook") and model_id:
-                with st.spinner("Generating notebook..."):
-                    # Use CommandHandler to process the command
-                    cmd = f"generate-notebook {model_id} {notebook_type} {output_path}"
-                    result = command_handler._handle_generate_notebook_command(cmd)
-                    st.session_state.results = result
-
-        elif st.session_state.selected_command == "help":
-            st.header("Help")
-            if st.button("Show Help"):
-                result = command_handler._handle_help_command()
+    def _handle_list_models(self, handler: "CommandHandler"):
+        """
+        Process the 'list-models' command: Refresh Model List button.
+        """
+        st.header("Available Models")
+        if st.button("Refresh Model List"):
+            with st.spinner("Loading models..."):
+                result = handler._handle_list_models_command()
                 st.session_state.results = result
 
-        # Display current status
-        status = st.session_state.status
-        if status in ["processing", "searching", "processing_results", "generating_response"]:
+    def _handle_list_images(self, handler: "CommandHandler"):
+        """
+        Process the 'list-images' command: Refresh Image List button.
+        """
+        st.header("Available Images")
+        if st.button("Refresh Image List"):
+            with st.spinner("Loading images..."):
+                result = handler._handle_list_images_command()
+                st.session_state.results = result
+
+    def _handle_generate_notebook(self, handler: "CommandHandler"):
+        """
+        Process the 'generate-notebook' command: collect model_id,
+        notebook_type, and output_path from user inputs and invoke handler.
+        """
+        st.header("Generate Notebook")
+        model_id = st.text_input("Model ID", key="nb_model_id")
+        notebook_type = st.selectbox(
+            "Notebook Type", ["evaluation", "training", "inference"], key="nb_type"
+        )
+        default_path = f"./notebooks/{model_id}_{notebook_type}.ipynb"
+        output_path = st.text_input("Output Path", value=default_path, key="nb_output")
+
+        if st.button("Generate Notebook") and model_id:
+            with st.spinner("Generating notebook..."):
+                cmd = f"generate-notebook {model_id} {notebook_type} {output_path}"
+                result = handler._handle_generate_notebook_command(cmd)
+                st.session_state.results = result
+
+    def _handle_help(self, handler: "CommandHandler"):
+        """
+        Process the 'help' command: show help when button is clicked.
+        """
+        st.header("Help")
+        if st.button("Show Help"):
+            result = handler._handle_help_command()
+            st.session_state.results = result
+
+    def _render_status(self):
+        """
+        Display the current system status (processing, error, etc.).
+        """
+        status = st.session_state.get("status", "")
+        if status in [
+            "processing",
+            "searching",
+            "processing_results",
+            "generating_response",
+        ]:
             st.info(f"Status: {status.replace('_', ' ').title()}")
         elif status == "error":
             st.error("Error occurred")
 
-        # Display results
-        interface.render()
+    def _render_debug_logs(self):
+        """
+        If debug mode is enabled, display the last 20 log entries.
+        """
+        if st.session_state.get("show_logs", False):
+            logs = st.session_state.get("logs", [])
+            if not logs:
+                return
 
-        # Display logs if debug mode is enabled
-        if show_logs and st.session_state.logs:
             st.header("Debug Logs")
-            for timestamp, log in reversed(st.session_state.logs[-20:]):
-                # Format log as in CLIInterface
+            for timestamp, log in reversed(logs[-20:]):
                 if isinstance(log, dict):
                     level = log.get("level", "info")
                     message = log.get("message", str(log))
@@ -804,10 +889,20 @@ def run_streamlit_app(components):
                     message = str(log)
 
                 log_time = time.strftime("%H:%M:%S", time.localtime(timestamp))
-
                 if level == "error":
                     st.error(f"[{log_time}] {message}")
                 elif level == "warning":
                     st.warning(f"[{log_time}] {message}")
                 else:
                     st.text(f"[{log_time}] {message}")
+
+
+def run_streamlit_app(components: dict):
+    """
+    Run the Streamlit app with pre-initialized components.
+
+    Args:
+        components: Dictionary containing initialized system components
+    """
+    app = StreamlitApp(components)
+    app.run()

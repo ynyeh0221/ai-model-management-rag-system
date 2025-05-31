@@ -16,6 +16,8 @@ from jsonschema import validate, ValidationError, SchemaError
 
 logger = logging.getLogger(__name__)
 
+schema_version_str = "$schema_version"
+
 class SchemaValidator:
     """
     Validates documents against schema definitions from a registry.
@@ -134,8 +136,8 @@ class SchemaValidator:
             raise ValueError(f"Schema ID '{schema_id}' not found in registry")
 
         # Determine which schema version to use.
-        if "$schema_version" in document:
-            requested_version = document["$schema_version"]
+        if schema_version_str in document:
+            requested_version = document[schema_version_str]
             if requested_version not in self.schemas[schema_id]:
                 raise ValueError(f"Schema version '{requested_version}' not found for schema ID '{schema_id}'")
             schema_version = requested_version
@@ -143,7 +145,7 @@ class SchemaValidator:
             # Default to the latest version if not specified
             schema_version = self._get_latest_version(schema_id)
             document = document.copy()  # Don't modify the original
-            document["$schema_version"] = schema_version
+            document[schema_version_str] = schema_version
             logger.debug(f"No schema version specified, using latest version: {schema_version}")
 
         # Get schema definition
@@ -249,73 +251,124 @@ class SchemaValidator:
         
         return versions[0]
     
-    def validate_schema_compatibility(self, document: Dict[str, Any], 
-                                     target_schema_id: str, 
-                                     target_version: str) -> List[str]:
+    def validate_schema_compatibility(
+        self,
+        document: Dict[str, Any],
+        target_schema_id: str,
+        target_version: str
+    ) -> List[str]:
         """
         Validate if a document is compatible with a different schema version.
-        
-        This is useful for checking if a document can be migrated to a newer schema version.
-        
+
         Args:
             document: The document to validate
             target_schema_id: The target schema ID
             target_version: The target schema version
-            
+
         Returns:
             List of compatibility issues, empty if fully compatible
-            
+
         Raises:
-            ValueError: If the target schema or version is not found
+            ValueError: If the target schema or version is not found, or if the document
+                        does not specify a schema version
         """
-        if target_schema_id not in self.schemas:
-            raise ValueError(f"Target schema ID '{target_schema_id}' not found in registry")
-        
-        if target_version not in self.schemas[target_schema_id]:
-            raise ValueError(f"Target schema version '{target_version}' not found for schema ID '{target_schema_id}'")
-        
-        # Get current document schema version
-        current_version = document.get("$schema_version")
+        # 1) Ensure the target schema ID and version exist
+        self._ensure_schema_exists(target_schema_id, target_version)
+
+        # 2) Extract the document’s current version, raising if missing
+        current_version = document.get(schema_version_str)
         if not current_version:
             raise ValueError("Document does not specify a schema version")
-        
-        # Get schema definitions
+
+        # 3) Retrieve the target schema’s definition
         target_schema = self.schemas[target_schema_id][target_version]["definition"]
-        
-        compatibility_issues = []
-        
-        # Check for required fields in target schema that are missing in a document
-        if "required" in target_schema:
-            for field in target_schema["required"]:
-                if field not in document and field != "$schema_version":
-                    compatibility_issues.append(f"Missing required field: {field}")
-        
-        # Check for properties with incompatible types
-        if "properties" in target_schema:
-            for prop_name, prop_schema in target_schema["properties"].items():
-                if prop_name in document:
-                    # Check type compatibility
-                    if "type" in prop_schema:
-                        target_type = prop_schema["type"]
-                        
-                        # Handle type compatibility
-                        value = document[prop_name]
-                        
-                        # Check if the value type is compatible with the target type
-                        if target_type == "string" and not isinstance(value, str):
-                            compatibility_issues.append(f"Field '{prop_name}' should be a string")
-                        elif target_type == "number" and not isinstance(value, (int, float)):
-                            compatibility_issues.append(f"Field '{prop_name}' should be a number")
-                        elif target_type == "integer" and not isinstance(value, int):
-                            compatibility_issues.append(f"Field '{prop_name}' should be an integer")
-                        elif target_type == "boolean" and not isinstance(value, bool):
-                            compatibility_issues.append(f"Field '{prop_name}' should be a boolean")
-                        elif target_type == "array" and not isinstance(value, list):
-                            compatibility_issues.append(f"Field '{prop_name}' should be an array")
-                        elif target_type == "object" and not isinstance(value, dict):
-                            compatibility_issues.append(f"Field '{prop_name}' should be an object")
-        
-        return compatibility_issues
+
+        # 4) Aggregate compatibility issues
+        issues: List[str] = []
+        issues.extend(self._collect_missing_required_fields(document, target_schema))
+        issues.extend(self._collect_type_mismatches(document, target_schema))
+
+        return issues
+
+    def _ensure_schema_exists(self, schema_id: str, version: str) -> None:
+        """
+        Raise a ValueError if schema_id or version is not present in self.schemas.
+        """
+        if schema_id not in self.schemas:
+            raise ValueError(f"Target schema ID '{schema_id}' not found in registry")
+        if version not in self.schemas[schema_id]:
+            raise ValueError(
+                f"Target schema version '{version}' not found for schema ID '{schema_id}'"
+            )
+
+    def _collect_missing_required_fields(
+        self,
+        document: Dict[str, Any],
+        target_schema: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Return a list of "Missing required field: <field>" messages for any field
+        listed in target_schema["required"] but not present in a document.
+        Ignores schema_version_str even if listed as required.
+        """
+        issues: List[str] = []
+        required_fields = target_schema.get("required", [])
+        for field_name in required_fields:
+            if field_name == schema_version_str:
+                continue
+            if field_name not in document:
+                issues.append(f"Missing required field: {field_name}")
+        return issues
+
+    def _collect_type_mismatches(
+        self,
+        document: Dict[str, Any],
+        target_schema: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Return a list of "<Field> should be a <type>" messages for any property
+        in target_schema["properties"] where the document’s value does not match
+        the declared type.
+        Supported types: string, number, integer, boolean, array, object.
+        """
+        issues: List[str] = []
+        properties = target_schema.get("properties", {})
+
+        for prop_name, prop_schema in properties.items():
+            if prop_name not in document:
+                continue  # Nothing to validate if the document doesn’t define this property
+
+            # Only validate if a type is specified in the schema
+            expected_type = prop_schema.get("type")
+            if not expected_type:
+                continue
+
+            actual_value = document[prop_name]
+            if not self._is_value_compatible(actual_value, expected_type):
+                issues.append(f"Field '{prop_name}' should be a {expected_type}")
+
+        return issues
+
+    def _is_value_compatible(self, value: Any, expected_type: str) -> bool:
+        """
+        Return True if `value` matches the JSON Schema type `expected_type`.
+        Supported expected_type strings: "string", "number", "integer",
+        "boolean", "array", "object".
+        """
+        if expected_type == "string":
+            return isinstance(value, str)
+        if expected_type == "number":
+            return isinstance(value, (int, float))
+        if expected_type == "integer":
+            return isinstance(value, int)
+        if expected_type == "boolean":
+            return isinstance(value, bool)
+        if expected_type == "array":
+            return isinstance(value, list)
+        if expected_type == "object":
+            return isinstance(value, dict)
+        # If an unrecognized type appears, treat as incompatible
+        return False
     
     def migrate_document(self, document: Dict[str, Any], 
                         target_schema_id: str, 
@@ -350,7 +403,7 @@ class SchemaValidator:
         migrated = document.copy()
         
         # Update schema version
-        migrated["$schema_version"] = target_version
+        migrated[schema_version_str] = target_version
         
         # Get target schema
         target_schema = self.schemas[target_schema_id][target_version]["definition"]

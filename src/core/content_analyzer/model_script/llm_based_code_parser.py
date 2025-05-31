@@ -717,7 +717,7 @@ def split_summary_into_chunks(summary_text, similarity_threshold=0.5, max_senten
     current_idxs = [0]
 
     for i in range(1, len(sentences)):
-        # Compare to both first and last sentence in current chunk
+        # Compare to both first and last sentence in the current chunk
         first_idx = current_idxs[0]
         last_idx = current_idxs[-1]
         vec_first = tfidf[first_idx].toarray()
@@ -729,7 +729,7 @@ def split_summary_into_chunks(summary_text, similarity_threshold=0.5, max_senten
         sim_last  = cosine_similarity(vec_last,  vec_i)[0][0]
         sim = max(sim_first, sim_last)
 
-        # Decide whether to extend current chunk or start a new one
+        # Decide whether to extend the current chunk or start a new one
         if sim >= similarity_threshold and len(current_idxs) < max_sentences_per_chunk:
             current_idxs.append(i)
         else:
@@ -778,7 +778,7 @@ def split_code_chunks_via_ast(file_content: str, file_path: str, chunk_size: int
                 chunks.append({
                     "text": chunk_text,
                     "offset": block_start_char_offset + j,
-                    "type": "code",  # you can expand logic later if needed
+                    "type": "code",  # you can expand the logic later if needed
                     "source_block": block_code
                 })
 
@@ -868,7 +868,7 @@ class LLMBasedCodeParser:
     Attributes:
     ----------
     schema_validator : object, optional
-        Validator for ensuring metadata conforms to expected schema structure.
+        Validator for ensuring metadata conforms to the expected schema structure.
     llm_interface : object, optional
         Interface to language model API for code summarization and analysis.
     llm_metadata_cache : dict

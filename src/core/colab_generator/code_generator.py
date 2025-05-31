@@ -33,7 +33,7 @@ class CodeGenerator:
             return ""
 
         if use_offset:
-            # Sort chunks by recorded position in original source
+            # Sort chunks by recorded position in the original source
             chunks = sorted(chunks, key=lambda c: c.get("offset", 0))
 
         result = chunks[0]["text"]

@@ -148,7 +148,7 @@ class KeywordBasedDatasetVisitor(ast.NodeVisitor):
     def _keywords_in_text(self, text: str, require_context: bool = False) -> Set[str]:
         """
         Return dataset keywords found in text.
-        If require_context is True, only matches when text also contains
+        If you require_context is True, only matches when a text also contains
         context words like 'dataset', 'data', 'load', or 'download'.
         """
         found = {kw for kw in self.DATASET_KEYWORDS if kw in text}

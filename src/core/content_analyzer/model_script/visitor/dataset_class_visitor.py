@@ -55,39 +55,43 @@ class DatasetClassVisitor(ast.NodeVisitor):
     def visit_ClassDef(self, node: ast.ClassDef):
         class_name = node.name
 
-        # Check if this class inherits from a dataset-related class
-        is_dataset_class = False
-        for base in node.bases:
-            if isinstance(base, ast.Name):
-                base_name = base.id
-                if ('Dataset' in base_name or
-                        'DataModule' in base_name or
-                        base_name.endswith('Data')):
-                    is_dataset_class = True
-                    self.dataset_classes.add(class_name)
-                    break
-            elif isinstance(base, ast.Attribute):
-                base_attr = base.attr
-                if ('Dataset' in base_attr or
-                        'DataModule' in base_attr or
-                        base_attr.endswith('Data')):
-                    is_dataset_class = True
-                    self.dataset_classes.add(class_name)
-                    break
+        # If any base indicates a dataset, record it and do follow‐up steps
+        if self._inherits_dataset_class(node.bases):
+            self.dataset_classes.add(class_name)
 
-        # If this is a dataset class, extract dataset name
-        if is_dataset_class:
+            # Extract a normalized dataset name from the class name
             dataset_name = self._extract_dataset_name_from_class(class_name)
             if dataset_name and not self._is_common_word(dataset_name):
                 self.detected_datasets.add(dataset_name.upper())
 
-        # Check docstring for dataset mentions - with improved filtering
-        doc = ast.get_docstring(node)
-        if doc and is_dataset_class:
-            # Look for potential dataset name patterns in docstring
-            self._extract_dataset_from_docstring(doc)
+            # If there’s a docstring, look for dataset patterns there
+            doc = ast.get_docstring(node)
+            if doc:
+                self._extract_dataset_from_docstring(doc)
 
+        # Continue traversing into child nodes
         self.generic_visit(node)
+
+    def _inherits_dataset_class(self, bases: list[ast.expr]) -> bool:
+        """
+        Return True if any base class name/attribute contains
+        'Dataset', 'DataModule', or ends with 'Data'.
+        """
+        for base in bases:
+            base_name = None
+            if isinstance(base, ast.Name):
+                base_name = base.id
+            elif isinstance(base, ast.Attribute):
+                base_name = base.attr
+
+            if base_name is not None and (
+                "Dataset" in base_name
+                or "DataModule" in base_name
+                or base_name.endswith("Data")
+            ):
+                return True
+
+        return False
 
     def _is_common_word(self, word: str) -> bool:
         """Check if a word is too common to be a dataset name."""
