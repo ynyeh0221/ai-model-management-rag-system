@@ -1,3 +1,49 @@
+"""
+SEARCH RESULT RERANKING SYSTEM
+==============================
+
+Overall System Architecture:
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           RERANKING PIPELINE                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────┐    ┌──────────────────┐    ┌─────────────────────────────────┐ │
+│  │ Query + │───▶│  RerankerFactory │───▶│    Choose Reranker Type         │ │
+│  │Results  │    │                  │    │                                 │ │
+│  └─────────┘    └──────────────────┘    └─────────────────────────────────┘ │
+│       │                                                │                    │
+│       │         ┌───────────────────────┐              │                    │
+│       │         │                       │              ▼                    │
+│       │    ┌────┴───────┐         ┌─────┴─────┐  ┌──────────┐               │
+│       │    │CrossEncoder│         │Dense      │  │ Choose   │               │
+│       │    │Reranker    │         │Reranker   │  │ Method   │               │
+│       │    └────┬───────┘         └─────┬─────┘  └──────────┘               │
+│       │         │                       │                                   │
+│       │         ▼                       ▼                                   │
+│       │  ┌─────────────┐         ┌─────────────┐                            │
+│       └─▶│Query-Doc    │         │Separate     │                            │
+│          │Pair Scoring │         │Embeddings   │                            │
+│          └─────────────┘         └─────────────┘                            │
+│                 │                       │                                   │
+│                 ▼                       ▼                                   │
+│          ┌─────────────┐         ┌─────────────┐                            │
+│          │Softmax      │         │Cosine       │                            │
+│          │Normalization│         │Similarity   │                            │
+│          └─────────────┘         └─────────────┘                            │
+│                 │                       │                                   │
+│                 └───────────┬───────────┘                                   │
+│                             ▼                                               │
+│                     ┌─────────────────┐                                     │
+│                     │Sort by Score +  │                                     │
+│                     │Apply Filters    │                                     │
+│                     └─────────────────┘                                     │
+│                             │                                               │
+│                             ▼                                               │
+│                     ┌─────────────────┐                                     │
+│                     │Reranked Results │                                     │
+│                     └─────────────────┘                                     │
+└─────────────────────────────────────────────────────────────────────────────┘
+"""
 import logging
 from typing import List, Dict, Any, Union, Optional
 
@@ -6,6 +52,108 @@ class CrossEncoderReranker:
     """
     A reranking model that uses a cross-encoder architecture to
     rerank search results based on query-document relevance.
+    
+    CROSS-ENCODER WORKFLOW:
+    ┌──────────────────────────────────────────────────────────────────────────┐
+    │                      CROSS-ENCODER RERANKING                             │
+    ├──────────────────────────────────────────────────────────────────────────┤
+    │                                                                          │
+    │  Input: Query + Documents                                                │
+    │  ┌─────────┐                                                             │
+    │  │"python" │  ┌─────────────────────────────────────────────────────────┐│
+    │  │         │  │Document 1: "Python programming tutorial..."             ││
+    │  │         │  │Document 2: "Java programming concepts..."               ││
+    │  │         │  │Document 3: "Python data structures guide..."            ││
+    │  └─────────┘  └─────────────────────────────────────────────────────────┘│
+    │       │                                │                                 │
+    │       └────────────┬───────────────────┘                                 │
+    │                    ▼                                                     │
+    │  ┌──────────────────────────────────────────────────────────────────────┐│
+    │  │               CREATE QUERY-DOCUMENT PAIRS                            ││
+    │  │  [("python", "Python programming tutorial..."),                      ││
+    │  │   ("python", "Java programming concepts..."),                        ││
+    │  │   ("python", "Python data structures guide...")]                     ││
+    │  └──────────────────────────────────────────────────────────────────────┘│
+    │                                   │                                      │
+    │                                   ▼                                      │
+    │  ┌──────────────────────────────────────────────────────────────────────┐│
+    │  │                    CROSS-ENCODER MODEL                               ││
+    │  │                                                                      ││
+    │  │    [CLS] query [SEP] document [SEP]                                  ││
+    │  │           │                                                          ││
+    │  │           ▼                                                          ││
+    │  │    ┌─────────────┐                                                   ││
+    │  │    │Transformer  │                                                   ││
+    │  │    │Layers       │                                                   ││
+    │  │    └─────────────┘                                                   ││
+    │  │           │                                                          ││
+    │  │           ▼                                                          ││
+    │  │    ┌─────────────┐                                                   ││
+    │  │    │Relevance    │                                                   ││
+    │  │    │Score        │                                                   ││
+    │  │    └─────────────┘                                                   ││
+    │  └──────────────────────────────────────────────────────────────────────┘│
+    │                                   │                                      │
+    │                                   ▼                                      │
+    │  ┌──────────────────────────────────────────────────────────────────────┐│
+    │  │                    RAW SCORES                                        ││
+    │  │    Document 1: 0.85                                                  ││
+    │  │    Document 2: 0.32                                                  ││
+    │  │    Document 3: 0.91                                                  ││
+    │  └──────────────────────────────────────────────────────────────────────┘│
+    │                                   │                                      │
+    │                                   ▼                                      │
+    │  ┌──────────────────────────────────────────────────────────────────────┐│
+    │  │                 SOFTMAX NORMALIZATION                                ││
+    │  │    exp(score/temperature) / sum(exp(all_scores/temperature))         ││
+    │  │                                                                      ││
+    │  │    Document 1: 0.42                                                  ││
+    │  │    Document 2: 0.18                                                  ││
+    │  │    Document 3: 0.40                                                  ││
+    │  └──────────────────────────────────────────────────────────────────────┘│
+    │                                   │                                      │
+    │                                   ▼                                      │
+    │  ┌──────────────────────────────────────────────────────────────────────┐│
+    │  │                    FINAL RANKING                                     ││
+    │  │    1. Document 1: "Python programming tutorial..." (0.42)            ││
+    │  │    2. Document 3: "Python data structures guide..." (0.40)           ││
+    │  │    3. Document 2: "Java programming concepts..." (0.18)              ││
+    │  └──────────────────────────────────────────────────────────────────────┘│
+    │                                                                          │
+    └──────────────────────────────────────────────────────────────────────────┘
+    
+    FALLBACK MECHANISM (When model fails):
+    ┌──────────────────────────────────────────────────────────────────────────┐
+    │                        FALLBACK RERANKING                                │
+    ├──────────────────────────────────────────────────────────────────────────┤
+    │                                                                          │
+    │  Query: "python tutorial"                                                │
+    │  ├─ Query Terms: ["python", "tutorial"]                                  │
+    │  │                                                                       │
+    │  ▼                                                                       │
+    │  ┌──────────────────────────────────────────────────────────────────────┐│
+    │  │                    TERM MATCHING ANALYSIS                            ││
+    │  │                                                                      ││
+    │  │  Doc1: "Python programming tutorial guide"                           ││
+    │  │    ├─ Contains: "python" ✓, "tutorial" ✓                             ││
+    │  │    ├─ Term Match Ratio: 2/2 = 1.0                                    ││
+    │  │    └─ Original Score: 0.7                                            ││
+    │  │                                                                      ││
+    │  │  Doc2: "Java programming concepts"                                   ││
+    │  │    ├─ Contains: "python" ✗, "tutorial" ✗                             ││
+    │  │    ├─ Term Match Ratio: 0/2 = 0.0                                    ││
+    │  │    └─ Original Score: 0.6                                            ││
+    │  └──────────────────────────────────────────────────────────────────────┘│
+    │                                   │                                      │
+    │                                   ▼                                      │
+    │  ┌──────────────────────────────────────────────────────────────────────┐│
+    │  │                   WEIGHTED COMBINATION                               ││
+    │  │    Final Score = 0.7 × Original + 0.3 × Term Match                   ││
+    │  │                                                                      ││
+    │  │    Doc1: 0.7 × 0.7 + 0.3 × 1.0 = 0.79                                ││
+    │  │    Doc2: 0.7 × 0.6 + 0.3 × 0.0 = 0.42                                ││
+    │  └──────────────────────────────────────────────────────────────────────┘│
+    └──────────────────────────────────────────────────────────────────────────┘
     """
 
     def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-12-v2", device: str = "cpu",
@@ -149,6 +297,81 @@ class DenseReranker:
     """
     A reranking model that uses a dense retrieval model to rerank search results.
     Can be used with models like SBERT, DPR, or other bi-encoders.
+    
+    DENSE RERANKING WORKFLOW:
+    ┌──────────────────────────────────────────────────────────────────────────┐
+    │                        DENSE RERANKING PIPELINE                          │
+    ├──────────────────────────────────────────────────────────────────────────┤
+    │                                                                          │
+    │  Input: Query + Documents                                                │
+    │  ┌─────────────┐    ┌─────────────────────────────────────────────────┐  │
+    │  │"machine     │    │Doc1: "Machine learning with Python..."          │  │
+    │  │ learning"   │    │Doc2: "Deep learning fundamentals..."            │  │
+    │  │             │    │Doc3: "Natural language processing..."           │  │
+    │  └─────────────┘    └─────────────────────────────────────────────────┘  │
+    │        │                                    │                            │
+    │        ▼                                    ▼                            │
+    │  ┌─────────────┐                    ┌─────────────┐                      │
+    │  │   ENCODER   │                    │   ENCODER   │                      │
+    │  │  (Bi-LSTM/  │                    │  (Bi-LSTM/  │                      │
+    │  │Transformer) │                    │Transformer) │                      │
+    │  └─────────────┘                    └─────────────┘                      │
+    │        │                                    │                            │
+    │        ▼                                    ▼                            │
+    │  ┌─────────────┐                    ┌───────────────┐                    │
+    │  │   Query     │                    │  Document     │                    │
+    │  │ Embedding   │                    │ Embeddings    │                    │
+    │  │   Vector    │                    │   Vectors     │                    │
+    │  │[0.2,0.8,...]│                    │[[0.1,0.7,...] │                    │
+    │  └─────────────┘                    │ [0.3,0.5,...] │                    │
+    │        │                            │ [0.6,0.2,...]]│                    │
+    │        │                            └───────────────┘                    │
+    │        │                                    │                            │
+    │        └─────────────────┬──────────────────┘                            │
+    │                          ▼                                               │
+    │  ┌──────────────────────────────────────────────────────────────────────┐│
+    │  │                    COSINE SIMILARITY                                 ││
+    │  │                                                                      ││
+    │  │    similarity = (query · doc) / (||query|| × ||doc||)                ││
+    │  │                                                                      ││
+    │  │    Query: [0.2, 0.8, 0.1]                                            ││
+    │  │    Doc1:  [0.1, 0.7, 0.2]  →  sim = 0.89                             ││
+    │  │    Doc2:  [0.3, 0.5, 0.1]  →  sim = 0.75                             ││
+    │  │    Doc3:  [0.6, 0.2, 0.3]  →  sim = 0.61                             ││
+    │  └──────────────────────────────────────────────────────────────────────┘│
+    │                                   │                                      │
+    │                                   ▼                                      │
+    │  ┌──────────────────────────────────────────────────────────────────────┐│
+    │  │                      RANKING                                         ││
+    │  │    1. Doc1: "Machine learning with Python..." (sim: 0.89)            ││
+    │  │    2. Doc2: "Deep learning fundamentals..." (sim: 0.75)              ││
+    │  │    3. Doc3: "Natural language processing..." (sim: 0.61)             ││
+    │  └──────────────────────────────────────────────────────────────────────┘│
+    │                                                                          │
+    └──────────────────────────────────────────────────────────────────────────┘
+    
+    EMBEDDING VISUALIZATION:
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │                       VECTOR SPACE REPRESENTATION                       │
+    ├─────────────────────────────────────────────────────────────────────────┤
+    │                                                                         │
+    │     High-dimensional space (e.g., 768 dimensions)                       │
+    │                                                                         │
+    │         Doc2 ●                                                          │
+    │                \                                                        │
+    │                 \                                                       │
+    │                  \                                                      │
+    │                   ● Query                                               │
+    │                  /                                                      │
+    │                 /                                                       │
+    │                /                                                        │
+    │         Doc1 ●                                                          │
+    │                                                                         │
+    │                                                                         │
+    │                        ● Doc3                                           │
+    │                                                                         │
+    │   Closer vectors = Higher similarity = Better relevance                 │
+    └─────────────────────────────────────────────────────────────────────────┘
     """
 
     def __init__(self, model_name: str = "BAAI/bge-m3", device: str = "cpu"):
@@ -251,7 +474,54 @@ class DenseReranker:
 
 
 class RerankerFactory:
-    """Factory class to create different types of rerankers."""
+    """
+    Factory class to create different types of rerankers.
+    
+    FACTORY PATTERN WORKFLOW:
+    ┌─────────────────────────────────────────────────────────────────────────┐
+    │                          RERANKER FACTORY                               │
+    ├─────────────────────────────────────────────────────────────────────────┤
+    │                                                                         │
+    │  Input: reranker_type + configuration                                   │
+    │  ┌─────────────────┐                                                    │
+    │  │"cross-encoder"  │                                                    │
+    │  │  + kwargs       │                                                    │
+    │  └─────────────────┘                                                    │
+    │           │                                                             │
+    │           ▼                                                             │
+    │  ┌─────────────────┐                                                    │
+    │  │   Type Check    │                                                    │
+    │  │                 │                                                    │
+    │  │ if type == "cross-encoder":                                          │
+    │  │     return CrossEncoderReranker(**kwargs)                            │
+    │  │ elif type == "dense":                                                │
+    │  │     return DenseReranker(**kwargs)                                   │
+    │  │ else:                                                                │
+    │  │     raise ValueError(...)                                            │
+    │  └─────────────────┘                                                    │
+    │           │                                                             │
+    │           ▼                                                             │
+    │  ┌─────────────────┐                                                    │
+    │  │   Instantiate   │                                                    │
+    │  │   Appropriate   │                                                    │
+    │  │   Reranker      │                                                    │
+    │  └─────────────────┘                                                    │
+    │           │                                                             │
+    │           ▼                                                             │
+    │  ┌─────────────────┐                                                    │
+    │  │Return Configured│                                                    │
+    │  │   Reranker      │                                                    │
+    │  │   Instance      │                                                    │
+    │  └─────────────────┘                                                    │
+    │                                                                         │
+    │  Usage Example:                                                         │
+    │  reranker = RerankerFactory.create_reranker(                            │
+    │      "cross-encoder",                                                   │
+    │      model_name="ms-marco-MiniLM-L-12-v2",                              │
+    │      device="cuda"                                                      │
+    │  )                                                                      │
+    └─────────────────────────────────────────────────────────────────────────┘
+    """
 
     @staticmethod
     def create_reranker(reranker_type: str, **kwargs) -> Union[CrossEncoderReranker, DenseReranker]:
