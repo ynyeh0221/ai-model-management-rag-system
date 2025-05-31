@@ -391,47 +391,42 @@ class ChromaManager:
 
     async def _generate_embeddings(self, content, collection_name: str, embed_content) -> Optional[List[Any]]:
         """Generate embeddings based on content and collection type."""
-        # Normalize embed_content to boolean or numpy array
+        # If embed_content is already an array, return it immediately
+        if isinstance(embed_content, np.ndarray):
+            return [embed_content]
+
+        # Determine whether to embed
         if isinstance(embed_content, bool):
             should_embed = embed_content
-        elif isinstance(embed_content, np.ndarray):
-            # If embed_content is already an embedding, return it directly
-            return [embed_content]
         else:
-            # Try to interpret as a boolean
             try:
                 should_embed = bool(embed_content)
             except Exception:
                 should_embed = True
 
-        # Check if content exists
+        if not should_embed:
+            return None
+
+        # Check if there's content or if we're handling images
         has_content = self._check_content_exists(content)
+        if not has_content and collection_name != "generated_images":
+            return None
 
-        # Generate embeddings if needed
-        if should_embed and (has_content or collection_name == "generated_images"):
-            if collection_name == "generated_images":
-                # If embed_content is already an embedding (numpy array), use it directly
-                if isinstance(embed_content, np.ndarray):
-                    return [embed_content]
-
-                # Otherwise, if it's a path, use it to generate an embedding
-                elif isinstance(embed_content, str) and os.path.exists(embed_content):
-                    return await self._run_in_executor(
-                        self.image_embedding_function,
-                        [embed_content]
-                    )
-                # For the case where embed_content is True but we don't have a valid path,
-                # generate a random embedding as fallback
-                else:
-                    # Create a random embedding with the same dimensionality as the expected embeddings
-                    random_embedding = np.random.rand(384).astype(np.float32)  # Default size is 384
-                    return [random_embedding]
-            else:
+        # Handle generated_images separately
+        if collection_name == "generated_images":
+            if isinstance(embed_content, str) and os.path.exists(embed_content):
                 return await self._run_in_executor(
-                    self.text_embedding_function,
-                    [content]
+                    self.image_embedding_function,
+                    [embed_content]
                 )
-        return None
+            rng = np.random.default_rng(42)
+            return [rng.random(384, dtype=np.float32)]
+
+        # For all other collections, generate a text embedding
+        return await self._run_in_executor(
+            self.text_embedding_function,
+            [content]
+        )
 
     def _normalize_embed_flag(self, embed_content) -> bool:
         """Convert embed_content to a simple boolean."""
@@ -622,68 +617,48 @@ class ChromaManager:
             Dict containing search results
         """
         try:
-            # Select the appropriate collection
+            # Get or create the collection
             collection = self.get_collection(collection_name)
 
-            # If include is not specified, include both metadata and documents
+            # Default include fields if not provided
             if include is None:
-                include = ["metadatas", "documents", "distances"]  # Correct plural forms
+                include = ["metadatas", "documents", "distances"]
 
-            # Apply access control if user_id is provided
-            if user_id is not None and where is not None:
+            # Apply access control filter once, if needed
+            if user_id is not None and where:
                 where = self._apply_access_control(where, user_id)
 
-            # Handle different query types
-            if isinstance(query, str):
-                # Text query - generate embedding
+            # If the query is not a string, perform a metadata-only get()
+            if not isinstance(query, str):
+                get_args = {"limit": limit, "offset": offset, "include": include}
+                if where:
+                    get_args["where"] = where
+                results = await self._run_in_executor(collection.get, **get_args)
+
+            else:
+                # Build embedding for a text-based search
                 if collection_name == "generated_images":
-                    # For text-to-image search
                     query_embedding = [await self.image_embedder.embed_text(query)]
                 else:
                     query_embedding = await self._run_in_executor(
-                        self.text_embedding_function,
-                        [query]
+                        self.text_embedding_function, [query]
                     )
 
-                # Query by embedding
                 query_args = {
                     "query_embeddings": query_embedding,
-                    "n_results": int(limit) if limit is not None else 100,  # Force conversion to int with fallback
+                    "n_results": int(limit),
                     "include": include
                 }
-
-                # Only add where filter if it's not empty
-                if where and len(where) > 0:
+                if where:
                     query_args["where"] = where
 
-                results = await self._run_in_executor(
-                    collection.query,
-                    **query_args
-                )
+                results = await self._run_in_executor(collection.query, **query_args)
 
-            else:
-                # Metadata-only query with no embedding
-                get_args = {
-                    "limit": limit,
-                    "offset": offset,
-                    "include": include
-                }
-
-                # Only add where filter if it's not empty
-                if where and len(where) > 0:
-                    get_args["where"] = where
-
-                results = await self._run_in_executor(
-                    collection.get,
-                    **get_args
-                )
-
-            # Process results into a more user-friendly format
+            # Process and return in a user-friendly format
             processed_results = self._process_search_results(results, include)
-
             self.logger.debug(
-                f"Search in {collection_name} returned {len(processed_results.get('results', []))} results")
-
+                f"Search in {collection_name} returned {len(processed_results.get('results', []))} results"
+            )
             return processed_results
 
         except Exception as e:
@@ -994,46 +969,83 @@ class ChromaManager:
             None, lambda: func(*args, **kwargs)
         )
 
+    def _flatten_list(self, lst: Any) -> List[Any]:
+        """
+        If lst is a nested list-of-lists (e.g., [[...]]), return the inner list.
+        Otherwise, return lst if it’s a list, or an empty list.
+        """
+        if isinstance(lst, list) and lst and isinstance(lst[0], list):
+            return lst[0]
+        return lst if isinstance(lst, list) else []
+
+    def _build_result_item(
+            self,
+            idx: int,
+            ids: List[Any],
+            documents: List[Any],
+            metadatas: List[Any],
+            embeddings: List[Any],
+            distances: List[Any],
+            include_docs: bool,
+            include_meta: bool,
+            include_emb: bool,
+            include_dist: bool
+    ) -> Dict[str, Any]:
+        """
+        Construct a single result dictionary based on index and include flags.
+        """
+        item: Dict[str, Any] = {"id": ids[idx]}
+
+        if include_docs and idx < len(documents):
+            item["document"] = documents[idx]
+
+        if include_meta:
+            item["metadata"] = metadatas[idx] if (idx < len(metadatas) and metadatas[idx]) else {}
+
+        if include_emb and idx < len(embeddings):
+            item["embedding"] = embeddings[idx]
+
+        if include_dist and idx < len(distances):
+            item["distance"] = distances[idx]
+
+        return item
+
     def _process_search_results(self, results: Dict[str, Any], include: List[str]) -> Dict[str, Any]:
         """
         Process raw Chroma results into a more user-friendly format.
         """
-        processed = {"results": []}
+        # Flatten each raw field into a simple list
+        ids = self._flatten_list(results.get("ids"))
+        documents = self._flatten_list(results.get("documents"))
+        metadatas = self._flatten_list(results.get("metadatas"))
+        embeddings = self._flatten_list(results.get("embeddings"))
+        distances = self._flatten_list(results.get("distances"))
 
-        ids = results.get('ids') or []
-        documents = results.get('documents') or []
-        metadatas = results.get('metadatas') or []
-        embeddings = results.get('embeddings') or []
-        distances = results.get('distances') or []  # Make sure to extract distances
+        # Precompute which fields to include
+        include_docs = "documents" in include
+        include_meta = ("metadatas" in include) or ("metadata" in include)
+        include_emb = "embeddings" in include
+        include_dist = "distances" in include
 
-        # Flatten structure if necessary
-        if isinstance(ids, list) and len(ids) > 0 and isinstance(ids[0], list):
-            ids = ids[0]
-        if isinstance(documents, list) and len(documents) > 0 and isinstance(documents[0], list):
-            documents = documents[0]
-        if isinstance(metadatas, list) and len(metadatas) > 0 and isinstance(metadatas[0], list):
-            metadatas = metadatas[0]
-        if isinstance(embeddings, list) and len(embeddings) > 0 and isinstance(embeddings[0], list):
-            embeddings = embeddings[0]
-        if isinstance(distances, list) and len(distances) > 0 and isinstance(distances[0], list):
-            distances = distances[0]  # Flatten distances if nested
+        # Build the list of processed result items
+        processed_results = []
+        for idx in range(len(ids)):
+            processed_results.append(
+                self._build_result_item(
+                    idx,
+                    ids,
+                    documents,
+                    metadatas,
+                    embeddings,
+                    distances,
+                    include_docs,
+                    include_meta,
+                    include_emb,
+                    include_dist
+                )
+            )
 
-        result_count = len(ids)
-        for i in range(result_count):
-            item = {"id": ids[i]}
-
-            if "documents" in include and i < len(documents):
-                item["document"] = documents[i]
-            if "metadatas" in include or "metadata" in include:
-                item["metadata"] = metadatas[i] if i < len(metadatas) and metadatas[i] else {}
-            if "embeddings" in include and i < len(embeddings):
-                item["embedding"] = embeddings[i]
-            if "distances" in include and i < len(distances):  # Add distances to results
-                item["distance"] = distances[i]
-
-            processed["results"].append(item)
-
-        return processed
+        return {"results": processed_results}
 
     def _apply_access_control(self, where: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         """

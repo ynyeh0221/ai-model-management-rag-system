@@ -170,8 +170,8 @@ class TestChromaManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(doc_id, "doc1")
         # Check that the document exists in the dummy collection.
         collection = self.manager.get_collection("model_script_processing")
-        self.assertTrue(
-            document["metadata"].items() <= collection.docs["doc1"]["metadata"].items()
+        self.assertLessEqual(
+            document["metadata"].items(), collection.docs["doc1"]["metadata"].items()
         )
 
     async def test_add_documents(self):
