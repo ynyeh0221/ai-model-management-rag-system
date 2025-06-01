@@ -33,7 +33,7 @@ class LLMResponseProcessor:
             try:
                 print("Raw response:")
                 print(str(response)[:500])  # Print first 500 chars at most
-            except:
+            except Exception:
                 print("Could not print raw response")
 
     @staticmethod

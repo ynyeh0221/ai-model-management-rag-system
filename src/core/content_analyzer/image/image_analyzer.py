@@ -1,3 +1,207 @@
+"""
+ImageAnalyzer Class Logic Flow Diagram
+=====================================
+
+┌────────────────────────────────────────────────────────────────────────────────┐
+│                              ImageAnalyzer.__init__()                          │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────────────┐ │
+│  │ face_detection  │  │ scene_detection │  │  content_classification         │ │
+│  │      flag       │  │      flag       │  │           flag                  │ │
+│  └─────────┬───────┘  └─────────┬───────┘  └─────────────┬───────────────────┘ │
+│            │                    │                        │                     │
+│            ▼                    ▼                        ▼                     │
+│  ┌─────────────────┐  ┌─────────────────────────────────────────────────────┐  │
+│  │_init_face_det() │  │         _init_vision_models()                       │  │
+│  │ Load OpenCV     │  │ Load AutoFeatureExtractor & AutoModel               │  │
+│  │ Haar Cascade    │  │ (ResNet-50 for scene/content classification)        │  │
+│  └─────────────────┘  └─────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────────────┘
+
+                                      │
+                                      ▼
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          analyze_image(image) - MAIN FLOW                       │
+└─────────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+                          ┌─────────────────────────┐
+                          │ _ensure_pil_image()     │
+                          │ Convert to PIL Image    │
+                          │ Return None if failed   │
+                          └───────────┬─────────────┘
+                                      │
+                                      ▼
+                          ┌─────────────────────────┐
+                          │ Initialize results{}    │
+                          │ subject_type: None      │
+                          │ subject_details: {}     │
+                          │ scene_type: None        │
+                          │ style: None             │
+                          │ tags: []                │
+                          │ colors: []              │
+                          │ objects: []             │
+                          │ description: None       │
+                          └───────────┬─────────────┘
+                                      │
+                                      ▼
+                          ┌─────────────────────────┐
+                          │ _extract_colors()       │
+                          │ • Resize to thumbnail   │
+                          │ • Convert to RGB        │
+                          │ • Get top 5 hex colors  │
+                          │ • Store in results      │
+                          └───────────┬─────────────┘
+                                      │
+                                      ▼
+                   ┌──────────────────────────────────────────┐
+                   │           Face Detection Branch          │
+                   │        if self.face_detection:           │
+                   └─────────────────┬────────────────────────┘
+                                     │
+                                     ▼
+                          ┌──────────────────────────┐
+                          │ _detect_faces()          │
+                          │ • Convert to OpenCV      │
+                          │ • Run face detection     │
+                          │ • If faces found:        │
+                          │   - subject_type="person"│
+                          │   - Add face details     │
+                          │   - Add to tags/objects  │
+                          └───────────┬──────────────┘
+                                      │
+                                      ▼
+              ┌──────────────────────────────────────────────────────────┐
+              │        Scene & Content Analysis Branch                   │
+              │  if (self.scene_detection or self.content_classification)│
+              │           and self._vision_model_available():            │
+              └────────────────────────┬─────────────────────────────────┘
+                                       │
+                                       ▼
+                          ┌──────────────────────────┐
+                          │_perform_scene_and_content│
+                          └───────────┬──────────────┘
+                                      │
+                                      ▼
+    ┌─────────────────────────────────────────────────────────────────────────────┐
+    │                    _perform_scene_and_content() Flow                        │
+    │                                                                             │
+    │  ┌─────────────────────────────────────────────────────────────────────┐    │
+    │  │ 1. Subject Detection (if subject_type is None)                      │    │
+    │  │    ▼                                                                │    │
+    │  │ ┌─────────────────────────┐  ┌─────────────────────────────────┐    │    │
+    │  │ │_simulate_subject_detection │ Randomly choose from:           │    │    │
+    │  │ │ • Random choice of:     │  │ - person, animal, vehicle       │    │    │
+    │  │ │   subject types         │  │ - landscape, building, food     │    │    │
+    │  │ │ • Special handling:     │  │ - text, abstract, object, chart │    │    │
+    │  │ │   - animal → add species│  │                                 │    │    │
+    │  │ │   - text → add text_type│  │ If animal: add species details  │    │    │
+    │  │ └─────────────────────────┘  │ If text: add text_type details  │    │    │
+    │  │                              └─────────────────────────────────┘    │    │
+    │  └─────────────────────────────────────────────────────────────────────┘    │
+    │                                      │                                      │
+    │                                      ▼                                      │
+    │  ┌─────────────────────────────────────────────────────────────────────┐    │
+    │  │ 2. Scene Type Detection                                             │    │
+    │  │    • Random choice: indoor, outdoor, urban, natural, abstract, studio    │
+    │  │    • Add to results["scene_type"] and results["tags"]               │    │
+    │  └─────────────────────────────────────────────────────────────────────┘    │
+    │                                      │                                      │
+    │                                      ▼                                      │
+    │  ┌─────────────────────────────────────────────────────────────────────┐    │
+    │  │ 3. Style Detection                                                  │    │
+    │  │    • Random choice: photorealistic, cartoon, sketch, painting,      │    │
+    │  │      3d_render, digital_art                                         │    │
+    │  │    • Add to results["style"] and results["tags"]                    │    │
+    │  └─────────────────────────────────────────────────────────────────────┘    │
+    │                                      │                                      │
+    │                                      ▼                                      │
+    │  ┌─────────────────────────────────────────────────────────────────────┐    │
+    │  │ 4. Object Detection (only if results["objects"] is empty)           │    │
+    │  │    ▼                                                                │    │
+    │  │ ┌─────────────────────────┐  ┌──────────────────────────────────┐   │    │
+    │  │ │_simulate_object_detection()│ • Random count: 1-3 objects      │   │    │
+    │  │ │ • Pick 1-3 objects      │  │ • Choose from: chair, table, car │   │    │
+    │  │ │ • Avoid duplicates      │  │   tree, building, cloud, computer│   │    │
+    │  │ │ • Add to objects & tags │  │ • Ensure no duplicates in loop   │   │    │
+    │  │ └─────────────────────────┘  └──────────────────────────────────┘   │    │
+    │  └─────────────────────────────────────────────────────────────────────┘    │
+    │                                      │                                      │
+    │                                      ▼                                      │
+    │  ┌─────────────────────────────────────────────────────────────────────┐    │
+    │  │ 5. Description Generation                                           │    │
+    │  │    ▼                                                                │    │
+    │  │ ┌─────────────────────────┐  ┌─────────────────────────────────┐    │    │
+    │  │ │ _compose_description()  │  │ Build human-readable string:    │    │    │
+    │  │ │ • Use species if available │ "A {style} of {subject} in a    │    │    │
+    │  │ │ • Format: "A {style} of │  │  {scene} setting."              │    │    │
+    │  │ │   {subject} in {scene}" │  │                                 │    │    │
+    │  │ └─────────────────────────┘  └─────────────────────────────────┘    │    │
+    │  └─────────────────────────────────────────────────────────────────────┘    │
+    └─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+                          ┌─────────────────────────┐
+                          │ _cleanup_tags_and_object│
+                          │ • Remove duplicates from│
+                          │   tags[] and objects[]  │
+                          │ • Use list(set()) method│
+                          └───────────┬─────────────┘
+                                      │
+                                      ▼
+                          ┌─────────────────────────┐
+                          │   Return results{}      │
+                          │                         │
+                          │ Final Structure:        │
+                          │ {                       │
+                          │   "subject_type": str,  │
+                          │   "subject_details": {},│
+                          │   "scene_type": str,    │
+                          │   "style": str,         │
+                          │   "tags": [str],        │
+                          │   "colors": [hex],      │
+                          │   "objects": [str],     │
+                          │   "description": str    │
+                          │ }                       │
+                          └─────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              Error Handling                                     │
+│                                                                                 │
+│ • All major methods wrapped in try/except blocks                                │
+│ • Failures logged with self.logger.error() or self.logger.warning()             │
+│ • Graceful degradation: disable features if dependencies unavailable            │
+│ • Invalid images return None from analyze_image()                               │
+│ • Missing files/models disable related functionality                            │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              Batch Processing                                   │
+│                                                                                 │
+│                      analyze_images_batch(images)                               │
+│                              │                                                  │
+│                              ▼                                                  │
+│                    ┌─────────────────────────┐                                  │
+│                    │ For each image:         │                                  │
+│                    │ • Call analyze_image()  │                                  │
+│                    │ • Collect results       │                                  │
+│                    │ • Return list of dicts  │                                  │
+│                    └─────────────────────────┘                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+Dependencies & Conditional Execution:
+====================================
+┌─────────────────┐     ┌─────────────────┐     ┌──────────────────────────┐
+│ CV2_AVAILABLE   │────▶│ face_detection  │────▶│ OpenCV face detection    │
+│ (cv2, numpy)    │     │ enabled         │     │ functionality            │
+└─────────────────┘     └─────────────────┘     └──────────────────────────┘
+
+┌─────────────────┐     ┌─────────────────┐     ┌──────────────────────────┐
+│VISION_MODEL_    │────▶│ scene_detection │────▶│ Transformers model       │
+│AVAILABLE        │     │ content_class   │     │ functionality            │
+│(transformers)   │     │ enabled         │     │ (ResNet-50)              │
+└─────────────────┘     └─────────────────┘     └──────────────────────────┘
+"""
 import logging
 import os
 from random import random
