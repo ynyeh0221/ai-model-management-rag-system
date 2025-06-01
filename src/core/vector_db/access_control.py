@@ -1,9 +1,6 @@
 import asyncio
 import json
 
-# ────────────────────────────────────────────────────────────────────────────────
-# Constants (to avoid duplicated string literals)
-# ────────────────────────────────────────────────────────────────────────────────
 
 _DB_CLIENT_REQUIRED_ERROR = "Database client is required to modify access control"
 _DEFAULT_ACCESS_CONTROL_JSON = '{"view": [], "edit": []}'
@@ -52,23 +49,38 @@ class AccessControlManager:
             return False
 
         for higher_perm, includes in self.permission_hierarchy.items():
-            # Only consider permission branches that include requested permission_type
-            if permission_type in includes and higher_perm in access_control:
-                perm_list = access_control[higher_perm]
+            # Skip if this branch doesn't cover the requested permission
+            if permission_type not in includes:
+                continue
 
-                # Direct user check
-                if user_id in perm_list:
-                    return True
+            perm_list = access_control.get(higher_perm, [])
+            if not isinstance(perm_list, (list, set, tuple)):
+                continue
 
-                # Group membership check
-                for group in self._get_user_groups(user_id):
-                    if group in perm_list:
-                        return True
+            if self._user_in_permission_list(user_id, perm_list):
+                return True
 
-                # Public access check
-                if "public" in perm_list:
-                    return True
+            if self._user_in_group_list(user_id, perm_list):
+                return True
 
+            if "public" in perm_list:
+                return True
+
+        return False
+
+    def _user_in_permission_list(self, user_id, perm_list):
+        """
+        Return True if the user_id is directly listed in perm_list.
+        """
+        return user_id in perm_list
+
+    def _user_in_group_list(self, user_id, perm_list):
+        """
+        Return True if any of the user's groups appear in perm_list.
+        """
+        for group in self._get_user_groups(user_id):
+            if group in perm_list:
+                return True
         return False
 
     def grant_access(self, document_id, user_id, permission_type="view"):
@@ -434,7 +446,7 @@ class AccessControlManager:
             model_id: The model ID to fetch info for.
 
         Returns:
-            dict: Consolidated metadata for that model, or None on error.
+            dict: Consolidated metadata for that model, or a simpler dict on error.
         """
         metadata_tables = [
             "model_architectures",
@@ -443,78 +455,128 @@ class AccessControlManager:
             "model_training_configs",
             "model_file",
             "model_git",
-            "model_images_folder"
+            "model_images_folder",
         ]
 
         consolidated = {"model_id": model_id}
 
-        # Fetch and merge metadata from each table
+        # 1) Fetch and merge metadata from each table
         for table in metadata_tables:
-            try:
-                if hasattr(self.db_client, "get") and asyncio.iscoroutinefunction(self.db_client.get):
-                    loop = asyncio.get_event_loop()
-                    coro = self.db_client.get(
-                        collection_name=table,
-                        where={"model_id": {"$eq": model_id}},
-                        include=["metadatas"]
-                    )
-                    results = loop.run_until_complete(coro)
-                else:
-                    results = self.db_client.get(
-                        collection_name=table,
-                        where={"model_id": {"$eq": model_id}},
-                        include=["metadatas"]
-                    )
-            except Exception:
+            meta = self._fetch_one_metadata(table, model_id)
+            if not meta:
                 continue
+            self._merge_metadata(consolidated, meta)
 
-            if (
+        # 2) Try to build a structured model_info (requires valid 'file' and 'images_folder')
+        structured = self._build_structured_model_info(model_id, consolidated)
+        if structured:
+            return structured
+
+        # 3) Fallback to a simpler dict if structured info is unavailable
+        return self._build_basic_model_info(model_id, consolidated)
+
+    def _fetch_one_metadata(self, table_name, model_id):
+        """
+        Helper to fetch a single record’s metadata from `table_name` for the given model_id.
+        Returns a dict of metadata, or None if the query fails or no metadata is found.
+        """
+        try:
+            # Determine whether `db_client.get` is a coroutine
+            if hasattr(self.db_client, "get") and asyncio.iscoroutinefunction(self.db_client.get):
+                loop = asyncio.get_event_loop()
+                coro = self.db_client.get(
+                    collection_name=table_name,
+                    where={"model_id": {"$eq": model_id}},
+                    include=["metadatas"],
+                )
+                results = loop.run_until_complete(coro)
+            else:
+                results = self.db_client.get(
+                    collection_name=table_name,
+                    where={"model_id": {"$eq": model_id}},
+                    include=["metadatas"],
+                )
+        except Exception:
+            return None
+
+        # Validate the shape of `results` and extract the first metadata dict
+        if (
                 isinstance(results, dict)
                 and "results" in results
                 and results["results"]
+                and isinstance(results["results"][0], dict)
                 and "metadata" in results["results"][0]
-            ):
-                meta = results["results"][0]["metadata"]
-                # If there's a 'description', exclude it from the consolidated dict
-                if "description" in meta:
-                    for key, val in meta.items():
-                        if key != "description":
-                            consolidated[key] = val
-                else:
-                    consolidated.update(meta)
+        ):
+            return results["results"][0]["metadata"]
 
-        # If 'file' and 'images_folder' keys exist, parse them for structured fields
+        return None
+
+    @staticmethod
+    def _merge_metadata(consolidated, meta):
+        """
+        Merge `meta` into the `consolidated` dict.
+        If `meta` contains 'description', skip that key; otherwise, update all fields.
+        """
+        if "description" in meta:
+            for key, val in meta.items():
+                if key != "description":
+                    consolidated[key] = val
+        else:
+            consolidated.update(meta)
+
+    @staticmethod
+    def _build_structured_model_info(model_id, consolidated):
+        """
+        Attempt to build a detailed model_info dict from the 'file' and 'images_folder'
+        JSON strings in `consolidated`. Returns a dict on success, or None if parsing fails
+        or required fields are missing.
+        """
+        import json
+
         file_raw = consolidated.get("file")
         images_folder_raw = consolidated.get("images_folder")
 
-        if file_raw and images_folder_raw:
-            try:
-                file_info = json.loads(file_raw)
-                images_info = json.loads(images_folder_raw)
+        if not file_raw or not images_folder_raw:
+            return None
 
-                model_info = {
-                    "model_id": model_id,
-                    "creation_date": file_info.get("creation_date"),
-                    "last_modified_date": file_info.get("last_modified_date"),
-                    "total_chunks": consolidated.get("total_chunks"),
-                    "absolute_path": file_info.get("absolute_path"),
-                    "images_folder": images_info.get("name"),
-                }
-                # Append optional fields if present
-                for opt_field in ("framework", "version"):
-                    if opt_field in consolidated:
-                        model_info[opt_field] = consolidated[opt_field]
+        try:
+            file_info = json.loads(file_raw)
+            images_info = json.loads(images_folder_raw)
+        except Exception:
+            return None
 
-                return model_info
-            except Exception:
-                pass
+        # Ensure we have the minimum required fields
+        creation_date = file_info.get("creation_date")
+        last_modified = file_info.get("last_modified_date")
+        if not (creation_date and last_modified):
+            return None
 
-        # If 'file' / 'images_folder' not present or parsing fails, return a simpler dict
+        model_info = {
+            "model_id": model_id,
+            "creation_date": creation_date,
+            "last_modified_date": last_modified,
+            "total_chunks": consolidated.get("total_chunks"),
+            "absolute_path": file_info.get("absolute_path"),
+            "images_folder": images_info.get("name"),
+        }
+
+        # Optionally include framework/version if present
+        for opt_field in ("framework", "version"):
+            if opt_field in consolidated:
+                model_info[opt_field] = consolidated[opt_field]
+
+        return model_info
+
+    @staticmethod
+    def _build_basic_model_info(model_id, consolidated):
+        """
+        Build a simpler metadata dict by copying everything from `consolidated` except
+        keys that are not useful (e.g., raw 'file', 'description', 'access_control').
+        """
         basic_info = {"model_id": model_id}
         for key, val in consolidated.items():
             if key not in ("file", "description", "access_control"):
                 basic_info[key] = val
-
         return basic_info
 
     # ────────────────────────────────────────────────────────────────────────────────

@@ -117,9 +117,9 @@ class TestDistanceNormalizer(unittest.TestCase):
         result = {
             'distances': [
                 [0.1, 0.2],  # First item has multiple distances
-                [0.3],  # Second item has one distance
-                0.4,  # Third item is not nested
-                []  # Fourth item is an empty list
+                [0.3],  # The Second item has one distance
+                0.4,  # The Third item is not nested
+                []  # The Fourth item is an empty list
             ]
         }
 
@@ -150,7 +150,7 @@ class TestDistanceNormalizer(unittest.TestCase):
         # 2. If that fails or is invalid, try item['distance']
         # 3. If that fails, use default (2.0)
 
-        # Case 1: No 'distances' in result, but 'distance' in item
+        # Case 1: No 'distances' in a result, but 'distance' in item
         result = {}
         item = {'distance': 0.5, 'metadata': {'model_id': 'test_model'}}
         distance = self.normalizer.extract_search_distance(result, 0, item)
@@ -158,13 +158,13 @@ class TestDistanceNormalizer(unittest.TestCase):
 
         # Case 2: 'distances' exists but index out of range, 'distance' in item
         # In this case, the code doesn't check item['distance'] because the logic
-        # only checks item['distance'] if 'distances' is not in result or is not a list
+        # only checks item['distance'] if 'distances' is not in a result or is not a list
         result = {'distances': [0.1]}
         item = {'distance': 0.5, 'metadata': {'model_id': 'test_model'}}
         distance = self.normalizer.extract_search_distance(result, 1, item)
         self.assertEqual(distance, 2.0)  # Uses default, not item['distance']
 
-        # Case 3: No 'distances' in result, no 'distance' in item
+        # Case 3: No 'distances' in a result, no 'distance' in item
         result = {}
         item = {'metadata': {'model_id': 'test_model'}}
         distance = self.normalizer.extract_search_distance(result, 0, item)
@@ -186,7 +186,7 @@ class TestDistanceNormalizer(unittest.TestCase):
         # Check that the log message contains expected information
         self.assertIn("raw=0.5000", log_message)
         self.assertIn("d0=0.5000", log_message)
-        self.assertIn("α=5", log_message)
+        self.assertIn("alpha=5.0", log_message)
 
         # Reset and test extract_search_distance logging
         self.mock_logger.reset_mock()
@@ -195,7 +195,7 @@ class TestDistanceNormalizer(unittest.TestCase):
         item = {'metadata': {'model_id': 'test_model_123'}}
         self.normalizer.extract_search_distance(result, 0, item, 'test_table')
 
-        # Verify logger was called with appropriate message
+        # Verify logger was called with the appropriate message
         self.mock_logger.debug.assert_called_once()
         log_message = self.mock_logger.debug.call_args[0][0]
 

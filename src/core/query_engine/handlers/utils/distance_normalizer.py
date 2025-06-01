@@ -37,14 +37,16 @@ class DistanceNormalizer:
         Normalize a distance value using an inverted exponential kernel.
 
         After linearly scaling into [0,1], we do:
-            normalized = 1 - exp(-α * d_norm)
+            normalized = 1 - exp(-alpha * d_norm)
         so:
           - d == min → d_norm=0 → normalized=0
-          - d == max → d_norm=1 → normalized=1-exp(-α)≈1
+          - d == max → d_norm=1 → normalized=1-exp(-alpha)≈1
           - small differences around zero get pulled even closer to zero
         """
-        min_val = stats.get('min', 0.0)
-        max_val = stats.get('max', 2.0)
+        import math
+
+        min_val = stats.get("min", 0.0)
+        max_val = stats.get("max", 2.0)
 
         # avoid division by zero
         if max_val == min_val:
@@ -55,12 +57,12 @@ class DistanceNormalizer:
         d0 = max(0.0, min(1.0, d0))
 
         # invertible exponential kernel
-        α = 5.0  # higher α → sharper falloff
-        normalized = 1.0 - math.exp(-α * d0)
+        alpha = 5.0  # higher alpha → sharper falloff
+        normalized = 1.0 - math.exp(-alpha * d0)
 
         self.logger.debug(
-            f"Exp‑kernel normalize: raw={distance:.4f}, d0={d0:.4f}, "
-            f"α={α}, result={normalized:.4f} (range {min_val}-{max_val})"
+            f"Exp-kernel normalize: raw={distance:.4f}, d0={d0:.4f}, "
+            f"alpha={alpha}, result={normalized:.4f} (range {min_val}-{max_val})"
         )
 
         return normalized
