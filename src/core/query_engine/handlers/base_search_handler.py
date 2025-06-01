@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from typing import Dict, Any, Tuple, Optional, List, Coroutine
+from typing import Dict, Any, Tuple, Optional, List, Coroutine, Iterable
 
 from src.core.query_engine.handlers.utils.distance_normalizer import DistanceNormalizer
 from src.core.query_engine.handlers.utils.filter_translator import FilterTranslator
@@ -17,90 +17,121 @@ class BaseSearchHandler:
         self.access_control_manager = access_control_manager
         self.filter_translator = filter_translator
 
-    async def _get_collection_distance_stats_for_query(self, query: str, collections: List[str],
-                                                       user_id: Optional[str] = None) -> Dict[
-        str, Dict[str, float]]:
+    async def _get_collection_distance_stats_for_query(
+            self,
+            query: str,
+            collections: List[str],
+            user_id: Optional[str] = None
+    ) -> Dict[str, Dict[str, float]]:
         """
-        Get min and max distances for each collection based on the actual user query.
+        Get min, max, median, and percentiles for each collection based on the actual user query.
         """
         self.logger.info(f"Getting min/max distances for all collections using query: {query}")
 
-        # Initialize result dictionary
-        collection_stats = {}
+        # Build an access-control filter once (it does not change per collection)
+        filters = {}
+        if self.access_control_manager and user_id:
+            filters = self.access_control_manager.create_access_filter(user_id)
 
-        # For each collection, run the query with a large limit to get distance distribution
+        collection_stats: Dict[str, Dict[str, float]] = {}
         for collection_name in collections:
-            try:
-                # Get access control filter if needed
-                filters = {}
-                if self.access_control_manager and user_id:
-                    filters = self.access_control_manager.create_access_filter(user_id)
-
-                # Run the query with a large limit to get a good distribution
-                result = await self.chroma_manager.search(
-                    collection_name=collection_name,
-                    query=query,
-                    where=filters,  # Apply access control filters only
-                    limit=10000,  # Very large limit to get good distribution
-                    include=["distances"]
-                )
-
-                # Extract all distances
-                distances = []
-                for idx, item in enumerate(result.get('results', [])):
-                    distance = self.distance_normalizer.extract_search_distance(
-                        result, idx, item, collection_name
-                    )
-                    if distance is not None:
-                        distances.append(distance)
-
-                # Calculate min and max if we have distances
-                if distances:
-                    # Sort distances
-                    distances.sort()
-
-                    # Get min and max (with some buffer to avoid edge cases)
-                    min_distance = distances[0]
-                    max_distance = distances[-1]
-
-                    # Log some statistics about the distribution
-                    percentile_10 = distances[int(len(distances) * 0.1)] if len(distances) > 10 else min_distance
-                    percentile_90 = distances[int(len(distances) * 0.9)] if len(distances) > 10 else max_distance
-                    median = distances[int(len(distances) * 0.5)] if len(distances) > 2 else min_distance
-
-                    collection_stats[collection_name] = {
-                        'min': min_distance,
-                        'max': max_distance,
-                        'median': median,
-                        'percentile_10': percentile_10,
-                        'percentile_90': percentile_90,
-                        'count': len(distances)
-                    }
-                else:
-                    # Default values if no distances found
-                    collection_stats[collection_name] = {
-                        'min': 0.0,
-                        'max': 2.0,  # Typical max distance in embeddings
-                        'median': 1.0,
-                        'percentile_10': 0.5,
-                        'percentile_90': 1.5,
-                        'count': 0
-                    }
-                    self.logger.warning(f"No distances found for collection {collection_name}, using defaults")
-
-            except Exception as e:
-                self.logger.error(f"Error getting distance stats for collection {collection_name}: {e}")
-                # Use default values on error
-                collection_stats[collection_name] = {
-                    'min': 0.0,
-                    'max': 2.0,
-                    'median': 1.0,
-                    'percentile_10': 0.5,
-                    'percentile_90': 1.5,
-                    'count': 0
-                }
+            stats = await self._get_stats_for_collection(collection_name, query, filters)
+            collection_stats[collection_name] = stats
 
         return collection_stats
+
+    async def _get_stats_for_collection(
+            self,
+            collection_name: str,
+            query: str,
+            filters: Dict[str, Any]
+    ) -> Dict[str, float]:
+        """
+        1) Runs the chroma_manager.search(...) call for up to 10,000 hits.
+        2) Extracts distances (or defaults).
+        3) Computes min/max/median/percentiles if any distances exist,
+           otherwise returns default stats.
+        4) Catches any exceptions and returns default stats on error.
+        """
+        try:
+            result = await self.chroma_manager.search(
+                collection_name=collection_name,
+                query=query,
+                where=filters,
+                limit=10000,
+                include=["distances"]
+            )
+            distances = self._extract_distances(result, collection_name)
+
+            if not distances:
+                self.logger.warning(
+                    f"No distances found for collection {collection_name}, using defaults"
+                )
+                return self._default_stats()
+
+            return self._compute_stats(distances)
+
+        except Exception as e:
+            self.logger.error(
+                f"Error getting distance stats for collection {collection_name}: {e}"
+            )
+            return self._default_stats()
+
+    def _extract_distances(
+            self,
+            search_result: Dict[str, Any],
+            collection_name: str
+    ) -> List[float]:
+        """
+        Walks through search_result['results'], calling distance_normalizer
+        on each item. Returns a list of all non‐None distances.
+        """
+        distances: List[float] = []
+        for idx, item in enumerate(search_result.get("results", [])):
+            distance = self.distance_normalizer.extract_search_distance(
+                search_result, idx, item, collection_name
+            )
+            if distance is not None:
+                distances.append(distance)
+        return distances
+
+    def _compute_stats(self, distances: List[float]) -> Dict[str, float]:
+        """
+        Given a nonempty list of distances, sorts them and returns a dict with:
+          - min, max, median
+          - 10th percentile, 90th percentile
+          - count
+        """
+        distances.sort()
+        n = len(distances)
+
+        min_distance = distances[0]
+        max_distance = distances[-1]
+        median = distances[int(n * 0.5)] if n > 2 else min_distance
+        percentile_10 = distances[int(n * 0.1)] if n > 10 else min_distance
+        percentile_90 = distances[int(n * 0.9)] if n > 10 else max_distance
+
+        return {
+            "min": min_distance,
+            "max": max_distance,
+            "median": median,
+            "percentile_10": percentile_10,
+            "percentile_90": percentile_90,
+            "count": float(n)
+        }
+
+    def _default_stats(self) -> Dict[str, float]:
+        """
+        Returns a reasonable default stats dict when no distances or on error.
+        """
+        return {
+            "min": 0.0,
+            "max": 2.0,
+            "median": 1.0,
+            "percentile_10": 0.5,
+            "percentile_90": 1.5,
+            "count": 0.0
+        }
 
     def _extract_text_search_parameters(self, parameters: Dict[str, Any]) -> Tuple[
         Optional[str], int, Dict[str, Any]]:
@@ -141,12 +172,12 @@ class BaseSearchHandler:
             table_weights: Dict[str, float], user_id: Optional[str], ner_filters: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Search metadata tables based on NER analysis of user query.
+        Search metadata tables based on NER analysis of a user query.
 
         This method handles four different cases based on NER entities:
         1. No NER entities: Search all tables with original query
         2. Only positive entities: Search only tables related to positive entities using entity values as queries
-        3. Only negative entities: Search all tables with original query, then filter out negative matches
+        3. Only negative entities: Search all tables with the original query, then filter out negative matches
         4. Both positive and negative entities: Search positive entity tables with entity values, filter out negative matches
 
         Args:
@@ -155,7 +186,7 @@ class BaseSearchHandler:
             requested_limit: Number of results to return
             table_weights: Weights for each table
             user_id: User ID for access control
-            ner_filters: Named entity filters extracted from query
+            ner_filters: Named entity filters extracted from a query
 
         Returns:
             Dictionary of search results
@@ -213,9 +244,13 @@ class BaseSearchHandler:
         self.logger.info(f"Found {len(all_results)} models after NER filtering")
         return all_results
 
-    def _analyze_ner_filters(self, ner_filters: Optional[Dict[str, Any]], table_weights: Dict[str, float]) -> Dict[
-        str, Any]:
-        """Analyze NER filters to determine positive and negative entities.
+    def _analyze_ner_filters(
+            self,
+            ner_filters: Optional[Dict[str, Any]],
+            table_weights: Dict[str, float],
+    ) -> Dict[str, Any]:
+        """
+        Analyze NER filters to determine positive and negative entities.
 
         Args:
             ner_filters: Named entity filters extracted from query
@@ -233,65 +268,147 @@ class BaseSearchHandler:
             "negative_entities": {}
         }
 
-        # Table mappings for each entity type using correct table names
+        # Table mappings for each entity type
         entity_table_mapping = {
             "architecture": ["model_architectures"],
             "dataset": ["model_datasets"],
-            "training_config": ["model_training_configs"]
+            "training_config": ["model_training_configs"],
         }
 
-        # If no NER filters, return default values
+        # Early return if no filters
         if not ner_filters:
             return result
 
         self.logger.info(f"Processing search with NER filters: {ner_filters}")
 
-        # Process single-value entities (architecture and dataset)
-        for entity_type in ["architecture", "dataset"]:
-            if entity_type in ner_filters:
-                self._process_single_entity(
-                    entity_type=entity_type,
-                    entity_data=ner_filters[entity_type],
-                    entity_table_mapping=entity_table_mapping,
-                    table_weights=table_weights,
-                    result=result
-                )
+        # 1) Process single‐value entities (architecture and dataset)
+        for entity_type in ("architecture", "dataset"):
+            self._process_if_present(
+                entity_type=entity_type,
+                ner_filters=ner_filters,
+                entity_table_mapping=entity_table_mapping,
+                table_weights=table_weights,
+                result=result,
+            )
 
-        # Process training_config separately as it can have multiple fields
-        if 'training_config' in ner_filters:
-            training_config = ner_filters['training_config']
-            training_tables = []
-
-            for field, data in training_config.items():
-                if isinstance(data, dict) and 'value' in data and data['value'] != "N/A":
-                    field_value = data['value']
-                    is_positive = data.get('is_positive', True)
-
-                    self.logger.info(f"Training config {field}: {field_value}, positive: {is_positive}")
-
-                    if is_positive:
-                        result["has_positive_entities"] = True
-                        # Add training config tables with the field value as query
-                        for table in entity_table_mapping.get("training_config", []):
-                            if table in table_weights and table not in training_tables:
-                                training_tables.append(table)
-                                # Use the field name and value in the query
-                                query_value = f"{field} {field_value}"
-                                result["positive_table_queries"][table] = query_value
-                    else:
-                        result["has_negative_entities"] = True
-                        result["negative_entities"].setdefault('training_config', {})[field] = field_value
-
-            # Store training config tables for intersection
-            if training_tables:
-                result["entity_type_tables"]["training_config"] = set(training_tables)
+        # 2) Process training_config in its own helper
+        self._process_training_config(
+            training_config=ner_filters.get("training_config"),
+            entity_table_mapping=entity_table_mapping,
+            table_weights=table_weights,
+            result=result,
+        )
 
         return result
 
-    def _process_single_entity(self, entity_type: str, entity_data: Dict[str, Any],
-                               entity_table_mapping: Dict[str, List[str]],
-                               table_weights: Dict[str, float], result: Dict[str, Any]) -> None:
-        """Process a single-value entity type (architecture or dataset).
+    def _process_if_present(
+            self,
+            entity_type: str,
+            ner_filters: Dict[str, Any],
+            entity_table_mapping: Dict[str, Any],
+            table_weights: Dict[str, float],
+            result: Dict[str, Any],
+    ) -> None:
+        """
+        If `entity_type` exists in ner_filters, call the original
+        _process_single_entity for that type.
+        """
+        if entity_type not in ner_filters:
+            return
+
+        # Delegate to the existing single‐entity handler
+        self._process_single_entity(
+            entity_type=entity_type,
+            entity_data=ner_filters[entity_type],
+            entity_table_mapping=entity_table_mapping,
+            table_weights=table_weights,
+            result=result,
+        )
+
+    def _process_training_config(
+            self,
+            training_config: Optional[Dict[str, Any]],
+            entity_table_mapping: Dict[str, Any],
+            table_weights: Dict[str, float],
+            result: Dict[str, Any],
+    ) -> None:
+        """
+        Handle any fields under 'training_config'. Sets positive vs.
+        negative flags, builds positive_table_queries, and populates
+        entity_type_tables["training_config"] if needed.
+        """
+        if not isinstance(training_config, dict):
+            return
+
+        seen_tables = set()
+        for field_name, data in training_config.items():
+            self._process_single_training_field(
+                field_name, data, entity_table_mapping, table_weights, result, seen_tables
+            )
+
+        if seen_tables:
+            result["entity_type_tables"]["training_config"] = seen_tables
+
+    def _process_single_training_field(
+            self,
+            field_name: str,
+            data: Any,
+            entity_table_mapping: Dict[str, Any],
+            table_weights: Dict[str, float],
+            result: Dict[str, Any],
+            seen_tables: set,
+    ) -> None:
+        """
+        Process one field under training_config:
+          - Skip if no valid value
+          - If positive, mark flags and add to positive_table_queries
+          - If negative, add to negative_entities
+        """
+        if not (isinstance(data, dict) and data.get("value") and data["value"] != "N/A"):
+            return
+
+        field_value = data["value"]
+        is_positive = data.get("is_positive", True)
+        self.logger.info(f"Training config {field_name}: {field_value}, positive: {is_positive}")
+
+        if is_positive:
+            result["has_positive_entities"] = True
+            self._add_positive_training_tables(
+                field_name, field_value, entity_table_mapping, table_weights, result, seen_tables
+            )
+        else:
+            result["has_negative_entities"] = True
+            result["negative_entities"].setdefault("training_config", {})[field_name] = field_value
+
+    def _add_positive_training_tables(
+            self,
+            field_name: str,
+            field_value: str,
+            entity_table_mapping: Dict[str, Any],
+            table_weights: Dict[str, float],
+            result: Dict[str, Any],
+            seen_tables: set,
+    ) -> None:
+        """
+        For a positive training field, attach the query to each valid table
+        exactly once, updating seen_tables and positive_table_queries.
+        """
+        for table in entity_table_mapping.get("training_config", []):
+            if table in table_weights and table not in seen_tables:
+                seen_tables.add(table)
+                query_value = f"{field_name} {field_value}"
+                result["positive_table_queries"][table] = query_value
+
+    def _process_single_entity(
+            self,
+            entity_type: str,
+            entity_data: Dict[str, Any],
+            entity_table_mapping: Dict[str, List[str]],
+            table_weights: Dict[str, float],
+            result: Dict[str, Any],
+    ) -> None:
+        """
+        Process a single-value entity type (architecture or dataset).
 
         Args:
             entity_type: Type of the entity (architecture or dataset)
@@ -300,29 +417,49 @@ class BaseSearchHandler:
             table_weights: Weights for each table
             result: Result dictionary to update
         """
-        if isinstance(entity_data, dict) and 'value' in entity_data:
-            entity_value = entity_data['value']
-            is_positive = entity_data.get('is_positive', True)
+        # Early exit if no usable value
+        if not (isinstance(entity_data, dict) and "value" in entity_data):
+            return
 
-            # Only process if there's an actual value
-            if entity_value != "N/A":
-                if is_positive:
-                    self.logger.info(f"Found positive {entity_type} entity: {entity_value}")
-                    result["has_positive_entities"] = True
-                    # Map to correct table
-                    entity_tables = []
-                    for table in entity_table_mapping.get(entity_type, []):
-                        if table in table_weights:
-                            entity_tables.append(table)
-                            # Use the entity value as the query for this table
-                            result["positive_table_queries"][table] = entity_value
+        entity_value = entity_data["value"]
+        if entity_value == "N/A":
+            return
 
-                    # Store entity tables for intersection
-                    if entity_tables:
-                        result["entity_type_tables"][entity_type] = set(entity_tables)
-                else:
-                    result["has_negative_entities"] = True
-                    result["negative_entities"][entity_type] = entity_value
+        is_positive = entity_data.get("is_positive", True)
+        if is_positive:
+            self._handle_positive_single_entity(
+                entity_type, entity_value, entity_table_mapping, table_weights, result
+            )
+        else:
+            result["has_negative_entities"] = True
+            result["negative_entities"][entity_type] = entity_value
+
+    def _handle_positive_single_entity(
+            self,
+            entity_type: str,
+            entity_value: str,
+            entity_table_mapping: Dict[str, List[str]],
+            table_weights: Dict[str, float],
+            result: Dict[str, Any],
+    ) -> None:
+        """
+        Handles the positive‐entity case: logs, sets flags, and builds
+        positive_table_queries + entity_type_tables entries.
+        """
+        self.logger.info(f"Found positive {entity_type} entity: {entity_value}")
+        result["has_positive_entities"] = True
+
+        # Filter only tables present in table_weights
+        valid_tables = [
+            tbl for tbl in entity_table_mapping.get(entity_type, [])
+            if tbl in table_weights
+        ]
+
+        for tbl in valid_tables:
+            result["positive_table_queries"][tbl] = entity_value
+
+        if valid_tables:
+            result["entity_type_tables"][entity_type] = set(valid_tables)
 
     def _determine_tables_to_search(
             self, has_positive_entities: bool, entity_type_tables: Dict[str, set],
@@ -404,7 +541,7 @@ class BaseSearchHandler:
             if has_positive_entities and table_name in positive_table_queries:
                 # Use the entity value as the query
                 table_query = positive_table_queries[table_name]
-                # Increase limit by 5x for NER queries
+                # Increase the limit by 5x for NER queries
                 search_limit = search_limit * 3
                 self.logger.info(f"Searching table {table_name} with NER query: {table_query} (limit: {search_limit})")
             else:
@@ -425,33 +562,66 @@ class BaseSearchHandler:
         return await asyncio.gather(*positive_search_tasks)
 
     async def _execute_negative_searches(
-            self, negative_entities: Dict[str, Any], requested_limit: int
+            self,
+            negative_entities: Dict[str, Any],
+            requested_limit: int
     ) -> Dict[str, List[Dict[str, Any]]]:
-        """Execute searches for negative NER fields.
+        """
+        Execute searches for negative NER fields.
 
         Args:
             negative_entities: Mapping of negative entity types to their values
             requested_limit: Number of results to return
 
         Returns:
-            Dictionary of negative search results
+            Dictionary of negative search results, keyed by table (or table_field)
         """
-        negative_results = {}
-        negative_search_tasks = []
-        negative_table_queries = {}
+        # 1) Build up all search tasks and keep track of which a query maps to which key
+        negative_table_queries, negative_search_tasks = self._build_negative_search_tasks(
+            negative_entities, requested_limit
+        )
 
-        # Entity type to table mapping
+        # 2) If there are no tasks, just return an empty dict immediately
+        if not negative_search_tasks:
+            return {}
+
+        # 3) Await all of them in parallel
+        negative_search_results = await asyncio.gather(*negative_search_tasks)
+
+        # 4) Process the raw returns into the final structure
+        return self._process_negative_search_results(
+            negative_search_results, negative_table_queries
+        )
+
+    def _build_negative_search_tasks(
+            self,
+            negative_entities: Dict[str, Any],
+            requested_limit: int
+    ) -> Tuple[Dict[str, str], List[Coroutine[Any, Any, Dict[str, Any]]]]:
+        """
+        Walk through `negative_entities` and, for each field, call
+        `_prepare_negative_search(...)` to generate:
+          - A new entry in negative_table_queries mapping “table” (or “table_field”) → query_value
+          - A corresponding search‐task coroutine in negative_search_tasks
+
+        Returns:
+            (negative_table_queries, negative_search_tasks)
+            - negative_table_queries: {table_or_table_field: query_value}
+            - negative_search_tasks: [<coroutine for chroma_manager.search>, ...]
+        """
+        negative_table_queries: Dict[str, str] = {}
+        negative_search_tasks: List[Coroutine[Any, Any, Dict[str, Any]]] = []
+
         entity_table_mapping = {
             "architecture": "model_architectures",
             "dataset": "model_datasets",
-            "training_config": "model_training_configs"
+            "training_config": "model_training_configs",
         }
 
-        # Prepare negative entity searches
         for entity_type, value in negative_entities.items():
-            if entity_type in ["architecture", "dataset"]:
-                # Handle single-value entity types
+            if entity_type in ("architecture", "dataset"):
                 table = entity_table_mapping[entity_type]
+                # Single‐value entity: the `value` is the direct query string
                 self._prepare_negative_search(
                     table=table,
                     query_value=value,
@@ -459,56 +629,76 @@ class BaseSearchHandler:
                     negative_search_tasks=negative_search_tasks,
                     requested_limit=requested_limit
                 )
-            elif entity_type == 'training_config':
-                # For training_config, handle multiple fields
+
+            elif entity_type == "training_config":
                 table = entity_table_mapping[entity_type]
+                # Multi‐field: each field→value pair becomes its own query
                 for field, field_value in value.items():
-                    if field_value != "N/A":
-                        query_value = f"{field} {field_value}"
-                        self._prepare_negative_search(
-                            table=table,
-                            query_value=query_value,
-                            negative_table_queries=negative_table_queries,
-                            negative_search_tasks=negative_search_tasks,
-                            requested_limit=requested_limit,
-                            table_key=f"{table}_{field}"  # Use a unique key for each field
-                        )
-
-        # Execute all negative searches in parallel
-        if negative_search_tasks:
-            negative_search_results = await asyncio.gather(*negative_search_tasks)
-
-            # Process negative search results
-            neg_table_idx = 0
-            for table, query_value in negative_table_queries.items():
-                if neg_table_idx >= len(negative_search_results):
-                    break
-
-                result = negative_search_results[neg_table_idx]
-                neg_table_idx += 1
-
-                # Store results with their distances
-                negative_results[table] = []
-
-                for idx, item in enumerate(result.get('results', [])):
-                    metadata = item.get('metadata', {})
-                    model_id = metadata.get('model_id', 'unknown')
-
-                    if model_id == 'unknown':
+                    if field_value == "N/A":
                         continue
-
-                    # Get distance using the proper extraction method
-                    distance = self.distance_normalizer.extract_search_distance(
-                        result, idx, item, table.split('_')[0] if '_' in table else table
+                    query_value = f"{field} {field_value}"
+                    table_key = f"{table}_{field}"
+                    self._prepare_negative_search(
+                        table=table,
+                        query_value=query_value,
+                        negative_table_queries=negative_table_queries,
+                        negative_search_tasks=negative_search_tasks,
+                        requested_limit=requested_limit,
+                        table_key=table_key
                     )
 
-                    negative_results[table].append({
-                        'model_id': model_id,
-                        'distance': distance,
-                        'metadata': metadata
-                    })
+        return negative_table_queries, negative_search_tasks
 
-                    self.logger.info(f"Negative result for {table}: model_id={model_id}, distance={distance:.4f}")
+    def _process_negative_search_results(
+            self,
+            negative_search_results: List[Dict[str, Any]],
+            negative_table_queries: Dict[str, str]
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Given the list of raw results (in the same order as negative_table_queries.items()),
+        extract `model_id`, `distance`, and `metadata` for each hit—skipping "unknown" ID—and
+        assemble a final dictionary keyed by table (or table_field).
+
+        Returns:
+            negative_results: {
+                table_or_table_field: [
+                    {'model_id': ..., 'distance': ..., 'metadata': {...}},
+                    ...
+                ],
+                ...
+            }
+        """
+        negative_results: Dict[str, List[Dict[str, Any]]] = {}
+
+        # Iterate in parallel over (table_key, query_value) and its corresponding search result
+        for idx, (table_key, query_value) in enumerate(negative_table_queries.items()):
+            if idx >= len(negative_search_results):
+                break  # safeguard if something mismatches
+
+            result = negative_search_results[idx]
+            negative_results[table_key] = []
+
+            for hit_idx, item in enumerate(result.get("results", [])):
+                metadata = item.get("metadata", {})
+                model_id = metadata.get("model_id", "unknown")
+                if model_id == "unknown":
+                    continue
+
+                # Determine which base table to pass into distance_normalizer
+                base_table = table_key.split("_")[0] if "_" in table_key else table_key
+                distance = self.distance_normalizer.extract_search_distance(
+                    result, hit_idx, item, base_table
+                )
+
+                negative_results[table_key].append({
+                    "model_id": model_id,
+                    "distance": distance,
+                    "metadata": metadata
+                })
+
+                self.logger.info(
+                    f"Negative result for {table_key}: model_id={model_id}, distance={distance:.4f}"
+                )
 
         return negative_results
 
@@ -540,12 +730,17 @@ class BaseSearchHandler:
         ))
 
     def _process_search_results(
-            self, positive_search_results: List[Dict[str, Any]], tables_to_search: List[str],
-            entity_type_tables: Dict[str, set], has_positive_entities: bool,
-            has_negative_entities: bool, negative_results: Dict[str, List[Dict[str, Any]]],
+            self,
+            positive_search_results: List[Dict[str, Any]],
+            tables_to_search: List[str],
+            entity_type_tables: Dict[str, set],
+            has_positive_entities: bool,
+            has_negative_entities: bool,
+            negative_results: Dict[str, List[Dict[str, Any]]],
             user_id: Optional[str]
     ) -> Dict[str, Dict[str, Any]]:
-        """Process search results and apply filters.
+        """
+        Process search results and apply filters.
 
         Args:
             positive_search_results: Results from positive entity searches
@@ -559,60 +754,106 @@ class BaseSearchHandler:
         Returns:
             Dictionary of filtered search results
         """
-        all_results = {}
+        all_results: Dict[str, Dict[str, Any]] = {}
 
         # Initialize tracking for models by entity type (for intersection)
         models_by_entity_type = self._initialize_entity_type_tracking(
-            has_positive_entities, entity_type_tables)
+            has_positive_entities, entity_type_tables
+        )
 
-        # Process positive search results
+        # Process each table’s positive search hits via a helper
         for table_idx, result in enumerate(positive_search_results):
             table_name = tables_to_search[table_idx]
+            matching_entity_type = self._find_matching_entity_type(
+                table_name, entity_type_tables
+            )
 
-            # Find entity type for this table
-            matching_entity_type = self._find_matching_entity_type(table_name, entity_type_tables)
+            self._process_positive_hits(
+                result=result,
+                table_name=table_name,
+                entity_type=matching_entity_type,
+                has_positive_entities=has_positive_entities,
+                has_negative_entities=has_negative_entities,
+                negative_results=negative_results,
+                user_id=user_id,
+                all_results=all_results,
+                models_by_entity_type=models_by_entity_type,
+                entity_type_tables=entity_type_tables
+            )
 
-            for idx, item in enumerate(result.get('results', [])):
-                metadata = item.get('metadata', {})
-                model_id = metadata.get('model_id', 'unknown')
-
-                # Skip if no model_id
-                if model_id == 'unknown':
-                    continue
-
-                # Apply access control
-                if not self._check_access_control(metadata, user_id):
-                    continue
-
-                # Track model for entity type intersection if needed
-                self._track_model_for_entity_type(
-                    has_positive_entities, matching_entity_type,
-                    models_by_entity_type, model_id, entity_type_tables)
-
-                # Get distance for this positive result
-                distance = self.distance_normalizer.extract_search_distance(
-                    result, idx, item, table_name
-                )
-
-                # Check if this model should be filtered out based on negative entities
-                if has_negative_entities and negative_results:
-                    skip_result, filter_reason = self._should_filter_by_negative_entities(
-                        model_id, negative_results)
-
-                    if skip_result:
-                        self.logger.info(f"Filtering out model {model_id} due to {filter_reason}")
-                        continue
-
-                # Add result to all_results
-                self._add_result_to_all_results(
-                    all_results, model_id, table_name, distance,
-                    has_positive_entities, has_negative_entities)
-
-        # Apply intersection filtering if needed
+        # If multiple positive entity types exist, enforce intersection
         if has_positive_entities and len(models_by_entity_type) > 1:
-            all_results = self._apply_intersection_filtering(all_results, models_by_entity_type)
+            all_results = self._apply_intersection_filtering(
+                all_results, models_by_entity_type
+            )
 
         return all_results
+
+    def _process_positive_hits(
+            self,
+            result: Dict[str, Any],
+            table_name: str,
+            entity_type: Optional[str],
+            has_positive_entities: bool,
+            has_negative_entities: bool,
+            negative_results: Dict[str, List[Dict[str, Any]]],
+            user_id: Optional[str],
+            all_results: Dict[str, Dict[str, Any]],
+            models_by_entity_type: Dict[str, set],
+            entity_type_tables: Dict[str, set]
+    ) -> None:
+        """
+        Iterate over a single table’s search results. For each hit:
+          - Skip if model_id is 'unknown'
+          - Skip if access control fails
+          - Track for intersection if needed
+          - Filter out by negative entities if applicable
+          - Add to all_results otherwise
+        """
+        for idx, item in enumerate(result.get("results", [])):
+            metadata = item.get("metadata", {})
+            model_id = metadata.get("model_id", "unknown")
+            if model_id == "unknown":
+                continue
+
+            # Apply access control
+            if not self._check_access_control(metadata, user_id):
+                continue
+
+            # Track model_id for intersection logic if positive entities exist
+            self._track_model_for_entity_type(
+                has_positive_entities,
+                entity_type,
+                models_by_entity_type,
+                model_id,
+                entity_type_tables
+            )
+
+            # Extract distance for this hit
+            distance = self.distance_normalizer.extract_search_distance(
+                result, idx, item, table_name
+            )
+
+            # If there are negative entities, check filtering
+            if has_negative_entities and negative_results:
+                skip, reason = self._should_filter_by_negative_entities(
+                    model_id, negative_results
+                )
+                if skip:
+                    self.logger.info(
+                        f"Filtering out model {model_id} due to {reason}"
+                    )
+                    continue
+
+            # If not filtered, add this hit into all_results
+            self._add_result_to_all_results(
+                all_results,
+                model_id,
+                table_name,
+                distance,
+                has_positive_entities,
+                has_negative_entities
+            )
 
     @staticmethod
     def _initialize_entity_type_tracking(
@@ -689,9 +930,11 @@ class BaseSearchHandler:
 
     @staticmethod
     def _should_filter_by_negative_entities(
-            model_id: str, negative_results: Dict[str, List[Dict[str, Any]]]
+            model_id: str,
+            negative_results: Dict[str, List[Dict[str, Any]]]
     ) -> Tuple[bool, str]:
-        """Check if a model should be filtered out based on negative entities.
+        """
+        Check if a model should be filtered out based on negative entities.
 
         Args:
             model_id: ID of the model to check
@@ -700,35 +943,39 @@ class BaseSearchHandler:
         Returns:
             Tuple of (should_filter, filter_reason)
         """
-        skip_result = False
-        filter_reason = ""
         negative_distance_threshold = 1.3  # Lower distance means better match
 
-        # Check each negative entity result
         for neg_table, neg_items in negative_results.items():
-            # Find this model in negative results
-            matching_neg_items = [item for item in neg_items if item['model_id'] == model_id]
+            # Gather any items matching this model_id
+            matching = [item for item in neg_items if item["model_id"] == model_id]
+            if not matching:
+                continue
 
-            if matching_neg_items:
-                # Get the lowest distance (best match)
-                min_distance = min(item['distance'] for item in matching_neg_items)
+            # Find the best (smallest) distance among matches
+            min_distance = min(item["distance"] for item in matching)
+            if min_distance < negative_distance_threshold:
+                reason = BaseSearchHandler._build_negative_filter_reason(neg_table, min_distance)
+                return True, reason
 
-                # If distance is below threshold (better match), filter out this model
-                if min_distance < negative_distance_threshold:
-                    table_type = neg_table.split('_')[0] if '_' in neg_table else neg_table
-                    if table_type == "model_architectures":
-                        filter_reason = f"negative architecture match (distance: {min_distance:.4f})"
-                    elif table_type == "model_datasets":
-                        filter_reason = f"negative dataset match (distance: {min_distance:.4f})"
-                    else:
-                        # Extract field name for training_config
-                        field = neg_table.split('_')[-1] if '_' in neg_table else "unknown"
-                        filter_reason = f"negative training config match: {field} (distance: {min_distance:.4f})"
+        return False, ""
 
-                    skip_result = True
-                    break
+    @staticmethod
+    def _build_negative_filter_reason(table_key: str, distance: float) -> str:
+        """
+        Construct a human-readable filter_reason based on which negative table_key
+        matched and the corresponding distance.
+        """
+        base = table_key.split("_")[0] if "_" in table_key else table_key
+        dist_str = f"{distance:.4f}"
 
-        return skip_result, filter_reason
+        if base == "model_architectures":
+            return f"negative architecture match (distance: {dist_str})"
+        if base == "model_datasets":
+            return f"negative dataset match (distance: {dist_str})"
+
+        # Otherwise, assume a training_config field (table_key is like "model_training_configs_field")
+        field_name = table_key.split("_")[-1]
+        return f"negative training config match: {field_name} (distance: {dist_str})"
 
     @staticmethod
     def _add_result_to_all_results(
@@ -794,70 +1041,137 @@ class BaseSearchHandler:
         return all_results
 
     async def _fetch_complete_model_metadata(
-            self, query: str, all_results: Dict[str, Any], table_weights: Dict[str, float], user_id: Optional[str]
+            self,
+            query: str,
+            all_results: Dict[str, Any],
+            table_weights: Dict[str, float],
+            user_id: Optional[str],
     ) -> Dict[str, Any]:
-        """Fetch complete metadata for ALL found models with distances."""
-        try:
-            # Get the list of all model IDs
-            all_model_ids = [model_id for model_id in all_results.keys() if model_id != 'unknown']
+        """
+        Fetch complete metadata for ALL found models with distances.
+        """
+        # 1) Collect all model IDs except 'unknown'
+        all_model_ids = [mid for mid in all_results.keys() if mid != "unknown"]
 
-            if all_model_ids:
-                # Process in smaller batches to reduce memory usage
-                batch_size = 1
-                for i in range(0, len(all_model_ids), batch_size):
-                    batch_model_ids = all_model_ids[i:i + batch_size]
+        # 2) Early exit if no valid IDs
+        if not all_model_ids:
+            return all_results
 
-                    # Create metadata fetch tasks for each table except model_descriptions
-                    for table_name in table_weights.keys():
-                        if table_name != 'model_descriptions':
-                            try:
-                                # Use search to retrieve actual distances
-                                result = await self.chroma_manager.search(
-                                    collection_name=table_name,
-                                    query=query,  # Use the original query
-                                    where={"model_id": {"$in": batch_model_ids}},
-                                    include=["metadatas", "documents", "distances"]  # Include distances
-                                )
-
-                                # Process each result item
-                                for idx, item in enumerate(result.get('results', [])):
-                                    metadata = item.get('metadata', {})
-                                    model_id = metadata.get('model_id', 'unknown')
-
-                                    # Get the distance from the results
-                                    distance = self.distance_normalizer.extract_search_distance(
-                                        result, idx, item, table_name
-                                    )
-
-                                    # Find the corresponding model in our results
-                                    if model_id in all_results:
-                                        # Initialize metadata dictionary if it doesn't exist
-                                        if 'metadata' not in all_results[model_id]:
-                                            all_results[model_id]['metadata'] = {}
-
-                                        # Update the metadata with this table's data
-                                        all_results[model_id]['metadata'].update(metadata)
-
-                                        # Update the tables list if not already present
-                                        if table_name not in all_results[model_id]['tables']:
-                                            all_results[model_id]['tables'].append(table_name)
-
-                                        # Make sure table_initial_distances exists before accessing it
-                                        if 'table_initial_distances' not in all_results[model_id]:
-                                            all_results[model_id]['table_initial_distances'] = {}
-
-                                        # Always store the distance from this search
-                                        all_results[model_id]['table_initial_distances'][table_name] = distance
-                            except Exception as e:
-                                self.logger.error(f"Error searching metadata from {table_name} for batch: {e}")
-        except Exception as e:
-            self.logger.error(f"Error fetching complete metadata for models: {e}")
+        # 3) Process in small batches to reduce memory usage
+        batch_size = 1
+        for batch_ids in self._chunk_model_ids(all_model_ids, batch_size):
+            await self._process_batch(batch_ids, query, table_weights, all_results)
 
         return all_results
 
-    async def _process_model_descriptions_text_search(self, query: str, all_results: Dict[str, Any],
-                                                      search_limit: int = 10) -> Dict[str, Any]:
-        """Process model descriptions using chunks.
+    def _chunk_model_ids(
+            self, all_model_ids: List[str], batch_size: int
+    ) -> Iterable[List[str]]:
+        """
+        Yield consecutive slices of size `batch_size` from all_model_ids.
+        """
+        for start in range(0, len(all_model_ids), batch_size):
+            yield all_model_ids[start: start + batch_size]
+
+    async def _process_batch(
+            self,
+            batch_model_ids: List[str],
+            query: str,
+            table_weights: Dict[str, float],
+            all_results: Dict[str, Any],
+    ) -> None:
+        """
+        For a given batch of IDs, loop over each table (except 'model_descriptions')
+        and fetch + process that table's metadata.
+        """
+        for table_name in table_weights:
+            if table_name == "model_descriptions":
+                continue
+
+            try:
+                await self._fetch_and_merge_table(
+                    table_name, batch_model_ids, query, all_results
+                )
+            except Exception as exc:
+                self.logger.error(
+                    f"Error searching metadata from {table_name} for batch {batch_model_ids}: {exc}"
+                )
+
+    async def _fetch_and_merge_table(
+            self,
+            table_name: str,
+            batch_model_ids: List[str],
+            query: str,
+            all_results: Dict[str, Any],
+    ) -> None:
+        """
+        1) Call chroma_manager.search(...) on `table_name` for this batch.
+        2) Loop over each returned item, extract distance + metadata, and merge
+           into all_results[model_id].
+        """
+        # 1) Perform the actual search call
+        result = await self.chroma_manager.search(
+            collection_name=table_name,
+            query=query,
+            where={"model_id": {"$in": batch_model_ids}},
+            include=["metadatas", "documents", "distances"],
+        )
+
+        # 2) If there are no 'results' or it's empty, do nothing
+        for idx, item in enumerate(result.get("results", [])):
+            self._merge_single_search_hit(
+                table_name, idx, item, result, all_results
+            )
+
+    def _merge_single_search_hit(
+            self,
+            table_name: str,
+            idx: int,
+            item: Dict[str, Any],
+            search_result: Dict[str, Any],
+            all_results: Dict[str, Any],
+    ) -> None:
+        """
+        Given one `item` from search_result['results'], extract
+        - model_id
+        - metadata dict
+        - distance
+        Then merge them into all_results[model_id].
+        """
+        metadata = item.get("metadata", {})
+        model_id = metadata.get("model_id", "unknown")
+        if model_id not in all_results:
+            return
+
+        # 1) Extract distance via distance_normalizer
+        distance = self.distance_normalizer.extract_search_distance(
+            search_result, idx, item, table_name
+        )
+
+        # 2) Ensure the sub‐dictionaries exist
+        model_entry = all_results[model_id]
+        model_entry.setdefault("metadata", {})
+        model_entry.setdefault("tables", [])
+        model_entry.setdefault("table_initial_distances", {})
+
+        # 3) Merge the metadata from this table
+        model_entry["metadata"].update(metadata)
+
+        # 4) Add table_name to the 'tables' list if not already present
+        if table_name not in model_entry["tables"]:
+            model_entry["tables"].append(table_name)
+
+        # 5) Finally, record the distance under `table_initial_distances`
+        model_entry["table_initial_distances"][table_name] = distance
+
+    async def _process_model_descriptions_text_search(
+            self,
+            query: str,
+            all_results: Dict[str, Any],
+            search_limit: int = 10
+    ) -> Dict[str, Any]:
+        """
+        Process model descriptions using chunks.
 
         Args:
             query: The search query string
@@ -867,111 +1181,141 @@ class BaseSearchHandler:
         Returns:
             Updated all_results dictionary with description data
 
-        Note: This method searches for search_limit records but only uses top 5
-        most similar records to calculate the distance.
+        Note: This method searches for 'search_limit' records but only uses
+        the top 5 most similar records to calculate the distance.
         """
-        # Define the max number of chunks to use for distance calculation
         top_chunks_for_distance = 5
+
         for model_id, model_data in all_results.items():
-            try:
-                if not model_id or model_id == 'unknown':
-                    continue
+            # Skip invalid or placeholder IDs
+            if not model_id or model_id == "unknown":
+                continue
 
-                # Ensure model_data has the required keys
-                if 'metadata' not in model_data:
-                    model_data['metadata'] = {}
+            # 1) Ensure required fields exist and initialize chunk‐related lists
+            self._prepare_model_data(model_data)
 
-                if 'table_initial_distances' not in model_data:
-                    model_data['table_initial_distances'] = {}
-
-                # Initialize description-related fields
-                model_data['chunk_descriptions'] = []
-                model_data['chunk_description_distances'] = []
-
-                try:
-                    # Search for the most relevant chunks using the query
-                    # Note: search_limit could be higher than 5 if passed in
-                    model_chunks_search = await self.chroma_manager.search(
-                        collection_name="model_descriptions",
-                        query=query,  # Use the same query to find the most relevant chunks
-                        where={"model_id": {"$eq": model_id}},  # Only search chunks for this specific model
-                        limit=search_limit,
-                        include=["metadatas", "distances"]  # Include distances
-                    )
-
-                    # Process chunk results to collect descriptions and distances
-                    chunk_results = []
-                    all_chunk_descriptions = []
-
-                    if model_chunks_search and isinstance(model_chunks_search,
-                                                          dict) and 'results' in model_chunks_search:
-                        for chunk_result in model_chunks_search.get('results', []):
-                            if not isinstance(chunk_result, dict):
-                                continue
-
-                            # Get distance
-                            distance = chunk_result.get('distance')
-                            # Log the distance value
-                            self.logger.debug(f"Distance for description chunk of model {model_id}: {distance}")
-
-                            # Get description
-                            description = None
-                            offset = 999999
-                            if 'metadata' in chunk_result and isinstance(chunk_result['metadata'], dict):
-                                description = chunk_result['metadata'].get('description')
-                                offset = chunk_result['metadata'].get('offset', 999999)
-
-                            # Store all valid descriptions regardless of distance
-                            if description and isinstance(description, str):
-                                all_chunk_descriptions.append({"description": description, "offset": offset})
-
-                                # For distance calculation, only add entries with valid distances
-                                if distance is not None:
-                                    chunk_results.append({
-                                        'distance': distance,
-                                        'description': description
-                                    })
-                                else:
-                                    # If no distance is provided, use a moderate default (2.0)
-                                    chunk_results.append({
-                                        'distance': 2.0,
-                                        'description': description
-                                    })
-
-                        # Sort by distance (ascending) and take only top chunks for distance calculation
-                        chunk_results.sort(key=lambda x: x['distance'])
-                        top_chunks = chunk_results[
-                                     :top_chunks_for_distance]  # Take only the top most similar chunks for distance
-
-                        # Extract distances from top 5 chunks only
-                        chunk_distances = [chunk['distance'] for chunk in top_chunks]
-
-                        chunk_descriptions, merged_description = self._sort_and_merge_descriptions_by_offset(
-                            all_chunk_descriptions
-                        )
-
-                        model_data['chunk_descriptions'] = chunk_descriptions
-                        model_data['chunk_description_distances'] = chunk_distances
-                        model_data['merged_description'] = merged_description
-                        model_data['metadata']['description'] = merged_description
-
-                        if chunk_descriptions:
-                            avg_distance = sum(chunk_distances) / len(chunk_distances)
-                            model_data['table_initial_distances']['model_descriptions'] = avg_distance
-                        else:
-                            model_data['table_initial_distances']['model_descriptions'] = 2.0
-
-                        if 'model_descriptions' not in model_data.get('tables', []):
-                            model_data.setdefault('tables', []).append('model_descriptions')
-
-                except Exception as e:
-                    self.logger.error(f"Error in chunk description search for model {model_id}: {e}")
-                    # Set a moderate default distance if error occurs
-                    model_data['table_initial_distances']['model_descriptions'] = 2.0
-            except Exception as e:
-                self.logger.error(f"Error in model description handling for model: {e}")
+            # 2) Perform the chunk search and merge into model_data
+            await self._search_and_process_chunks(
+                model_id=model_id,
+                model_data=model_data,
+                query=query,
+                search_limit=search_limit,
+                top_chunks_for_distance=top_chunks_for_distance
+            )
 
         return all_results
+
+    def _prepare_model_data(self, model_data: Dict[str, Any]) -> None:
+        """
+        Make sure 'metadata' and 'table_initial_distances' keys exist, and
+        initialize chunk‐specific fields.
+        """
+        model_data.setdefault("metadata", {})
+        model_data.setdefault("table_initial_distances", {})
+
+        model_data["chunk_descriptions"] = []
+        model_data["chunk_description_distances"] = []
+
+    async def _search_and_process_chunks(
+            self,
+            model_id: str,
+            model_data: Dict[str, Any],
+            query: str,
+            search_limit: int,
+            top_chunks_for_distance: int
+    ) -> None:
+        """
+        1) Call chroma_manager.search to retrieve up to 'search_limit' chunks
+           for the given model_id.
+        2) Extract distances and descriptions, sort by distance, pick top N.
+        3) Merge resulting descriptions and distances into model_data.
+        """
+        try:
+            model_chunks_search = await self.chroma_manager.search(
+                collection_name="model_descriptions",
+                query=query,
+                where={"model_id": {"$eq": model_id}},
+                limit=search_limit,
+                include=["metadatas", "distances"]
+            )
+        except Exception as e:
+            self.logger.error(f"Error in chunk description search for model {model_id}: {e}")
+            # On error, set a moderate default distance and bail out
+            model_data["table_initial_distances"]["model_descriptions"] = 2.0
+            return
+
+        # Extract raw chunk info (distance + description + offset)
+        chunk_results, all_chunk_descriptions = self._extract_chunk_info(model_chunks_search, model_id)
+
+        # Sort by distance and pick only the top chunks_for_distance
+        chunk_results.sort(key=lambda x: x["distance"])
+        top_chunks = chunk_results[:top_chunks_for_distance]
+        chunk_distances = [chunk["distance"] for chunk in top_chunks]
+
+        # Merge all descriptions by their offsets, then pick the merged string
+        chunk_descriptions, merged_description = self._sort_and_merge_descriptions_by_offset(
+            all_chunk_descriptions
+        )
+
+        # Write back into model_data
+        model_data["chunk_descriptions"] = chunk_descriptions
+        model_data["chunk_description_distances"] = chunk_distances
+        model_data["merged_description"] = merged_description
+        model_data["metadata"]["description"] = merged_description
+
+        # Compute average distance (or default) for 'model_descriptions'
+        if chunk_distances:
+            avg_distance = sum(chunk_distances) / len(chunk_distances)
+        else:
+            avg_distance = 2.0
+
+        model_data["table_initial_distances"]["model_descriptions"] = avg_distance
+
+        # Ensure 'model_descriptions' is listed in the tables
+        if "model_descriptions" not in model_data.get("tables", []):
+            model_data.setdefault("tables", []).append("model_descriptions")
+
+    def _extract_chunk_info(
+            self,
+            search_result: Dict[str, Any],
+            model_id: str
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Walk through search_result['results'], and for each valid chunk dict:
+          - Pull out its distance (or default to 2.0 if missing)
+          - Pull out description & offset
+          - Return two lists:
+             1) chunk_results: [{'distance': float, 'description': str}, ...]
+             2) all_chunk_descriptions: [{'description': str, 'offset': int}, ...]
+        """
+        chunk_results = []
+        all_chunk_descriptions = []
+
+        if not (isinstance(search_result, dict) and "results" in search_result):
+            return chunk_results, all_chunk_descriptions
+
+        for chunk_item in search_result.get("results", []):
+            if not isinstance(chunk_item, dict):
+                continue
+
+            # 1) Extract distance (or default)
+            raw_distance = chunk_item.get("distance")
+            distance = raw_distance if raw_distance is not None else 2.0
+            self.logger.debug(f"Distance for description chunk of model {model_id}: {distance}")
+
+            # 2) Extract description & offset
+            desc = None
+            offset = 999999
+            metadata = chunk_item.get("metadata")
+            if isinstance(metadata, dict):
+                desc = metadata.get("description")
+                offset = metadata.get("offset", 999_999)
+
+            if isinstance(desc, str) and desc:
+                all_chunk_descriptions.append({"description": desc, "offset": offset})
+                chunk_results.append({"distance": distance, "description": desc})
+
+        return chunk_results, all_chunk_descriptions
 
     @staticmethod
     def _sort_and_merge_descriptions_by_offset(chunks: list[dict]) -> tuple[list[str], str]:
@@ -988,94 +1332,118 @@ class BaseSearchHandler:
         merged = " ".join(sorted_descriptions)
         return sorted_descriptions, merged
 
-    def _calculate_model_distances(self, all_results: Dict[str, Any], table_weights: Dict[str, float],
-                                   collection_stats: Dict[str, Dict[str, float]]) -> Dict[str, Any]:
-        """Calculate weighted distance sum for all models using normalized distances."""
-        self.logger.info(f"Calculating model distances using collection stats")
+    def _calculate_model_distances(
+            self,
+            all_results: Dict[str, Any],
+            table_weights: Dict[str, float],
+            collection_stats: Dict[str, Dict[str, float]]
+    ) -> Dict[str, Any]:
+        """
+        Calculate a weighted distance sum for all models using normalized distances.
+        """
+        self.logger.info("Calculating model distances using collection stats")
 
         for model_id, model_data in all_results.items():
-            # Skip special keys
-            if not isinstance(model_data, dict) or 'model_id' not in model_data:
+            # Skip invalid entries
+            if not isinstance(model_data, dict) or "model_id" not in model_data:
                 continue
 
-            # Calculate weighted distance from metadata tables
-            weighted_sum = 0.0
+            # 1) Compute normalized distances for metadata tables
+            table_normals, weighted_sum = self._calculate_metadata_components(
+                model_data, table_weights, collection_stats
+            )
+            model_data["table_normalized_distances"] = table_normals
 
-            # Initialize normalized distances dictionary
-            model_data['table_normalized_distances'] = {}
-
-            for table_name, table_weight in table_weights.items():
-                if table_name in model_data.get('table_initial_distances', {}):
-                    # Get the raw distance
-                    raw_distance = model_data['table_initial_distances'][table_name]
-
-                    # Get stats for this table from collection stats
-                    table_stats = collection_stats.get(table_name, {
-                        'min': 0.0,
-                        'max': 2.0,
-                        'percentile_10': 0.5,
-                        'percentile_90': 1.5
-                    })
-
-                    # Normalize the distance using the robust method
-                    normalized_distance = self.distance_normalizer.normalize_distance(raw_distance, table_stats)
-                else:
-                    # Missing table data should be treated as worst possible match
-                    normalized_distance = 1.0
-
-                # Store the normalized distance
-                model_data['table_normalized_distances'][table_name] = normalized_distance
-
-                # Add to weighted sum
-                weighted_sum += normalized_distance * table_weight
-
-                self.logger.debug(
-                    f"Model {model_id}, table {table_name}: "
-                    f"normalized={normalized_distance}, weight={table_weight}"
-                )
-
-            # Since table_weights sum to 1.0, weighted_sum is already the weighted average
             metadata_distance = weighted_sum
 
-            # Normalize chunk distance if it exists
-            if 'chunk_initial_distance' in model_data:
-                chunk_stats = collection_stats.get('model_scripts_chunks', {
-                    'min': 0.0,
-                    'max': 2.0,
-                    'percentile_10': 0.5,
-                    'percentile_90': 1.5
-                })
+            # 2) Compute final distance (including chunks if present)
+            final_distance, has_chunks, _ = self._calculate_chunk_and_final_distance(
+                model_data, metadata_distance, collection_stats
+            )
+            model_data["distance"] = final_distance
+            model_data["metadata_distance"] = metadata_distance
 
-                raw_chunk_distance = model_data['chunk_initial_distance']
-                normalized_chunk_distance = self.distance_normalizer.normalize_distance(raw_chunk_distance,
-                                                                                        chunk_stats)
-
-                model_data['chunk_normalized_distance'] = normalized_chunk_distance
-
-                # Parameters: 0.9, 0.1
-                # Rationale: We significantly favor metadata matches (90%) over chunk matches (10%)
-                if model_data['match_source'] == 'metadata+chunks':
-                    final_distance = 0.9 * metadata_distance + 0.1 * normalized_chunk_distance
-                else:  # 'chunks' only
-                    final_distance = normalized_chunk_distance
-            else:
-                final_distance = metadata_distance
-
-            # Store the final calculated distance
-            model_data['distance'] = final_distance
-
-            # Also store the metadata_distance for comparison
-            model_data['metadata_distance'] = metadata_distance
-
-            # Add raw distance stats for debugging
-            model_data['distance_stats'] = {
-                'weighted_sum': weighted_sum,
-                'weight_sum': 1.0,  # Now always 1.0 since we use full weights
-                'metadata_tables_count': len(model_data.get('table_normalized_distances', {})),
-                'has_chunks': 'chunk_initial_distance' in model_data
+            # 3) Build distance_stats for debugging
+            model_data["distance_stats"] = {
+                "weighted_sum": weighted_sum,
+                "weight_sum": 1.0,  # Total weight is always 1.0
+                "metadata_tables_count": len(table_normals),
+                "has_chunks": has_chunks
             }
 
         return all_results
+
+    def _calculate_metadata_components(
+            self,
+            model_data: Dict[str, Any],
+            table_weights: Dict[str, float],
+            collection_stats: Dict[str, Dict[str, float]]
+    ) -> Tuple[Dict[str, float], float]:
+        """
+        For each table in table_weights:
+          - If 'table_initial_distances' contains that table, normalize using collection_stats.
+          - Otherwise treat as the worst possible match (1.0).
+        Returns:
+          (table_normalized_distances, weighted_sum_of_distances)
+        """
+        weighted_sum = 0.0
+        table_normals: Dict[str, float] = {}
+
+        for table_name, table_weight in table_weights.items():
+            if table_name in model_data.get("table_initial_distances", {}):
+                raw_dist = model_data["table_initial_distances"][table_name]
+                default_stats = {
+                    "min": 0.0,
+                    "max": 2.0,
+                    "percentile_10": 0.5,
+                    "percentile_90": 1.5
+                }
+                stats = collection_stats.get(table_name, default_stats)
+                normalized = self.distance_normalizer.normalize_distance(raw_dist, stats)
+            else:
+                normalized = 1.0
+
+            table_normals[table_name] = normalized
+            weighted_sum += normalized * table_weight
+
+            self.logger.debug(
+                f"Model {model_data.get('model_id')}, table {table_name}: "
+                f"normalized={normalized}, weight={table_weight}"
+            )
+
+        return table_normals, weighted_sum
+
+    def _calculate_chunk_and_final_distance(
+            self,
+            model_data: Dict[str, Any],
+            metadata_distance: float,
+            collection_stats: Dict[str, Dict[str, float]]
+    ) -> Tuple[float, bool, Optional[float]]:
+        """
+        If 'chunk_initial_distance' exists, normalize it and combine with metadata_distance.
+        Returns:
+          (final_distance, has_chunks, normalized_chunk_distance_or_None)
+        """
+        if "chunk_initial_distance" in model_data:
+            default_chunk_stats = {
+                "min": 0.0,
+                "max": 2.0,
+                "percentile_10": 0.5,
+                "percentile_90": 1.5
+            }
+            chunk_stats = collection_stats.get("model_scripts_chunks", default_chunk_stats)
+            raw_chunk = model_data["chunk_initial_distance"]
+            normalized_chunk = self.distance_normalizer.normalize_distance(raw_chunk, chunk_stats)
+            model_data["chunk_normalized_distance"] = normalized_chunk
+
+            if model_data.get("match_source") == "metadata+chunks":
+                final = 0.9 * metadata_distance + 0.1 * normalized_chunk
+            else:
+                final = normalized_chunk
+
+            return final, True, normalized_chunk
+
+        return metadata_distance, False, None
 
     @staticmethod
     def _sort_and_limit_search_results(all_results: Dict[str, Any], requested_limit: int) -> List[
