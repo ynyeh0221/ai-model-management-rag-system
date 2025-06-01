@@ -59,7 +59,7 @@ SEARCH WORKFLOW:
                     │    Distances & Rank         │
                     └─────────────────────────────┘
 
-KEY COMPONENTS AND LOGIC:
+KEY PARTS AND LOGIC:
 
 1. STATISTICS COLLECTION (_get_collection_distance_stats_for_query):
    - Samples up to 10,000 records per collection using the actual user query
@@ -686,14 +686,13 @@ class BaseSearchHandler:
         """
         positive_search_tasks = []
         for table_name in tables_to_search:
-            # Set base search limit
-            search_limit = (
-                requested_limit * 40
-                if table_name == "model_descriptions"
-                else requested_limit * 3
-                if table_name == "model_date"
-                else requested_limit
-            )
+            # Set base search limit using an explicit if/elif/else instead of a nested ternary
+            if table_name == "model_descriptions":
+                search_limit = requested_limit * 40
+            elif table_name == "model_date":
+                search_limit = requested_limit * 3
+            else:
+                search_limit = requested_limit
 
             # Determine which query to use for this table
             if has_positive_entities and table_name in positive_table_queries:
@@ -701,20 +700,25 @@ class BaseSearchHandler:
                 table_query = positive_table_queries[table_name]
                 # Increase the limit by 5x for NER queries
                 search_limit = search_limit * 3
-                self.logger.info(f"Searching table {table_name} with NER query: {table_query} (limit: {search_limit})")
+                self.logger.info(
+                    f"Searching table {table_name} with NER query: {table_query} (limit: {search_limit})"
+                )
             else:
                 # Use the original query if no positive entity for this table
                 table_query = query
                 self.logger.info(
-                    f"Searching table {table_name} with original query: {table_query} (limit: {search_limit})")
+                    f"Searching table {table_name} with original query: {table_query} (limit: {search_limit})"
+                )
 
-            positive_search_tasks.append(self.chroma_manager.search(
-                collection_name=table_name,
-                query=table_query,
-                where=chroma_filters,
-                limit=search_limit,
-                include=["metadatas", "documents", "distances"]
-            ))
+            positive_search_tasks.append(
+                self.chroma_manager.search(
+                    collection_name=table_name,
+                    query=table_query,
+                    where=chroma_filters,
+                    limit=search_limit,
+                    include=["metadatas", "documents", "distances"]
+                )
+            )
 
         # Execute all positive searches in parallel
         return await asyncio.gather(*positive_search_tasks)
@@ -1208,6 +1212,9 @@ class BaseSearchHandler:
         """
         Fetch complete metadata for ALL found models with distances.
         """
+
+        self.logger.info(f"Fetching metadata for {query}. User id is {user_id}")
+
         # 1) Collect all model IDs except 'unknown'
         all_model_ids = [mid for mid in all_results.keys() if mid != "unknown"]
 
