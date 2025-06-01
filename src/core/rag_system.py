@@ -605,7 +605,12 @@ class RAGSystem:
 
         return result
 
-    async def _process_regular_query(self, query_text: str, generate_llm_response: bool = True, max_output_counts: int = 3) -> Dict[str, Any]:
+    async def _process_regular_query(
+            self,
+            query_text: str,
+            generate_llm_response: bool = True,
+            max_output_counts: int = 3
+    ) -> Dict[str, Any]:
         """
         Process a regular (non-comparison) query.
 
@@ -616,23 +621,20 @@ class RAGSystem:
         Returns:
             Dict: The query result
         """
-        # Extract required components
-        query_parser = self.components["query_engine"]["query_parser"]
-        search_dispatcher = self.components["query_engine"]["search_dispatcher"]
-        query_analytics = self.components["query_engine"]["query_analytics"]
-        reranker = self.components["query_engine"]["reranker"]
+        # Extract components
+        components = self.components["query_engine"]
+        query_parser = components["query_parser"]
+        search_dispatcher = components["search_dispatcher"]
+        query_analytics = components["query_analytics"]
+        reranker = components["reranker"]
         llm_interface = self.components["response_generator"]["llm_interface"]
 
-        # Parse query
+        # Parse and log
         parsed_query = query_parser.parse_query(query_text)
         self._log(f"Parse result: {parsed_query}")
-
-        # Log query
         query_analytics.log_query(self.user_id, query_text, parsed_query)
 
         self._update_status("searching")
-
-        # Dispatch query
         search_results = await search_dispatcher.dispatch(
             query=parsed_query.get("processed_query", query_text),
             intent=parsed_query["intent"],
@@ -640,94 +642,153 @@ class RAGSystem:
             user_id=self.user_id
         )
 
-        # Process search results
-        self._update_status("processing_results")
-
+        # If this is an image search, short-circuit immediately
         if parsed_query["intent"] == "image_search":
-            # Image search processing
+            self._update_status("completed")
             result = {
                 "type": "image_search",
                 "results": search_results,
                 "query": query_text,
                 "parsed_query": parsed_query
             }
-        else:
-            # Regular search processing
-            all_reranked = self._process_search_results(
-                search_results, reranker, parsed_query, query_text, rerank_threshold=0
-            )
+            self._handle_result(result)
+            return result
 
-            pages_info = []
-            page_id = 0
-            def process_paged_results(all_reranked, page_id: int, page_size: int, max_pages_to_fetch: int):
+        # Otherwise, do a regular (text) search
+        self._update_status("processing_results")
+        all_reranked = self._process_search_results(
+            search_results, reranker, parsed_query, query_text, rerank_threshold=0
+        )
 
-                print(f"Processing page {page_id}")
+        # Determine how many pages to fetch
+        page_size = 3
+        max_pages = 3 if generate_llm_response else max_output_counts
 
-                pages_info.append({})
+        # Delegate all paging + summary logic to a helper
+        pages_info = await self._generate_paged_summaries(
+            all_reranked,
+            llm_interface,
+            query_text,
+            page_size,
+            max_pages
+        )
 
-                current_page = all_reranked[page_id * page_size:(page_id + 1) * page_size]
+        # Build the final flattened result
+        flat_results = []
+        for page in pages_info:
+            flat_results.extend(page["search_results"])
 
-                # Build result text for current page
-                results_text = self._build_results_text(current_page, page_id != len(all_reranked) - 1)
-                print(f"results_text: {results_text}")
+        final_page_summary = pages_info[-1].get("page_summary", "")
 
-                # Initialize result structure
-                pages_info[-1] = {
-                    "search_results": current_page,
-                    "has_next_page": page_id == len(all_reranked) - 1,
-                }
-
-                # Generate LLM response if requested
-                if generate_llm_response:
-                    # TODO Refactor this prompt to make it output response in desired format when INSUFFICIENT INFORMATION (MORE RESULTS NEEDED) #NOSONAR
-                    system_prompt = QueryPathPromptManager.get_system_prompt_for_regular_response()
-
-                    # Build user prompt
-                    user_prompt = f"\nUser query:\n{query_text}\n"
-                    user_prompt += f"Search results:\n{results_text}"
-                    if "page_summary" in pages_info[-1]:
-                        summaries = '\n\n'.join([page_info["page_summary"] for page_info in pages_info])
-                        user_prompt += f"\nSummaries of previous pages: {summaries}"
-
-                    # Generate final response
-                    self._update_status("generating_response")
-                    final_response = llm_interface.generate_structured_response(
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        temperature=0.25,
-                        max_tokens=32000
-                    )
-
-                    # Process result
-                    if isinstance(final_response, dict) and 'content' in final_response:
-                        content = final_response['content']
-                        content = self.remove_thinking_sections(content)
-                    else:
-                        content = str(final_response)
-                        content = self.remove_thinking_sections(content)
-
-                    pages_info[-1]["page_summary"] = content
-
-                    # If llm decides beed more results, then fetch more results
-                    if "<need_more_results>" in content and max_pages_to_fetch > 0:
-                        process_paged_results(all_reranked, page_id + 1, page_size, max_pages_to_fetch - 1)
-                else:
-                    # Skip LLM response generation
-                    pages_info[-1]["page_summary"] = ""
-
-            # TODO make page_size and max_pages_to_fetch defined and passed-in from outside #NOSONAR
-            process_paged_results(all_reranked, 0, 3, 3 if generate_llm_response else max_output_counts)
-
-            result = {"type": "text_search" if generate_llm_response else "retrieval_only", "query": query_text,
-                      "parsed_query": parsed_query,
-                      "search_results": [item for page_info in pages_info for item in page_info["search_results"]],
-                      "checked_pages": page_id + 1, "final_response": pages_info[-1]["page_summary"]}
+        result_type = "text_search" if generate_llm_response else "retrieval_only"
+        result = {
+            "type": result_type,
+            "query": query_text,
+            "parsed_query": parsed_query,
+            "search_results": flat_results,
+            "checked_pages": len(pages_info),
+            "final_response": final_page_summary
+        }
 
         if generate_llm_response:
             self._update_status("completed")
             self._handle_result(result)
 
         return result
+
+    async def _generate_paged_summaries(
+            self,
+            all_reranked: List[Any],
+            llm_interface: Any,
+            query_text: str,
+            page_size: int,
+            max_pages_to_fetch: int
+    ) -> List[Dict[str, Any]]:
+        """
+        Helper to process paged results and optionally generate LLM summaries per page.
+        Returns a list of dicts, each containing:
+          - "search_results": List of items in that page
+          - "has_next_page": bool
+          - "page_summary": str (possibly empty)
+        """
+        pages_info: List[Dict[str, Any]] = []
+        total_results = len(all_reranked)
+        total_pages = (total_results + page_size - 1) // page_size
+
+        # Only process up to max_pages_to_fetch pages
+        pages_to_process = min(total_pages, max_pages_to_fetch)
+
+        for page_id in range(pages_to_process):
+            start_idx = page_id * page_size
+            end_idx = start_idx + page_size
+            current_page = all_reranked[start_idx:end_idx]
+            has_next = (page_id < total_pages - 1)
+
+            self._log(f"Processing page {page_id}")
+            results_text = self._build_results_text(current_page, has_next)
+            self._log(f"results_text: {results_text}")
+
+            page_dict: Dict[str, Any] = {
+                "search_results": current_page,
+                "has_next_page": has_next,
+                "page_summary": ""
+            }
+
+            # If we have no pages left for LLM generation, skip summary
+            if max_pages_to_fetch <= 0:
+                pages_info.append(page_dict)
+                continue
+
+            # Generate an LLM-based summary for this page
+            self._update_status("generating_response")
+            summary = self._get_page_summary(llm_interface, query_text, results_text, pages_info)
+            page_dict["page_summary"] = summary
+            pages_info.append(page_dict)
+
+            # If the LLM does NOT request more results, stop early
+            if "<need_more_results>" not in summary:
+                break
+
+        return pages_info
+
+    def _get_page_summary(
+            self,
+            llm_interface: Any,
+            query_text: str,
+            results_text: str,
+            pages_info: List[Dict[str, Any]]
+    ) -> str:
+        """
+        Builds a user prompt (including any previous summaries) and calls the LLM to get a page summary.
+        Returns the cleaned-up content string.
+        """
+        system_prompt = QueryPathPromptManager.get_system_prompt_for_regular_response()
+
+        user_prompt = f"\nUser query:\n{query_text}\nSearch results:\n{results_text}"
+
+        # Include summaries of previous pages if present
+        previous_summaries = [
+            info["page_summary"]
+            for info in pages_info
+            if info.get("page_summary")
+        ]
+        if previous_summaries:
+            combined = "\n\n".join(previous_summaries)
+            user_prompt += f"\nSummaries of previous pages: {combined}"
+
+        raw_response = llm_interface.generate_structured_response(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            temperature=0.25,
+            max_tokens=32000
+        )
+
+        if isinstance(raw_response, dict) and "content" in raw_response:
+            content = raw_response["content"]
+        else:
+            content = str(raw_response)
+
+        return self.remove_thinking_sections(content)
 
     async def _detect_comparison_query(self, query_text: str, llm_interface) -> Tuple[bool, List[str]]:
         """
@@ -927,59 +988,131 @@ class RAGSystem:
         return [{k: v for k, v in item.items() if k != field_to_remove} for item in dict_list]
 
     @staticmethod
-    def _build_results_text(reranked_results, has_next_page: bool):
-        """Build structured text of search results"""
+    def _build_results_text(reranked_results, has_next_page: bool) -> str:
+        """
+        Build structured text of search results by delegating to smaller helpers.
+        """
+        lines = []
+        for idx, item in enumerate(reranked_results, start=1):
+            # Ensure we have a dict for the model
+            model = item if isinstance(item, dict) else {"model_id": str(item), "metadata": {}}
+            md = model.get("metadata") or {}
+
+            # 1) Parse any JSON‐encoded metadata fields
+            md = RAGSystem._parse_metadata_json(md)
+
+            # 2) Extract a single description string (with all fallbacks)
+            description = RAGSystem._extract_description(model, md)
+
+            # 3) Format the block for this one model
+            block_lines = RAGSystem._format_single_model(
+                idx=idx,
+                model=model,
+                md=md,
+                description=description,
+                has_next_page=has_next_page
+            )
+            lines.extend(block_lines)
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _parse_metadata_json(md: dict) -> dict:
+        """
+        Safely parse (if needed) any JSON‐encoded strings under the
+        keys: "file", "framework", "architecture", "dataset", "training_config".
+        If parsing fails or the value is missing, replace with {}.
+        """
         import json
 
-        results_text = ""
-        for idx, model in enumerate(reranked_results, 1):
-            # Ensure model dict and safely parse nested metadata
-            if not isinstance(model, dict):
-                model = {"model_id": str(model), "metadata": {}}
+        for key in ["file", "framework", "architecture", "dataset", "training_config"]:
+            val = md.get(key)
+            if isinstance(val, str):
+                try:
+                    md[key] = json.loads(val)
+                except json.JSONDecodeError:
+                    md[key] = {}
+            else:
+                # If it wasn’t a string, ensure at least an empty dict
+                md[key] = val or {}
+        return md
 
-            # Extract description
-            description = model.get('merged_description') or model.get('description')
-            md = model.get('metadata') or {}
-            if not description:
-                description = md.get('description') or md.get('merged_description') or 'N/A'
+    @staticmethod
+    def _extract_description(model: dict, md: dict) -> str:
+        """
+        Return a single “description” value.  Fallback order:
+        1) model["merged_description"]
+        2) model["description"]
+        3) md["description"]
+        4) md["merged_description"]
+        5) "N/A"
+        """
+        desc = model.get("merged_description") or model.get("description")
+        if desc:
+            return desc
+        return md.get("description") or md.get("merged_description") or "N/A"
 
-            # Safely parse nested JSON fields in metadata
-            for key in ["file", "framework", "architecture", "dataset", "training_config"]:
-                val = md.get(key)
-                if isinstance(val, str):
-                    try:
-                        md[key] = json.loads(val)
-                    except json.JSONDecodeError:
-                        md[key] = {}
+    @staticmethod
+    def _format_training_config(training: dict) -> list:
+        """
+        Given the training_config dict, return a list of lines
+        like:
+          - Training Configuration:
+            - Batch Size: 32
+            - Learning Rate: 0.001
+            ...
+        If training is empty or none, return an empty list.
+        """
+        lines = []
+        if training:
+            lines.append("- Training Configuration:")
+            for field in ["batch_size", "learning_rate", "optimizer", "epochs", "hardware_used"]:
+                pretty = field.replace("_", " ").title()
+                lines.append(f"  - {pretty}: {training.get(field, 'missing')}")
+        return lines
 
-            # Extract fields with fallbacks
-            model_id = model.get('model_id') or model.get('id') or 'missing'
-            rerank_score = model.get('rerank_score', 'N/A')
-            file_md = md.get('file', {})
-            fw = md.get('framework', {})
-            arch = md.get('architecture', {})
-            ds = md.get('dataset', {})
-            training = md.get('training_config', {})
+    @staticmethod
+    def _format_single_model(
+            idx: int,
+            model: dict,
+            md: dict,
+            description: str,
+            has_next_page: bool
+    ) -> list:
+        """
+        Build a list of lines for exactly one “Model #idx” block.
+        Uses the already‐parsed md dict and the computed description.
+        """
+        lines = []
+        model_id = model.get("model_id") or model.get("id") or "missing"
+        rerank_score = model.get("rerank_score", "N/A")
 
-            # Compose block
-            results_text += f"Model #{idx}:\n"
-            results_text += f"- Model ID: {model_id}\n"
-            results_text += f"- Rerank Score: {rerank_score}\n"
-            results_text += f"- File Size: {file_md.get('size_bytes', 'missing')}\n"
-            results_text += f"- Created On: {file_md.get('creation_date', 'missing')}\n"
-            results_text += f"- Last Modified: {file_md.get('last_modified_date', 'missing')}\n"
-            results_text += f"- Framework: {fw.get('name', 'missing')} {fw.get('version', '')}\n"
-            results_text += f"- Architecture: {arch.get('type', 'missing')}\n\n{arch.get('reason', 'missing')}\n"
-            results_text += f"- Dataset: {ds.get('name', 'missing')}\n"
-            if training:
-                results_text += "- Training Configuration:\n"
-                for field in ['batch_size', 'learning_rate', 'optimizer', 'epochs', 'hardware_used']:
-                    results_text += f"  - {field.replace('_', ' ').title()}: {training.get(field, 'missing')}\n"
-            results_text += f"- Description: {description}\n\n"
+        file_md = md.get("file", {})
+        fw = md.get("framework", {})
+        arch = md.get("architecture", {})
+        ds = md.get("dataset", {})
+        training = md.get("training_config", {})
 
-            results_text += f"Has More Models: {has_next_page}\n"
+        lines.append(f"Model #{idx}:")
+        lines.append(f"- Model ID: {model_id}")
+        lines.append(f"- Rerank Score: {rerank_score}")
+        lines.append(f"- File Size: {file_md.get('size_bytes', 'missing')}")
+        lines.append(f"- Created On: {file_md.get('creation_date', 'missing')}")
+        lines.append(f"- Last Modified: {file_md.get('last_modified_date', 'missing')}")
+        # “rstrip()” just to avoid trailing space if a version is empty
+        lines.append(f"- Framework: {fw.get('name', 'missing')} {fw.get('version', '')}".rstrip())
+        lines.append(f"- Architecture: {arch.get('type', 'missing')}")
+        lines.append(arch.get("reason", "missing"))
+        lines.append(f"- Dataset: {ds.get('name', 'missing')}")
 
-        return results_text
+        # Insert any training lines
+        lines.extend(RAGSystem._format_training_config(training))
+
+        lines.append(f"- Description: {description}")
+        lines.append(f"Has More Models: {has_next_page}")
+        lines.append("")  # blank line after each model block
+
+        return lines
 
     # Internal helper methods
 
