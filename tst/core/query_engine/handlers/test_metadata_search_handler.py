@@ -34,7 +34,7 @@ class TestMetadataSearchHandler(unittest.IsolatedAsyncioTestCase):
         # Mock the MetadataTableManager
         self.handler.metadata_table_manager = MagicMock(spec=MetadataTableManager)
 
-        # Mock the parent class methods that we'll need to use
+        # Mock the parent class methods that we'll need to use,
         # We'll set these in individual tests as needed
         self.handler._extract_text_search_parameters = MagicMock()
         self.handler._get_collection_distance_stats_for_query = AsyncMock()
@@ -376,7 +376,7 @@ class TestMetadataSearchHandler(unittest.IsolatedAsyncioTestCase):
 
         self.handler._calculate_model_distances.return_value = calculated_results
 
-        # Mock _sort_and_limit_search_results to return expected sorted list
+        # Mock _sort_and_limit_search_results to return an expected sorted list
         sorted_results = [
             calculated_results["model2"],  # Lowest distance first
             calculated_results["model1"]  # Second-lowest distance
@@ -427,7 +427,7 @@ class TestMetadataSearchHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["items"][0]["model_id"], "model2")  # Lowest distance first
         self.assertEqual(result["items"][1]["model_id"], "model1")  # Second-lowest distance
 
-        # Model3 should not be included because limit is 2
+        # Model3 should not be included because the limit is 2
         model_ids = [item["model_id"] for item in result["items"]]
         self.assertNotIn("model3", model_ids)
 

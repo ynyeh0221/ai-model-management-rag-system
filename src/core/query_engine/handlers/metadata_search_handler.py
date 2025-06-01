@@ -21,7 +21,7 @@ class MetadataSearchHandler(BaseSearchHandler):
         Handle a metadata-specific search query across multiple metadata tables.
         1. Query all metadata tables to find model_ids
         2. Fetch complete metadata for ALL found model_ids
-        3. Calculate weighted distance sum using complete metadata
+        3. Calculate a weighted distance sum using complete metadata
         4. Sort ALL results by distance
         5. Limit to requested number of results
         """
@@ -56,7 +56,7 @@ class MetadataSearchHandler(BaseSearchHandler):
             # Special handling for model descriptions using chunks - process one model at a time
             all_results = await self._process_model_descriptions_text_search(query, all_results)
 
-            # STEP 3: Calculate weighted distance sum for all models using all gathered metadata
+            # STEP 3: Calculate a weighted distance sum for all models using all gathered metadata
             all_results = self._calculate_model_distances(all_results, table_weights, collection_stats)
 
             # STEP 4 & 5: Convert to list, sort by distance, and limit results
