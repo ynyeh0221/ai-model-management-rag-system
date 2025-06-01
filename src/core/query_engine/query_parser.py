@@ -157,7 +157,7 @@ Flow Summary:
 import json
 import logging
 import re
-from typing import Dict, List, Any, Optional, Union
+from typing import Dict, List, Any, Optional, Union, Set
 
 import nltk
 import spacy
@@ -196,13 +196,13 @@ class QueryParser:
     Example:
         >>> parser = QueryParser(nlp_model="en_core_web_sm", use_langchain=True)
         >>> result = parser.parse_query("Find models with architecture transformer limit 5")
-        >>> print(result["intent"])  # 'retrieval'
-        >>> print(result["parameters"]["limit"])  # 5
+        >>> print(result["intent"]) # 'retrieval'
+        >>> print(result["parameters"]["limit"]) # 5
     """
 
     def __init__(self, nlp_model: str = "en_core_web_sm", llm_model_name: str = "deepseek-r1:7b"):
         """
-        Initialize the QueryParser with necessary NLP components.
+        Initialize the QueryParser with necessary NLP parts.
 
         Args:
             nlp_model: The spaCy model to use for NLP tasks
@@ -413,13 +413,42 @@ class QueryParser:
         if intent is None:
             intent, _ = self.classify_intent(query_text)
 
-        parameters = {}
+        parameters: Dict[str, Any] = {}
         query_lower = query_text.lower()
 
-        # Initialize or retrieve existing filters
-        filters = parameters.get("filters", {})
+        # 1) Build filters (month, year, model_id)
+        filters = self._build_date_and_model_filters(query_text, query_lower)
+        if filters:
+            parameters["filters"] = filters
 
-        # Defensive enhancement: always try to detect month/year references
+        # 2) Extract generic limit and sort_by
+        limit_val = self._extract_limit(query_lower, parameters)
+        if limit_val is not None:
+            parameters["limit"] = limit_val
+
+        sort_val = self._extract_sort_by(query_lower)
+        if sort_val:
+            parameters["sort_by"] = sort_val
+
+        # 3) Always extract NER filters via LLM
+        parameters["ner_filters"] = self._extract_entities_with_llm(query_text)
+        print(f"ner_filters: {parameters['ner_filters']}")
+
+        # 4) Intent-specific image parameters
+        if intent == QueryIntent.IMAGE_SEARCH:
+            valid_model_ids = self._extract_model_id_mentions(query_text)
+            image_params = self._extract_image_parameters(query_text, valid_model_ids)
+            parameters.update(image_params)
+
+        return parameters
+
+    def _build_date_and_model_filters(self, query_text: str, query_lower: str) -> Dict[str, Any]:
+        """
+        Construct a 'filters' dict for created_month, created_year, and model_id if present.
+        """
+        filters: Dict[str, Any] = {}
+
+        # Month detection
         months = [
             "january", "february", "march", "april", "may", "june",
             "july", "august", "september", "october", "november", "december"
@@ -429,43 +458,38 @@ class QueryParser:
                 filters["created_month"] = month.capitalize()
                 break
 
-        # Extract year using context-aware patterns
+        # Year detection using precompiled patterns
         for pattern in self.created_year_patterns:
-            year_match = re.search(pattern, query_lower)
-            if year_match:
-                filters["created_year"] = year_match.group(1)
+            match = re.search(pattern, query_lower)
+            if match:
+                filters["created_year"] = match.group(1)
                 break
 
+        # Model ID mention detection
         valid_model_ids = self._extract_model_id_mentions(query_text)
         if valid_model_ids:
             filters["model_id"] = valid_model_ids[0] if len(valid_model_ids) == 1 else valid_model_ids
 
-        if filters:
-            parameters["filters"] = filters
+        return filters
 
-        # Result limit
-        limit_match = re.search(self.limit_pattern, query_lower)
-        if limit_match:
-            parameters["limit"] = int(limit_match.group(2))
+    def _extract_limit(self, query_lower: str, params: Dict[str, Any]) -> Optional[int]:
+        """
+        Return an integer limit if the query contains a 'limit/ top/ first N' pattern.
+        """
+        match = re.search(self.limit_pattern, query_lower)
+        return int(match.group(2)) if match else None
 
-        # Sort
-        sort_match = re.search(self.sort_pattern, query_lower)
-        if sort_match:
-            parameters["sort_by"] = {
-                "field": sort_match.group(3),
-                "order": sort_match.group(4) if sort_match.group(4) else "descending"
-            }
-
-        # Extract architecture, dataset, and training configuration using LLM
-        # Store these in a separate ner_filters parameter
-        parameters["ner_filters"] = self._extract_entities_with_llm(query_text)
-        print(f"ner_filters: {parameters['ner_filters']}")
-
-        # Intent-specific
-        if intent == QueryIntent.IMAGE_SEARCH:
-            parameters.update(self._extract_image_parameters(query_text, valid_model_ids))
-
-        return parameters
+    def _extract_sort_by(self, query_lower: str) -> Optional[Dict[str, str]]:
+        """
+        Return a {'field': ..., 'order': ...} dict if the query contains a sort pattern.
+        """
+        match = re.search(self.sort_pattern, query_lower)
+        if not match:
+            return None
+        return {
+            "field": match.group(3),
+            "order": match.group(4) or "descending"
+        }
 
     def _extract_entities_with_llm(self, query_text: str, max_retries: int = 5) -> Dict[str, Any]:
         """
@@ -564,53 +588,52 @@ class QueryParser:
         """
         Convert string numeric values to actual numeric types in the entities dictionary
         with the new nested structure that includes is_positive flags.
-
-        Args:
-            entities: Dictionary of entities extracted by the LLM
         """
-        # Convert training config numeric values
-        if "training_config" in entities:
-            config = entities["training_config"]
+        if "training_config" not in entities:
+            return
 
-            # Convert batch size to integer
-            if "batch_size" in config and config["batch_size"]["value"] != "N/A":
-                try:
-                    # Handle potential formatted strings like "32" or "32 samples"
-                    batch_size_str = str(config["batch_size"]["value"])
-                    # Extract the numeric part
-                    numeric_part = re.search(r'\d+', batch_size_str)
-                    if numeric_part:
-                        config["batch_size"]["value"] = int(numeric_part.group(0))
-                except (ValueError, TypeError):
-                    pass
+        config = entities["training_config"]
+        QueryParser._convert_int_field(config, "batch_size")
+        QueryParser._convert_float_field(config, "learning_rate")
+        QueryParser._convert_int_field(config, "epochs")
 
-            # Convert learning rate to float
-            if "learning_rate" in config and config["learning_rate"]["value"] != "N/A":
-                try:
-                    # Handle potential formatted strings like "0.001" or "1e-3"
-                    lr_str = str(config["learning_rate"]["value"])
-                    # Check for scientific notation
-                    if 'e' in lr_str.lower():
-                        config["learning_rate"]["value"] = float(lr_str)
-                    else:
-                        # Extract the numeric part
-                        numeric_part = re.search(r'([0-9]*[.])?[0-9]+', lr_str)
-                        if numeric_part:
-                            config["learning_rate"]["value"] = float(numeric_part.group(0))
-                except (ValueError, TypeError):
-                    pass
+    @staticmethod
+    def _convert_int_field(config: Dict[str, Any], field_name: str) -> None:
+        """
+        If field_name exists in config and its value is not "N/A",
+        extract the first integer substring and replace the value.
+        """
+        if field_name not in config or config[field_name].get("value") == "N/A":
+            return
 
-            # Convert epochs to integer
-            if "epochs" in config and config["epochs"]["value"] != "N/A":
-                try:
-                    # Handle potential formatted strings like "100" or "100 epochs"
-                    epochs_str = str(config["epochs"]["value"])
-                    # Extract the numeric part
-                    numeric_part = re.search(r'\d+', epochs_str)
-                    if numeric_part:
-                        config["epochs"]["value"] = int(numeric_part.group(0))
-                except (ValueError, TypeError):
-                    pass
+        value = config[field_name].get("value")
+        try:
+            numeric_part = re.search(r"\d+", str(value))
+            if numeric_part:
+                config[field_name]["value"] = int(numeric_part.group(0))
+        except (ValueError, TypeError):
+            pass
+
+    @staticmethod
+    def _convert_float_field(config: Dict[str, Any], field_name: str) -> None:
+        """
+        If field_name exists in config and its value is not "N/A",
+        extract a float (including scientific notation) and replace the value.
+        """
+        if field_name not in config or config[field_name].get("value") == "N/A":
+            return
+
+        value = config[field_name].get("value")
+        try:
+            text = str(value)
+            if "e" in text.lower():
+                config[field_name]["value"] = float(text)
+            else:
+                numeric_part = re.search(r"(\d*\.)?\d+", text)
+                if numeric_part:
+                    config[field_name]["value"] = float(numeric_part.group(0))
+        except (ValueError, TypeError):
+            pass
 
     def _extract_model_id_mentions(self, query_text: str) -> List[str]:
         """
@@ -653,208 +676,292 @@ class QueryParser:
 
     def _extract_image_parameters(self, query_text: str, valid_model_ids: list) -> Dict[str, Any]:
         """
-        Extract image search specific parameters.
+        Extract image search-specific parameters.
 
         Args:
             query_text: The query text to extract from
+            valid_model_ids: List of valid model IDs (for fallback)
 
         Returns:
             Dictionary of image search parameters
         """
-        params = {}
-        query_lower = query_text.lower()
+        params: Dict[str, Any] = {}
+        ql = query_text.lower()
 
-        # Determine search type based on query patterns
-        if re.search(r"highest\s+epoch|latest\s+epoch", query_lower):
+        # 1) Determine search_type via small matchers and extractors
+        if self._matches_highest_epoch(ql):
             params["search_type"] = "highest_epoch"
-        elif re.search(r"epoch\s*[=:]\s*\d+", query_lower) or re.search(r"from\s+epoch\s+\d+", query_lower):
-            params["search_type"] = "epoch"
-            # Extract epoch number
-            epoch_match = re.search(r"epoch\s*[=:]\s*(\d+)", query_lower) or re.search(r"from\s+epoch\s+(\d+)",
-                                                                                       query_lower)
-            if epoch_match:
-                params["epoch"] = int(epoch_match.group(1))
-        elif re.search(r"tag[s]?\s*[=:]\s*|with\s+tags?\s+", query_lower):
-            params["search_type"] = "tag"
-            # Extract tags
-            tags_pattern = r"tag[s]?\s*[=:]\s*\"?([^\"]+)\"?|with\s+tags?\s+\"?([^\"]+)\"?"
-            tags_match = re.search(tags_pattern, query_lower)
-            if tags_match:
-                # Get whichever group matched
-                tags_str = tags_match.group(1) if tags_match.group(1) else tags_match.group(2)
-                # Split by commas or 'and'
-                tags = re.split(r',|\sand\s', tags_str)
-                params["tags"] = [tag.strip() for tag in tags if tag.strip()]
-                params["require_all"] = "all" in query_lower and "tags" in query_lower
-        elif re.search(r"color[s]?\s*[=:]\s*|with\s+color[s]?\s+", query_lower):
-            params["search_type"] = "color"
-            # Extract colors
-            colors_pattern = r"color[s]?\s*[=:]\s*\"?([^\"]+)\"?|with\s+color[s]?\s+\"?([^\"]+)\"?"
-            colors_match = re.search(colors_pattern, query_lower)
-            if colors_match:
-                # Get whichever group matched
-                colors_str = colors_match.group(1) if colors_match.group(1) else colors_match.group(2)
-                # Split by commas or 'and'
-                colors = re.split(r',|\sand\s', colors_str)
-                params["colors"] = [color.strip() for color in colors if color.strip()]
-        elif re.search(r"date\s*[=:]\s*|created\s+(on|in)\s+", query_lower):
-            params["search_type"] = "date"
-            # Extract date components
-            date_filter = {}
-
-            # Look for year
-            year_match = re.search(r"(20\d{2})", query_lower)
-            if year_match:
-                date_filter["created_year"] = year_match.group(1)
-
-            # Look for month
-            months = ["january", "february", "march", "april", "may", "june",
-                      "july", "august", "september", "october", "november", "december"]
-            for i, month in enumerate(months, 1):
-                if month in query_lower:
-                    date_filter["created_month"] = str(i).zfill(2)  # "01" for January, etc.
-                    break
-
-            params["date_filter"] = date_filter
-        elif re.search(r"content\s*[=:]\s*|subject\s*[=:]\s*|scene\s*[=:]\s*", query_lower):
-            params["search_type"] = "content"
-            # Extract content filter components
-            content_filter = {}
-
-            # Subject type
-            subject_match = re.search(r"subject\s*[=:]\s*\"?([^\"]+)\"?", query_lower)
-            if subject_match:
-                content_filter["subject_type"] = subject_match.group(1).strip()
-
-            # Scene type
-            scene_match = re.search(r"scene\s*[=:]\s*\"?([^\"]+)\"?", query_lower)
-            if scene_match:
-                content_filter["scene_type"] = scene_match.group(1).strip()
-
-            params["content_filter"] = content_filter
-        elif valid_model_ids is not None and len(valid_model_ids) > 0:
+        elif self._matches_epoch(ql):
+            self._extract_epoch_info(ql, params)
+        elif self._matches_tag(ql):
+            self._extract_tag_info(ql, params)
+        elif self._matches_color(ql):
+            self._extract_color_info(ql, params)
+        elif self._matches_date(ql):
+            self._extract_date_info(ql, params)
+        elif self._matches_content(ql):
+            self._extract_content_info(ql, params)
+        elif valid_model_ids:
             params["search_type"] = "model_id"
         else:
-            # Default to similarity search
             params["search_type"] = "similarity"
 
-        # Extract prompt terms (for similarity search)
+        # 2) Extract optional prompt, style, resolution, and limit
+        self._extract_prompt_terms(ql, params)
+        self._extract_style_tags(ql, params)
+        self._extract_resolution(ql, params)
+        self._extract_limit(ql, params)
+
+        return params
+
+    @staticmethod
+    def _matches_highest_epoch(ql: str) -> bool:
+        return bool(re.search(r"highest\s+epoch|latest\s+epoch", ql))
+
+    @staticmethod
+    def _matches_epoch(ql: str) -> bool:
+        return bool(re.search(r"epoch\s*[=:]\s*\d+", ql) or re.search(r"from\s+epoch\s+\d+", ql))
+
+    def _extract_epoch_info(self, ql: str, params: Dict[str, Any]) -> None:
+        """
+        Populate params["search_type"] = "epoch" and extract integer epoch into params["epoch"].
+        """
+        params["search_type"] = "epoch"
+        epoch_match = re.search(r"epoch\s*[=:]\s*(\d+)", ql) or re.search(r"from\s+epoch\s+(\d+)", ql)
+        if epoch_match:
+            params["epoch"] = int(epoch_match.group(1))
+
+    @staticmethod
+    def _matches_tag(ql: str) -> bool:
+        return bool(re.search(r"tags?\s*[=:]\s*|with\s+tags?\s+", ql))
+
+    def _extract_tag_info(self, ql: str, params: Dict[str, Any]) -> None:
+        """
+        Populate params for tag search:
+          - params["search_type"] = "tag"
+          - params["tags"] = List[str]
+          - params["require_all"] = bool
+        """
+        params["search_type"] = "tag"
+        # Match either tag=: "a,b" or with tags "a,b"
+        tags_pattern = r'(?:tags?\s*[=:]\s*|with\s+tags?\s+)"?([^"]+)"?'
+        match = re.search(tags_pattern, ql)
+        if not match:
+            return
+        tags_str = match.group(1) or match.group(2) or ""
+        # Split on commas or "and"
+        tags = re.split(r",|\sand\s", tags_str)
+        params["tags"] = [t.strip() for t in tags if t.strip()]
+        params["require_all"] = "all" in ql and "tags" in ql
+
+    @staticmethod
+    def _matches_color(ql: str) -> bool:
+        return bool(re.search(r"colors?\s*[=:]\s*|with\s+colors?\s+", ql))
+
+    def _extract_color_info(self, ql: str, params: Dict[str, Any]) -> None:
+        """
+        Populate params for color search:
+          - params["search_type"] = "color"
+          - params["colors"] = List[str]
+        """
+        params["search_type"] = "color"
+        colors_pattern = r'(?:colors?\s*[=:]\s*|with\s+colors?\s+)"?([^"]+)"?'
+        match = re.search(colors_pattern, ql)
+        if not match:
+            return
+        colors_str = match.group(1) or match.group(2) or ""
+        colors = re.split(r",|\sand\s", colors_str)
+        params["colors"] = [c.strip() for c in colors if c.strip()]
+
+    @staticmethod
+    def _matches_date(ql: str) -> bool:
+        return bool(re.search(r"date\s*[=:]\s*|created\s+(on|in)\s+", ql))
+
+    def _extract_date_info(self, ql: str, params: Dict[str, Any]) -> None:
+        """
+        Populate params for date search:
+          - params["search_type"] = "date"
+          - params["date_filter"] = {"created_year": "YYYY", "created_month": "MM"}
+        """
+        params["search_type"] = "date"
+        date_filter: Dict[str, str] = {}
+
+        # Year (e.g., 2021, 2022, ...)
+        year_match = re.search(r"(20\d{2})", ql)
+        if year_match:
+            date_filter["created_year"] = year_match.group(1)
+
+        # Month names → numeric string
+        months = [
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december"
+        ]
+        for idx, month in enumerate(months, 1):
+            if month in ql:
+                date_filter["created_month"] = str(idx).zfill(2)
+                break
+
+        params["date_filter"] = date_filter
+
+    @staticmethod
+    def _matches_content(ql: str) -> bool:
+        return bool(re.search(r"content\s*[=:]\s*|subject\s*[=:]\s*|scene\s*[=:]\s*", ql))
+
+    def _extract_content_info(self, ql: str, params: Dict[str, Any]) -> None:
+        """
+        Populate params for content search:
+          - params["search_type"] = "content"
+          - params["content_filter"] = {"subject_type": str, "scene_type": str}
+        """
+        params["search_type"] = "content"
+        content_filter: Dict[str, str] = {}
+
+        subject_match = re.search(r"subject\s*[=:]\s*\"?([^\"]+)\"?", ql)
+        if subject_match:
+            content_filter["subject_type"] = subject_match.group(1).strip()
+
+        scene_match = re.search(r"scene\s*[=:]\s*\"?([^\"]+)\"?", ql)
+        if scene_match:
+            content_filter["scene_type"] = scene_match.group(1).strip()
+
+        params["content_filter"] = content_filter
+
+    def _extract_prompt_terms(self, ql: str, params: Dict[str, Any]) -> None:
+        """
+        If the query includes a prompt/text indicator, extract and store it:
+          - params["prompt_terms"]
+          - If search_type == "similarity", also set params["query_text"]
+        """
         prompt_pattern = r"(prompt|prompts|text)[:\s]+[\"']?([\w\s,]+)[\"']?"
-        match = re.search(prompt_pattern, query_lower)
-        if match:
-            params["prompt_terms"] = match.group(2).strip()
+        match = re.search(prompt_pattern, ql)
+        if not match:
+            return
+        prompt = match.group(2).strip()
+        params["prompt_terms"] = prompt
+        if params.get("search_type") == "similarity":
+            params["query_text"] = prompt
 
-            # If search_type is similarity, set query_text as well
-            if params.get("search_type") == "similarity":
-                params["query_text"] = match.group(2).strip()
-
-        # Extract style tags
+    def _extract_style_tags(self, ql: str, params: Dict[str, Any]) -> None:
+        """
+        Extract style tags from the query if present:
+          - params["style_tags"] = List[str]
+        """
         style_pattern = r"(style|type|category|look)[:\s]+[\"']?([\w\s,]+)[\"']?"
-        match = re.search(style_pattern, query_lower)
-        if match:
-            # Split by commas and clean up
-            styles = re.split(r',|\sand\s', match.group(2))
-            params["style_tags"] = [style.strip() for style in styles if style.strip()]
+        match = re.search(style_pattern, ql)
+        if not match:
+            return
+        raw_styles = match.group(2)
+        styles = re.split(r",|\sand\s", raw_styles)
+        params["style_tags"] = [s.strip() for s in styles if s.strip()]
 
-        # Extract resolution preference
+    def _extract_resolution(self, ql: str, params: Dict[str, Any]) -> None:
+        """
+        Extract resolution (width x height) if specified:
+          - params["resolution"] = {"width": int, "height": int}
+        """
         resolution_pattern = r"(resolution|size|dimensions)[:\s]+(\d+)\s*[x×]\s*(\d+)"
-        match = re.search(resolution_pattern, query_lower)
-        if match:
-            params["resolution"] = {
-                "width": int(match.group(2)),
-                "height": int(match.group(3))
-            }
+        match = re.search(resolution_pattern, ql)
+        if not match:
+            return
+        params["resolution"] = {
+            "width": int(match.group(2)),
+            "height": int(match.group(3))
+        }
 
-        # Extract limit for results
+    def _extract_limit(self, ql: str, params: Dict[str, Any]) -> None:
+        """
+        Extract a limit for number of results if specified, else default to 10:
+          - params["limit"]
+        """
         limit_pattern = r"(limit|top|first)\s+(\d+)"
-        match = re.search(limit_pattern, query_lower)
+        match = re.search(limit_pattern, ql)
         if match:
             params["limit"] = int(match.group(2))
         else:
-            # Default limit
             params["limit"] = 10
-
-        return params
 
     def preprocess_query(self, query_text: str) -> str:
         """
         Preprocess a natural language query to optimize for AI model search and analysis.
-
-        This function performs intelligent multi-stage text processing:
-        1. Preserves named entities (PRODUCT, ORG, GPE, PERSON, WORK_OF_ART)
-        2. Preserves noun phrases containing model family names (e.g., "transformer model")
-        3. Standardizes remaining words through lemmatization and filters out noise
-
-        The processing pipeline prioritizes technical accuracy while improving search consistency.
-
-        Args:
-            query_text: The raw query text from the user
-
-        Returns:
-            str: Preprocessed query text optimized for model search and parameter extraction
-
-        Examples:
-            >>> parser.preprocess_query("Show me GPT-4 models trained by OpenAI using transformers")
-            'GPT-4 OpenAI transformer model train'
-
-            >>> parser.preprocess_query("Find the best performing BERT models from 2023")
-            'BERT model best perform from 2023'
         """
-        # Basic text cleaning
         clean_text = query_text.strip()
-
-        # Parse with spaCy
         doc = self.nlp(clean_text)
 
-        # Initialize processing variables
-        processed_tokens = []
-        skip_indices = set()
+        processed_tokens: List[str] = []
+        skip_indices: Set[int] = set()
 
-        # STAGE 1: Preserve important named entities
-        for entity in doc.ents:
-            if entity.label_ in ["PRODUCT", "ORG", "GPE", "PERSON", "WORK_OF_ART"]:
-                # Mark all tokens in this entity as processed
-                for i in range(entity.start, entity.end):
-                    skip_indices.add(i)
-                # Keep the entity text as-is
-                processed_tokens.append(entity.text)
+        # STAGE 1: Preserve named entities
+        self._preserve_named_entities(doc, processed_tokens, skip_indices)
 
         # STAGE 2: Preserve model-related noun phrases
-        for noun_phrase in doc.noun_chunks:
-            # Check if this phrase contains any model family name
-            has_model_term = any(
-                family in noun_phrase.text.lower()
-                for family in self.model_families
-            )
-
-            if has_model_term:
-                # Check if we've already processed all tokens in this phrase
-                tokens_already_processed = all(
-                    i in skip_indices
-                    for i in range(noun_phrase.start, noun_phrase.end)
-                )
-
-                if not tokens_already_processed:
-                    # Mark all tokens in this phrase as processed
-                    for i in range(noun_phrase.start, noun_phrase.end):
-                        skip_indices.add(i)
-                    # Keep the phrase text as-is
-                    processed_tokens.append(noun_phrase.text)
+        self._preserve_model_noun_phrases(doc, processed_tokens, skip_indices)
 
         # STAGE 3: Process remaining tokens
-        for i, token in enumerate(doc):
-            if i not in skip_indices:
-                # Filter out noise tokens
-                is_meaningful = (
-                        not token.is_stop and  # Not a stopword
-                        not token.is_punct and  # Not punctuation
-                        not token.is_space and  # Not whitespace
-                        len(token.text.strip()) > 1  # Not a single character
-                )
+        self._process_remaining_tokens(doc, processed_tokens, skip_indices)
 
-                if is_meaningful:
-                    # Add the legitimatized, lowercase form
-                    processed_tokens.append(token.lemma_.lower())
-
-        # Combine all processed tokens into a single string
         return " ".join(processed_tokens)
+
+    def _preserve_named_entities(
+            self,
+            doc: spacy.tokens.Doc,
+            processed_tokens: List[str],
+            skip_indices: Set[int]
+    ) -> None:
+        """
+        Find entities with labels PRODUCT, ORG, GPE, PERSON, WORK_OF_ART,
+        mark their token indices as skipped, and add the full text to processed_tokens.
+        """
+        for ent in doc.ents:
+            if ent.label_ in {"PRODUCT", "ORG", "GPE", "PERSON", "WORK_OF_ART"}:
+                for i in range(ent.start, ent.end):
+                    skip_indices.add(i)
+                processed_tokens.append(ent.text)
+
+    def _preserve_model_noun_phrases(
+            self,
+            doc: spacy.tokens.Doc,
+            processed_tokens: List[str],
+            skip_indices: Set[int]
+    ) -> None:
+        """
+        For each noun chunk containing any term in self.model_families,
+        mark its token indices as skipped (if not already) and add the chunk text.
+        """
+        for chunk in doc.noun_chunks:
+            text_lower = chunk.text.lower()
+            contains_model_family = any(
+                family in text_lower for family in self.model_families
+            )
+            if not contains_model_family:
+                continue
+
+            # If at least one token in this chunk isn't yet skipped, preserve it
+            if any(i not in skip_indices for i in range(chunk.start, chunk.end)):
+                for i in range(chunk.start, chunk.end):
+                    skip_indices.add(i)
+                processed_tokens.append(chunk.text)
+
+    def _process_remaining_tokens(
+            self,
+            doc: spacy.tokens.Doc,
+            processed_tokens: List[str],
+            skip_indices: Set[int]
+    ) -> None:
+        """
+        For each token not in skip_indices, filter out stopwords, punctuation, spaces,
+        and single-character tokens; then add its lowercase lemma.
+        """
+        for i, token in enumerate(doc):
+            if i in skip_indices:
+                continue
+
+            if (
+                    token.is_stop
+                    or token.is_punct
+                    or token.is_space
+                    or len(token.text.strip()) <= 1
+            ):
+                continue
+
+            processed_tokens.append(token.lemma_.lower())
+

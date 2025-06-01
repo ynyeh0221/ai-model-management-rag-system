@@ -23,7 +23,7 @@ class TextSearchHandler(BaseSearchHandler):
         1. Query all metadata tables to find model_ids
         2. Query model_scripts_chunks to find more model_ids
         3. Fetch complete metadata for ALL found model_ids
-        4. Calculate weighted distance sum using complete metadata
+        4. Calculate a weighted distance sum using complete metadata
         5. Sort ALL results by distance
         6. Limit to requested number of results
         """
@@ -61,7 +61,7 @@ class TextSearchHandler(BaseSearchHandler):
             # Special handling for model descriptions using chunks - process one model at a time
             all_results = await self._process_model_descriptions_text_search(query, all_results)
 
-            # STEP 4: Calculate weighted distance sum for all models using all gathered metadata
+            # STEP 4: Calculate a weighted distance sum for all models using all gathered metadata
             all_results = self._calculate_model_distances(all_results, table_weights, collection_stats)
 
             # STEP 5 & 6: Convert to list, sort by distance, and limit results

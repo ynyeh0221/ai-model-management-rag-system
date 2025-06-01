@@ -182,7 +182,7 @@ class TestQueryParser(unittest.TestCase):
         self.assertEqual(params["search_type"], "epoch")
         self.assertEqual(params["epoch"], 15)
 
-        # Test color search type - using proper format that the implementation expects
+        # Test color search type - using the proper format that the implementation expects
         query = "Find image_processing with colors = 'blue,red'"
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["search_type"], "color")
@@ -190,13 +190,13 @@ class TestQueryParser(unittest.TestCase):
         self.assertGreater(len(params["colors"]), 1)
 
         # Test date search type
-        query = "Find image_processing created in 2023"  # Using a format the implementation recognizes
+        query = "Find image_processing created in 2023"  # Using a format, the implementation recognizes
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["search_type"], "date")
         self.assertIn("date_filter", params)
 
         # Test content search type - using the exact format the implementation expects
-        query = "Find image_processing with content = 'landscape'"  # Using content instead of subject
+        query = "Find image_processing with content = 'landscape'"  # Using content instead of a subject
         params = self.parser._extract_image_parameters(query, valid_model_ids)
         self.assertEqual(params["search_type"], "content")
 
@@ -229,7 +229,7 @@ class TestQueryParser(unittest.TestCase):
         self.assertEqual(params["limit"], 25)
 
     def test_extract_model_id_mentions(self):
-        """Test extraction of model ID mentions."""
+        """Test extraction of model ID mentions it."""
         # Test with explicit model ID
         query = "Find details for model id ABC123"
         model_ids = self.parser._extract_model_id_mentions(query)
@@ -343,7 +343,7 @@ class TestQueryParser(unittest.TestCase):
 
     def test_parse_query(self):
         """Test the full parse_query method."""
-        # Mock necessary components
+        # Mock the necessary parts
         with patch.object(self.parser, 'preprocess_query', return_value="processed query"), \
                 patch.object(self.parser, 'classify_intent', return_value=(QueryIntent.RETRIEVAL, "Test reason")), \
                 patch.object(self.parser, 'extract_parameters', return_value={"test_param": "test_value"}):
