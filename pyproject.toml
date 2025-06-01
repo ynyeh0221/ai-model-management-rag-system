@@ -34,6 +34,7 @@ langchain_ollama = "*"
 graphviz="*"
 pandas="*"
 prettytable="*"
+transformers="*"
 
 [tool.poetry.group.dev.dependencies]
 flake8 = "*"
