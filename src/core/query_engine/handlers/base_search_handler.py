@@ -1,3 +1,161 @@
+"""
+BaseSearchHandler: Intelligent Vector Database Search Engine
+===========================================================
+
+This class implements a sophisticated search system for machine learning model metadata
+stored in a vector database (ChromaDB). It provides intelligent query processing with
+Named Entity Recognition (NER), multi-table search capabilities, and advanced filtering.
+
+CORE ARCHITECTURE:
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           BaseSearchHandler                                     │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│ Dependencies:                                                                   │
+│ • ChromaManager: Vector DB operations                                           │
+│ • AccessControlManager: User permission filtering                               │
+│ • FilterTranslator: Query filter transformation                                 │
+│ • DistanceNormalizer: Distance score normalization                              │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+SEARCH WORKFLOW:
+┌─────────────┐    ┌──────────────┐    ┌─────────────────┐    ┌──────────────┐
+│   User      │    │  Parameter   │    │   NER Entity    │    │   Table      │
+│   Query     │───▶│  Extraction  │───▶│   Analysis      │───▶│  Selection   │
+│             │    │              │    │                 │    │              │
+└─────────────┘    └──────────────┘    └─────────────────┘    └──────────────┘
+                                                │
+                    ┌─────────────────────────────┼─────────────────────────────┐
+                    │                             ▼                             │
+            ┌───────────────┐              ┌──────────────┐              ┌─────────────┐
+            │   Negative    │              │   Positive   │              │   Neutral   │
+            │   Entities    │              │   Entities   │              │   Search    │
+            │   (Filter     │              │   (Target    │              │   (All      │
+            │    Out)       │              │    Tables)   │              │   Tables)   │
+            └───────────────┘              └──────────────┘              └─────────────┘
+                    │                             │                             │
+                    ▼                             ▼                             │
+            ┌───────────────┐              ┌──────────────┐                     │
+            │   Execute     │              │   Execute    │                     │
+            │   Negative    │              │   Positive   │◀────────────────────┘
+            │   Searches    │              │   Searches   │
+            └───────────────┘              └──────────────┘
+                    │                             │
+                    └─────────────┬───────────────┘
+                                  ▼
+                    ┌─────────────────────────────┐
+                    │      Filter & Combine       │
+                    │        Results              │
+                    └─────────────────────────────┘
+                                  │
+                                  ▼
+                    ┌─────────────────────────────┐
+                    │   Fetch Complete Metadata   │
+                    │   + Process Descriptions    │
+                    └─────────────────────────────┘
+                                  │
+                                  ▼
+                    ┌─────────────────────────────┐
+                    │    Calculate Normalized     │
+                    │    Distances & Rank         │
+                    └─────────────────────────────┘
+
+KEY COMPONENTS AND LOGIC:
+
+1. STATISTICS COLLECTION (_get_collection_distance_stats_for_query):
+   - Samples up to 10,000 records per collection using the actual user query
+   - Computes min/max/median/percentiles for distance normalization
+   - Handles access control filtering during statistics gathering
+
+2. NER ENTITY ANALYSIS (_analyze_ner_filters):
+   - Processes three entity types: architecture, dataset, training_config
+   - Distinguishes between positive entities (target what to find) and negative entities (filter out)
+   - Maps entities to their corresponding database tables:
+     * architecture → model_architectures
+     * dataset → model_datasets  
+     * training_config → model_training_configs
+
+3. SEARCH STRATEGY (_search_all_metadata_tables):
+   Four distinct search scenarios based on NER analysis:
+   
+   a) No NER entities: Search all tables with original query
+   b) Only positive entities: Search specific tables using entity values as queries
+   c) Only negative entities: Search all tables, then filter out negative matches
+   d) Mixed entities: Search positive tables with entity values, filter negative matches
+
+4. POSITIVE ENTITY PROCESSING:
+   - Uses entity values as specialized search queries (e.g., "ResNet" for architecture)
+   - Increases search limits for NER queries (3x multiplier)
+   - Supports intersection logic when multiple entity types are present
+
+5. NEGATIVE ENTITY FILTERING:
+   - Executes separate searches for negative entities
+   - Filters out models with similarity distance < 1.3 to negative entities
+   - Provides detailed filtering reasons for debugging
+
+6. METADATA COMPLETION (_fetch_complete_model_metadata):
+   - Processes models in small batches to reduce memory usage
+   - Fetches complete metadata from all relevant tables
+   - Merges distance scores and metadata across tables
+
+7. DESCRIPTION PROCESSING (_process_model_descriptions_text_search):
+   - Handles chunked text descriptions stored separately
+   - Searches for top 10 chunks but uses only top 5 for distance calculation
+   - Reconstructs full descriptions by sorting chunks by offset
+   - Computes average distance across relevant chunks
+
+8. DISTANCE NORMALIZATION & RANKING (_calculate_model_distances):
+   - Uses collection statistics to normalize distances (0.0 = perfect match, 1.0 = worst)
+   - Applies weighted combination across different metadata tables
+   - Combines metadata distance (90%) with chunk distance (10%) when both available
+   - Handles missing data by assigning worst-case scores (1.0)
+
+DATA STRUCTURES:
+
+Table Weights Dictionary:
+{
+    "model_architectures": 0.3,
+    "model_datasets": 0.25, 
+    "model_training_configs": 0.25,
+    "model_descriptions": 0.15,
+    "model_date": 0.05
+}
+
+Result Structure:
+{
+    "model_id_123": {
+        "model_id": "123",
+        "metadata": {...},
+        "tables": ["model_architectures", "model_datasets"],
+        "table_initial_distances": {"model_architectures": 0.45, ...},
+        "table_normalized_distances": {"model_architectures": 0.23, ...},
+        "distance": 0.67,
+        "match_source": "metadata",
+        "filter_info": {
+            "used_ner_query": True,
+            "applied_negative_filter": False
+        }
+    }
+}
+
+ACCESS CONTROL:
+- Integrates with AccessControlManager for user-based filtering
+- Applies access filters at multiple stages (statistics, search, results)
+- Supports hierarchical permission checking
+
+ERROR HANDLING:
+- Graceful degradation with default statistics when collections fail
+- Batch processing with individual error isolation
+- Comprehensive logging for debugging and monitoring
+
+PERFORMANCE OPTIMIZATIONS:
+- Parallel execution of multiple table searches using asyncio.gather()
+- Batch processing for metadata completion
+- Configurable search limits based on table importance
+- Early filtering to reduce downstream processing
+
+This design enables sophisticated semantic search with intelligent query understanding,
+multi-faceted filtering, and robust ranking across heterogeneous metadata sources.
+"""
 import asyncio
 import logging
 from typing import Dict, Any, Tuple, Optional, List, Coroutine, Iterable
