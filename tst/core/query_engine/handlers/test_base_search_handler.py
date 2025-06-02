@@ -426,7 +426,7 @@ class TestBaseSearchHandler(unittest.IsolatedAsyncioTestCase):
         # Assertions
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]['model_id'], 'model2')  # Lowest distance first
-        self.assertEqual(result[1]['model_id'], 'model3')  # Second lowest distance
+        self.assertEqual(result[1]['model_id'], 'model3')  # Second-lowest distance
 
     def test_prepare_text_search_items(self):
         # Setup test data
@@ -453,7 +453,7 @@ class TestBaseSearchHandler(unittest.IsolatedAsyncioTestCase):
         # Assertions
         self.assertEqual(len(result), 2)
 
-        # Check first item
+        # Check the first item
         self.assertEqual(result[0]['id'], 'model_metadata_model1')
         self.assertEqual(result[0]['model_id'], 'model1')
         self.assertEqual(result[0]['metadata']['name'], 'Model 1')
@@ -462,7 +462,7 @@ class TestBaseSearchHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]['distance'], 0.1)
         self.assertEqual(result[0]['merged_description'], 'Merged description 1')
 
-        # Check second item
+        # Check the second item
         self.assertEqual(result[1]['id'], 'model_metadata_model2')
         self.assertEqual(result[1]['model_id'], 'model2')
         self.assertEqual(result[1]['metadata']['name'], 'Model 2')
@@ -473,7 +473,7 @@ class TestBaseSearchHandler(unittest.IsolatedAsyncioTestCase):
 
     # Additional test cases for previously untested methods
     def test_sort_and_merge_descriptions_by_offset(self):
-        # Test with empty list
+        # Test with an empty list
         descriptions, merged = self.handler._sort_and_merge_descriptions_by_offset([])
         self.assertEqual(descriptions, [])
         self.assertEqual(merged, "")
@@ -715,7 +715,7 @@ class TestBaseSearchHandler(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(should_filter)
         self.assertEqual(reason, "")
 
-        # Test with matching model but high distance (should not filter)
+        # Test with a matching model but high distance (should not filter)
         negative_results = {
             'model_architectures': [{'model_id': 'model1', 'distance': 1.5}]
         }
@@ -724,7 +724,7 @@ class TestBaseSearchHandler(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(should_filter)
         self.assertEqual(reason, "")
 
-        # Test with matching model and low distance (should filter)
+        # Test with a matching model and low distance (should filter)
         negative_results = {
             'model_architectures': [{'model_id': 'model1', 'distance': 0.5}]
         }
@@ -1185,7 +1185,7 @@ class TestBaseSearchHandler(unittest.IsolatedAsyncioTestCase):
         # Assertions
         self.assertEqual(len(result), 2)
         self.assertEqual(result[0]['model_id'], 'model2')  # Lowest distance first
-        self.assertEqual(result[1]['model_id'], 'model3')  # Second lowest distance
+        self.assertEqual(result[1]['model_id'], 'model3')  # Second-lowest distance
 
     def test_prepare_text_search_items(self):
         # Setup test data
@@ -1212,7 +1212,7 @@ class TestBaseSearchHandler(unittest.IsolatedAsyncioTestCase):
         # Assertions
         self.assertEqual(len(result), 2)
 
-        # Check first item
+        # Check the first item
         self.assertEqual(result[0]['id'], 'model_metadata_model1')
         self.assertEqual(result[0]['model_id'], 'model1')
         self.assertEqual(result[0]['metadata']['name'], 'Model 1')
@@ -1221,7 +1221,7 @@ class TestBaseSearchHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[0]['distance'], 0.1)
         self.assertEqual(result[0]['merged_description'], 'Merged description 1')
 
-        # Check second item
+        # Check the second item
         self.assertEqual(result[1]['id'], 'model_metadata_model2')
         self.assertEqual(result[1]['model_id'], 'model2')
         self.assertEqual(result[1]['metadata']['name'], 'Model 2')
@@ -1230,6 +1230,399 @@ class TestBaseSearchHandler(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result[1]['distance'], 0.2)
         self.assertEqual(result[1]['merged_description'], 'Merged description 2')
 
+    async def test_execute_negative_searches_no_entities(self):
+        """Test _execute_negative_searches with no negative entities"""
+        negative_entities = {}
+        requested_limit = 10
+
+        result = await self.handler._execute_negative_searches(negative_entities, requested_limit)
+
+        self.assertEqual(result, {})
+        self.chroma_manager.search.assert_not_called()
+
+    async def test_execute_negative_searches_single_architecture(self):
+        """Test _execute_negative_searches with single architecture entity"""
+        negative_entities = {
+            'architecture': 'CNN'
+        }
+        requested_limit = 10
+
+        # Mock search result
+        self.chroma_manager.search.return_value = {
+            'results': [
+                {'metadata': {'model_id': 'model1'}, 'distance': 0.5},
+                {'metadata': {'model_id': 'unknown'}, 'distance': 0.3}  # Should be skipped
+            ]
+        }
+        self.distance_normalizer.extract_search_distance.return_value = 0.5
+
+        result = await self.handler._execute_negative_searches(negative_entities, requested_limit)
+
+        self.assertIn('model_architectures', result)
+        self.assertEqual(len(result['model_architectures']), 1)
+        self.assertEqual(result['model_architectures'][0]['model_id'], 'model1')
+        self.assertEqual(result['model_architectures'][0]['distance'], 0.5)
+
+        # Verify search was called correctly
+        self.chroma_manager.search.assert_called_once_with(
+            collection_name='model_architectures',
+            query='CNN',
+            where={},
+            limit=30,  # requested_limit * 3
+            include=["metadatas", "documents", "distances"]
+        )
+
+    async def test_execute_negative_searches_training_config(self):
+        """Test _execute_negative_searches with training_config entities"""
+        negative_entities = {
+            'training_config': {
+                'batch_size': '32',
+                'learning_rate': '0.001'
+            }
+        }
+        requested_limit = 10
+
+        # Mock search results for both fields
+        self.chroma_manager.search.side_effect = [
+            {
+                'results': [
+                    {'metadata': {'model_id': 'model1'}, 'distance': 0.4}
+                ]
+            },
+            {
+                'results': [
+                    {'metadata': {'model_id': 'model2'}, 'distance': 0.6}
+                ]
+            }
+        ]
+        self.distance_normalizer.extract_search_distance.side_effect = [0.4, 0.6]
+
+        result = await self.handler._execute_negative_searches(negative_entities, requested_limit)
+
+        self.assertIn('model_training_configs_batch_size', result)
+        self.assertIn('model_training_configs_learning_rate', result)
+        self.assertEqual(result['model_training_configs_batch_size'][0]['model_id'], 'model1')
+        self.assertEqual(result['model_training_configs_learning_rate'][0]['model_id'], 'model2')
+
+        # Verify both searches were called
+        self.assertEqual(self.chroma_manager.search.call_count, 2)
+
+    def test_build_negative_search_tasks_architecture_dataset(self):
+        """Test _build_negative_search_tasks with architecture and dataset"""
+        negative_entities = {
+            'architecture': 'ResNet',
+            'dataset': 'CIFAR-10'
+        }
+        requested_limit = 10
+
+        queries, tasks = self.handler._build_negative_search_tasks(negative_entities, requested_limit)
+
+        self.assertEqual(len(queries), 2)
+        self.assertEqual(len(tasks), 2)
+        self.assertIn('model_architectures', queries)
+        self.assertIn('model_datasets', queries)
+        self.assertEqual(queries['model_architectures'], 'ResNet')
+        self.assertEqual(queries['model_datasets'], 'CIFAR-10')
+
+    def test_build_negative_search_tasks_training_config(self):
+        """Test _build_negative_search_tasks with training_config"""
+        negative_entities = {
+            'training_config': {
+                'optimizer': 'Adam',
+                'epochs': '100'
+            }
+        }
+        requested_limit = 10
+
+        queries, tasks = self.handler._build_negative_search_tasks(negative_entities, requested_limit)
+
+        self.assertEqual(len(queries), 2)
+        self.assertEqual(len(tasks), 2)
+        self.assertIn('model_training_configs_optimizer', queries)
+        self.assertIn('model_training_configs_epochs', queries)
+        self.assertEqual(queries['model_training_configs_optimizer'], 'optimizer Adam')
+        self.assertEqual(queries['model_training_configs_epochs'], 'epochs 100')
+
+    def test_build_negative_search_tasks_skip_na_values(self):
+        """Test _build_negative_search_tasks skips N/A values"""
+        negative_entities = {
+            'training_config': {
+                'optimizer': 'Adam',
+                'learning_rate': 'N/A'  # Should be skipped
+            }
+        }
+        requested_limit = 10
+
+        queries, tasks = self.handler._build_negative_search_tasks(negative_entities, requested_limit)
+
+        self.assertEqual(len(queries), 1)
+        self.assertEqual(len(tasks), 1)
+        self.assertIn('model_training_configs_optimizer', queries)
+        self.assertNotIn('model_training_configs_learning_rate', queries)
+
+    def test_process_negative_search_results(self):
+        """Test _process_negative_search_results processing"""
+        negative_search_results = [
+            {
+                'results': [
+                    {'metadata': {'model_id': 'model1'}, 'distance': 0.5},
+                    {'metadata': {'model_id': 'unknown'}, 'distance': 0.3},  # Should be skipped
+                    {'metadata': {'model_id': 'model2'}, 'distance': 0.7}
+                ]
+            },
+            {
+                'results': [
+                    {'metadata': {'model_id': 'model3'}, 'distance': 0.4}
+                ]
+            }
+        ]
+
+        negative_table_queries = {
+            'model_architectures': 'CNN',
+            'model_datasets': 'ImageNet'
+        }
+
+        self.distance_normalizer.extract_search_distance.side_effect = [0.5, 0.7, 0.4]
+
+        result = self.handler._process_negative_search_results(
+            negative_search_results, negative_table_queries
+        )
+
+        self.assertEqual(len(result), 2)
+
+        # Check first table results
+        self.assertIn('model_architectures', result)
+        self.assertEqual(len(result['model_architectures']), 2)  # Should skip 'unknown'
+        self.assertEqual(result['model_architectures'][0]['model_id'], 'model1')
+        self.assertEqual(result['model_architectures'][0]['distance'], 0.5)
+        self.assertEqual(result['model_architectures'][1]['model_id'], 'model2')
+        self.assertEqual(result['model_architectures'][1]['distance'], 0.7)
+
+        # Check second table results
+        self.assertIn('model_datasets', result)
+        self.assertEqual(len(result['model_datasets']), 1)
+        self.assertEqual(result['model_datasets'][0]['model_id'], 'model3')
+        self.assertEqual(result['model_datasets'][0]['distance'], 0.4)
+
+    def test_build_negative_filter_reason_architecture(self):
+        """Test _build_negative_filter_reason for architecture"""
+        table_key = 'model_architectures'
+        distance = 0.5432
+
+        reason = self.handler._build_negative_filter_reason(table_key, distance)
+
+        # Based on actual implementation, it splits and uses the last part as field name
+        self.assertEqual(reason, "negative training config match: architectures (distance: 0.5432)")
+
+    def test_build_negative_filter_reason_dataset(self):
+        """Test _build_negative_filter_reason for dataset"""
+        table_key = 'model_datasets'
+        distance = 0.1234
+
+        reason = self.handler._build_negative_filter_reason(table_key, distance)
+
+        # Based on actual implementation, it splits and uses the last part as field name
+        self.assertEqual(reason, "negative training config match: datasets (distance: 0.1234)")
+
+    def test_build_negative_filter_reason_training_config(self):
+        """Test _build_negative_filter_reason for training config field"""
+        table_key = 'model_training_configs_batch_size'
+        distance = 0.8765
+
+        reason = self.handler._build_negative_filter_reason(table_key, distance)
+
+        self.assertEqual(reason, "negative training config match: size (distance: 0.8765)")
+
+    def test_analyze_ner_filters_negative_entities_only(self):
+        """Test _analyze_ner_filters with only negative entities"""
+        table_weights = {
+            'model_architectures': 0.5,
+            'model_datasets': 0.3,
+            'model_training_configs': 0.2
+        }
+        ner_filters = {
+            'architecture': {'value': 'CNN', 'is_positive': False},
+            'dataset': {'value': 'ImageNet', 'is_positive': False}
+        }
+
+        result = self.handler._analyze_ner_filters(ner_filters, table_weights)
+
+        self.assertFalse(result['has_positive_entities'])
+        self.assertTrue(result['has_negative_entities'])
+        self.assertEqual(result['positive_table_queries'], {})
+        self.assertEqual(result['entity_type_tables'], {})
+        self.assertEqual(result['negative_entities'], {
+            'architecture': 'CNN',
+            'dataset': 'ImageNet'
+        })
+
+    def test_analyze_ner_filters_mixed_positive_negative(self):
+        """Test _analyze_ner_filters with mixed positive and negative entities"""
+        table_weights = {
+            'model_architectures': 0.5,
+            'model_datasets': 0.3,
+            'model_training_configs': 0.2
+        }
+        ner_filters = {
+            'architecture': {'value': 'Transformer', 'is_positive': True},
+            'dataset': {'value': 'GLUE', 'is_positive': False},
+            'training_config': {
+                'optimizer': {'value': 'Adam', 'is_positive': True},
+                'batch_size': {'value': '32', 'is_positive': False}
+            }
+        }
+
+        result = self.handler._analyze_ner_filters(ner_filters, table_weights)
+
+        self.assertTrue(result['has_positive_entities'])
+        self.assertTrue(result['has_negative_entities'])
+
+        # Check positive entities
+        self.assertIn('model_architectures', result['positive_table_queries'])
+        self.assertEqual(result['positive_table_queries']['model_architectures'], 'Transformer')
+        self.assertIn('model_training_configs', result['positive_table_queries'])
+        self.assertEqual(result['positive_table_queries']['model_training_configs'], 'optimizer Adam')
+
+        # Check negative entities
+        self.assertEqual(result['negative_entities'], {
+            'dataset': 'GLUE',
+            'training_config': {'batch_size': '32'}
+        })
+
+        # Check entity type tables
+        self.assertIn('architecture', result['entity_type_tables'])
+        self.assertIn('training_config', result['entity_type_tables'])
+
+    def test_analyze_ner_filters_training_config_mixed_fields(self):
+        """Test _analyze_ner_filters with training_config having mixed positive/negative fields"""
+        table_weights = {
+            'model_architectures': 0.5,
+            'model_datasets': 0.3,
+            'model_training_configs': 0.2
+        }
+        ner_filters = {
+            'training_config': {
+                'optimizer': {'value': 'Adam', 'is_positive': True},
+                'learning_rate': {'value': '0.001', 'is_positive': True},
+                'batch_size': {'value': '128', 'is_positive': False},
+                'epochs': {'value': '50', 'is_positive': False}
+            }
+        }
+
+        result = self.handler._analyze_ner_filters(ner_filters, table_weights)
+
+        self.assertTrue(result['has_positive_entities'])
+        self.assertTrue(result['has_negative_entities'])
+
+        # Should only have one positive table query (first positive field found)
+        self.assertEqual(len(result['positive_table_queries']), 1)
+        self.assertIn('model_training_configs', result['positive_table_queries'])
+        # Should use the first positive field found (optimizer)
+        self.assertEqual(result['positive_table_queries']['model_training_configs'], 'optimizer Adam')
+
+        # Check negative entities include both negative fields
+        self.assertEqual(result['negative_entities'], {
+            'training_config': {
+                'batch_size': '128',
+                'epochs': '50'
+            }
+        })
+
+    async def test_search_all_metadata_tables_with_negative_filtering(self):
+        """Test _search_all_metadata_tables integrates negative filtering correctly"""
+        table_weights = {
+            "model_architectures": 0.5,
+            "model_datasets": 0.3,
+            "model_training_configs": 0.2
+        }
+
+        ner_filters = {
+            'architecture': {'value': 'Transformer', 'is_positive': True},
+            'dataset': {'value': 'ImageNet', 'is_positive': False}  # Negative filter
+        }
+
+        # Mock positive search results
+        positive_search_results = [
+            {
+                'results': [
+                    {'metadata': {'model_id': 'model1'}},
+                    {'metadata': {'model_id': 'model2'}}
+                ]
+            }
+        ]
+
+        # Mock negative search results
+        negative_search_results = [
+            {
+                'results': [
+                    {'metadata': {'model_id': 'model1'}, 'distance': 0.5}  # Should be filtered
+                ]
+            }
+        ]
+
+        # Configure mocks
+        with unittest.mock.patch.object(self.handler, '_execute_positive_searches') as mock_positive:
+            with unittest.mock.patch.object(self.handler, '_execute_negative_searches') as mock_negative:
+                with unittest.mock.patch.object(self.handler, '_process_search_results') as mock_process:
+                    mock_positive.return_value = positive_search_results
+                    mock_negative.return_value = {'model_datasets': [{'model_id': 'model1', 'distance': 0.5}]}
+                    mock_process.return_value = {'model2': {'model_id': 'model2'}}  # model1 filtered out
+
+                    result = await self.handler._search_all_metadata_tables(
+                        query="test query",
+                        chroma_filters={},
+                        requested_limit=10,
+                        table_weights=table_weights,
+                        user_id="user123",
+                        ner_filters=ner_filters
+                    )
+
+                    # Verify negative search was called
+                    mock_negative.assert_called_once()
+
+                    # Verify process_search_results was called with correct parameters
+                    #  are positional: positive_search_results, tables_to_search, entity_type_tables,
+                    # has_positive_entities, has_negative_entities, negative_results, user_id
+                    call_args = mock_process.call_args[0]  # positional args
+                    self.assertTrue(call_args[3])  # has_positive_entities
+                    self.assertTrue(call_args[4])  # has_negative_entities
+                    self.assertIn('model_datasets', call_args[5])  # negative_results
+
+    def test_should_filter_by_negative_entities_multiple_tables(self):
+        """Test _should_filter_by_negative_entities with multiple negative tables"""
+        model_id = 'model1'
+        negative_results = {
+            'model_architectures': [
+                {'model_id': 'model1', 'distance': 1.5},  # High distance should not filter
+                {'model_id': 'model2', 'distance': 0.5}
+            ],
+            'model_datasets': [
+                {'model_id': 'model1', 'distance': 0.8}  # Low distance should filter
+            ]
+        }
+
+        should_filter, reason = self.handler._should_filter_by_negative_entities(model_id, negative_results)
+
+        self.assertTrue(should_filter)
+        # Based on actual implementation, it uses a training config format
+        self.assertIn("negative training config match: datasets", reason)
+        self.assertIn("0.8000", reason)
+
+    def test_should_filter_by_negative_entities_training_config_fields(self):
+        """Test _should_filter_by_negative_entities with training config field"""
+        model_id = 'model1'
+        negative_results = {
+            'model_training_configs_optimizer': [
+                {'model_id': 'model1', 'distance': 0.2}
+            ]
+        }
+
+        should_filter, reason = self.handler._should_filter_by_negative_entities(model_id, negative_results)
+
+        self.assertTrue(should_filter)
+        self.assertIn("negative training config match", reason)
+        self.assertIn("optimizer", reason)
+        self.assertIn("0.2000", reason)
 
 if __name__ == '__main__':
     unittest.main()

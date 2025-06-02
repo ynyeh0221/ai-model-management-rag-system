@@ -1,3 +1,121 @@
+"""
+ASTSummaryGenerator - Logic Flow and Architecture
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           AST Summary Generator Overview                        │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  INPUT: Python Model Code (string) + File Path                                  │
+│                                    │                                            │
+│                                    ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                    PHASE 1: AST Parsing & Data Collection               │    │
+│  │                                                                         │    │
+│  │  ast.parse() ──► CodeSummaryVisitor ──► Collect:                        │    │
+│  │                         │                • Function definitions         │    │
+│  │                         │                • Class hierarchies            │    │
+│  │                         │                • Variable assignments         │    │
+│  │                         │                • Component instantiations     │    │
+│  │                         │                • Layer information            │    │
+│  │                         ▼                                               │    │
+│  │                  Update Internal State:                                 │    │
+│  │                  • model_layers[]                                       │    │
+│  │                  • class_layers{}                                       │    │
+│  │                  • function_calls{}                                     │    │
+│  │                  • component_instantiations{}                           │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                    │                                            │
+│                                    ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                 PHASE 2: Function Call Processing                       │    │
+│  │                                                                         │    │
+│  │  For each function definition found:                                    │    │
+│  │  ┌─────────────────────────────────────────────────────────────────┐    │    │
+│  │  │ 1. Find actual call instances in function_calls{}               │    │    │
+│  │  │ 2. Extract real argument values from calls                      │    │    │
+│  │  │ 3. Update function signature with actual values                 │    │    │
+│  │  │ 4. Add annotations showing parameter sources (call vs default)  │    │    │
+│  │  └─────────────────────────────────────────────────────────────────┘    │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                    │                                            │
+│                                    ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                   PHASE 3: Dataset Detection                            │    │
+│  │                                                                         │    │
+│  │  Primary Strategy: KeywordBasedDatasetVisitor                           │    │
+│  │  ├─ Scan for common dataset names (CIFAR, MNIST, etc.)                  │    │
+│  │  └─ Quick pattern matching                                              │    │
+│  │                                 │                                       │    │
+│  │                If Primary fails ▼                                       │    │
+│  │  Fallback Strategies:                                                   │    │
+│  │  ├─ DataLoaderVisitor    ──► Find DataLoader usage                      │    │
+│  │  ├─ DatasetClassVisitor  ──► Find custom Dataset classes                │    │
+│  │  └─ DatasetImportVisitor ──► Find dataset library imports               │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                    │                                            │
+│                                    ▼                                            │
+│  ┌─────────────────────────────────────────────────────────────────────────┐    │
+│  │                PHASE 4: Architecture & Dependencies                     │    │
+│  │                                                                         │    │
+│  │  Model Architecture:                                                    │    │
+│  │  ┌───────────────────────────────────────────────────────────────┐      │    │
+│  │  │ 1. Identify used components (referenced in layers/forward())  │      │    │
+│  │  │ 2. Filter out unused components                               │      │    │
+│  │  │ 3. For each component:                                        │      │    │
+│  │  │    ├─ List layers in definition order                         │      │    │
+│  │  │    ├─ Show only important layer types                         │      │    │
+│  │  │    └─ Extract key dimensions (limited by max_dims_to_show)    │      │    │
+│  │  └───────────────────────────────────────────────────────────────┘      │    │
+│  │                                                                         │    │
+│  │  Component Dependencies:                                                │    │
+│  │  └─ Map which components depend on which other components               │    │
+│  └─────────────────────────────────────────────────────────────────────────┘    │
+│                                    │                                            │
+│                                    ▼                                            │
+│                          Final Summary Output                                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                              Key Data Structures                                │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  model_layers: List[Dict]           ──► Individual layer information            │
+│  ├─ name, layer_type, class, args                                               │
+│  └─ Example: {"name": "conv1", "layer_type": "Conv2d", "class": "MyModel"}      │
+│                                                                                 │
+│  class_layers: Dict[str, List[str]] ──► Class → List of layer names             │
+│  ├─ Maps class names to their constituent layers                                │
+│  └─ Example: {"MyModel": ["conv1", "relu1", "pool1"]}                           │
+│                                                                                 │
+│  function_calls: Dict[str, Any]   ──► Function call tracking                    │
+│  ├─ Records actual arguments passed to functions                                │
+│  └─ Used to enhance function signatures with real values                        │
+│                                                                                 │
+│  used_components: Set[str]        ──► Components actually referenced            │
+│  └─ Filters out unused/dead code from final summary                             │
+│                                                                                 │
+│  important_layer_types: Set[str]  ──► Key layers to highlight                   │
+│  └─ Conv2d, Linear, Attention, etc. - focuses summary on crucial parts          │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                             Visitor Pattern Usage                               │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                 │
+│  CodeSummaryVisitor           ──► Main AST traversal and data collection        │
+│  KeywordBasedDatasetVisitor   ──► Fast dataset name detection                   │
+│  DataLoaderVisitor            ──► Find DataLoader instantiations                │
+│  DatasetClassVisitor          ──► Detect custom Dataset class definitions       │
+│  DatasetImportVisitor         ──► Track dataset-related imports                 │
+│                                                                                 │
+│  Each visitor walks the AST and populates the generator's internal state        │
+│  Multiple visitors allow for specialized detection strategies                   │
+└─────────────────────────────────────────────────────────────────────────────────┘
+
+PURPOSE: Transform raw Python model code into structured, human-readable summaries
+         that highlight key architectural components, datasets, and dependencies
+         while filtering out noise and focusing on the most important elements.
+"""
 import ast
 import os
 import re
