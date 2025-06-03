@@ -233,7 +233,7 @@ src/ (~5K LoC)
 
 ## Contributing
 
-We welcome contributions! See our [contributing guide](docs/CONTRIBUTING.md) for details on how to get involved.
+We welcome contributions! See the contributing guidelines for details on how to get involved.
 
 ## License
 
