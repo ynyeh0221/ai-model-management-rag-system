@@ -126,7 +126,7 @@ The system provides several formatted outputs:
 - Some complex semantic queries may require specific technical terminology for best results
 - Search results may sometimes be truncated in responses
 
-## Sameple Inputs/Outputs
+## Sample Inputs/Outputs
 
 ### CLI
 
