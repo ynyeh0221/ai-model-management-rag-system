@@ -1,7 +1,4 @@
-"""
-Refactored implementation of the AI Model Management RAG system UI components.
-This refactoring separates concerns into multiple classes for better maintainability.
-"""
+"""Utility helpers for displaying CLI output."""
 
 from datetime import datetime
 
@@ -13,18 +10,31 @@ class DisplayUtils:
     ASCII_CHARS = '@%#*+=-:. '
 
     @staticmethod
-    def truncate_string(text, max_length=120):
-        """Truncate a string if it exceeds the maximum length."""
+    def truncate_string(text, max_length: int = 120):
+        """Truncate a string if it exceeds ``max_length``."""
         if isinstance(text, str) and len(text) > max_length:
-            return text[:max_length - 3] + "..."
+            return text[: max_length - 3] + "..."
         return text
 
     @staticmethod
-    def format_timestamp(timestamp, format_str="%Y-%m-%dT%H:%M"):
-        """Format a timestamp string."""
+    def format_timestamp(timestamp, format_str: str = "%Y-%m-%dT%H:%M"):
+        """Return ``timestamp`` formatted according to ``format_str``.
+
+        - If ``timestamp`` is falsy, return ``"Unknown"``.
+        - Non-string values are returned unchanged.
+        - Strings are parsed with :func:`datetime.fromisoformat` with ``"Z"``
+          interpreted as UTC.  If parsing fails, the original value is returned.
+        """
         if not timestamp:
             return "Unknown"
+
+        if not isinstance(timestamp, str):
+            return timestamp
+
         try:
-            return datetime.fromisoformat(timestamp).strftime(format_str)
+            ts = timestamp.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(ts)
+            return dt.strftime(format_str)
         except (ValueError, TypeError):
             return timestamp
+
