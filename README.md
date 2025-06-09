@@ -3,6 +3,20 @@
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=ynyeh0221_model-insight-rag&metric=coverage)](https://sonarcloud.io/summary/new_code?id=ynyeh0221_model-insight-rag)
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ynyeh0221/model-insight-rag)
 
+## Table of Contents
+
+1. [Overview](#overview)
+2. [Quick Start](#quick-start)
+3. [Key Features](#key-features)
+4. [Architecture](#architecture)
+5. [Data Model](#data-model)
+6. [Processing Pipelines](#processing-pipelines)
+7. [Usage](#usage)
+8. [Technical requirements](#technical-requirements)
+9. [Project structure](#project-structure)
+10. [Contributing](#contributing)
+11. [License](#license)
+
 ## Overview
 
 A comprehensive framework for understanding, indexing, and retrieving machine learning models through advanced code analysis and agentic retrieval-augmented generation.
@@ -20,6 +34,9 @@ cd model-insight-rag
 
 # Install dependencies
 pip install -r requirements.txt
+
+# (Optional) install the package for easier CLI usage
+pip install -e .
 
 # Start the web interface
 streamlit run src/streamlit_main.py
@@ -202,6 +219,12 @@ python src/main.py process-images path/to/images/
 ```bash
 # Start the web interface
 streamlit run src/streamlit_main.py
+```
+
+### Running tests
+
+```bash
+pytest
 ```
 
 ## Technical requirements
