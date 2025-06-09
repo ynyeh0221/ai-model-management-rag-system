@@ -10,6 +10,7 @@ import logging
 from typing import Dict, Any
 
 from src.core.rag_system import RAGSystem
+from src.core.base_command_handler import BaseCommandHandler
 
 
 class CLIInterface:
@@ -300,7 +301,7 @@ class CLIInterface:
         message = status_messages.get(status, status)
         print(f"Status: {message}")
 
-class CommandHandler:
+class CommandHandler(BaseCommandHandler):
     """Handles command processing and delegation to appropriate components."""
 
     def __init__(self, cli_interface):
@@ -314,6 +315,8 @@ class CommandHandler:
         self.rag_system = cli_interface.rag_system
         self.components = self.rag_system.components
         self.user_id = cli_interface.user_id
+
+        super().__init__(self.rag_system, self.components, self.user_id)
 
         # These will be accessed from the CLIInterface
         self.model_display = cli_interface.model_display_manager
@@ -372,11 +375,8 @@ class CommandHandler:
 
     def _handle_list_models_command(self):
         """List all models accessible to the current user."""
-        access_control = self.components["vector_db"]["access_control"]
-
         try:
-            # Get models the user has access to
-            available_models = access_control.get_accessible_models(self.user_id)
+            available_models = self.list_models()
             print("\nAvailable models:")
             self.model_display.display_models_pretty(available_models)
         except Exception as e:
@@ -385,59 +385,13 @@ class CommandHandler:
     def _handle_list_images_command(self):
         """List all image_processing accessible to the current user."""
         try:
-            access_control = self.components["vector_db"]["access_control"]
-
-            # Get image_processing the user has access to
-            try:
-                available_images = access_control.get_accessible_images(self.user_id)
-            except AttributeError:
-                # Fallback: Get all image_processing if access control is not properly implemented
-                print("Warning: Access control not fully implemented. Showing all available image_processing.")
-                chroma_manager = self.components["vector_db"]["chroma_manager"]
-                # Use a safer method to get image_processing
-                available_images = asyncio.run(self._get_all_images(chroma_manager))
-
+            available_images = self.list_images()
             print("\nAvailable image_processing:")
             self.image_display.display_images_with_thumbnails(available_images, is_search_result=False)
         except Exception as e:
             print(f"Error listing image_processing: {str(e)}")
             print("Please ensure the vector database and access control are properly configured.")
 
-    async def _get_all_images(self, chroma_manager):
-        """
-        Fallback method to get all image_processing when access control fails.
-
-        Args:
-            chroma_manager: The Chroma database manager
-
-        Returns:
-            List of image dictionaries
-        """
-        try:
-            # Query for all image_processing in the generated_images collection
-            results = await chroma_manager.get(
-                collection_name="generated_images",
-                include=["metadatas"],
-                limit=100  # Set a reasonable limit
-            )
-
-            if results and "results" in results:
-                images = []
-                for item in results["results"]:
-                    metadata = item.get("metadata", {})
-                    images.append({
-                        "id": item.get("id", "Unknown"),
-                        "prompt": metadata.get("prompt", "No prompt"),
-                        "image_path": metadata.get("image_path", "Not available"),
-                        "thumbnail_path": metadata.get("thumbnail_path",
-                                                       metadata.get("image_path", "Not available")),
-                        "metadata": metadata
-                    })
-                return images
-            return []
-        except Exception as e:
-            print(f"Error retrieving image_processing: {str(e)}")
-            return []
 
     def _handle_query_command(self, cmd):
         """Process and execute a query command."""
@@ -464,9 +418,7 @@ class CommandHandler:
             model_id, _, output_path = self._extract_notebook_args(cmd)
 
         # 3) Invoke the generator
-        result = self.notebook_generator.generate_notebook(
-            self.components, model_id, output_path
-        )
+        result = self.generate_notebook(model_id, output_path)
 
         # 4) Print success / failure
         if result:
