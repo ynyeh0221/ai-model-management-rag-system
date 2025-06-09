@@ -359,6 +359,7 @@ import logging
 from typing import Dict, Any, Callable, List, Tuple
 
 from src.core.prompt_manager.query_path_prompt_manager import QueryPathPromptManager
+from src.core.search_result_processor import SearchResultProcessor
 
 
 class RAGSystem:
@@ -378,6 +379,7 @@ class RAGSystem:
         """Initialize RAG system core components"""
         self.components = None
         self.user_id = "anonymous"
+        self.search_processor = SearchResultProcessor()
         self.callbacks = {
             "on_log": lambda msg: None,  # Default log callback
             "on_result": lambda result: None,  # Default result callback
@@ -954,122 +956,40 @@ class RAGSystem:
             }
 
     def _process_search_results(self, search_results, reranker, parsed_query, query_text, rerank_threshold=0.1):
-        """Process and rerank search results"""
-        if not isinstance(search_results, dict) or 'items' not in search_results:
-            return []
-
-        # Extract items from search results
-        items_to_rerank = search_results['items']
-
-        if reranker and items_to_rerank:
-            self._log(f"Sending {len(items_to_rerank)} items to reranker")
-            # Loop through each item and add content field
-            for item in items_to_rerank:
-                item['content'] = ("Model description: " + item.get('merged_description', '') + "\n" +
-                                   "architecture is: " + item.get('metadata', {}).get('architecture', '') + "\n" +
-                                   "dataset is: " + item.get('metadata', {}).get('dataset', {})
-                                   )
-            all_ranked = reranker.rerank(
-                query=parsed_query.get("processed_query", query_text),
-                results=items_to_rerank,
-                top_k=len(items_to_rerank),
-                threshold=rerank_threshold
-            )
-            all_ranked = self._remove_field(all_ranked, "content")
-            return all_ranked
-        else:
-            return items_to_rerank
+        """Process and rerank search results (delegates to SearchResultProcessor)."""
+        self._log("Processing search results")
+        return self.search_processor.process_search_results(
+            search_results,
+            reranker,
+            parsed_query,
+            query_text,
+            rerank_threshold,
+        )
 
     @staticmethod
     def _remove_field(dict_list, field_to_remove):
         """Remove a field from all dictionaries in a list"""
-        if not dict_list:
-            return []
-        return [{k: v for k, v in item.items() if k != field_to_remove} for item in dict_list]
+        return SearchResultProcessor.remove_field(dict_list, field_to_remove)
 
     @staticmethod
     def _build_results_text(reranked_results, has_next_page: bool) -> str:
-        """
-        Build structured text of search results by delegating to smaller helpers.
-        """
-        lines = []
-        for idx, item in enumerate(reranked_results, start=1):
-            # Ensure we have a dict for the model
-            model = item if isinstance(item, dict) else {"model_id": str(item), "metadata": {}}
-            md = model.get("metadata") or {}
-
-            # 1) Parse any JSON‐encoded metadata fields
-            md = RAGSystem._parse_metadata_json(md)
-
-            # 2) Extract a single description string (with all fallbacks)
-            description = RAGSystem._extract_description(model, md)
-
-            # 3) Format the block for this one model
-            block_lines = RAGSystem._format_single_model(
-                idx=idx,
-                model=model,
-                md=md,
-                description=description,
-                has_next_page=has_next_page
-            )
-            lines.extend(block_lines)
-
-        return "\n".join(lines)
+        """Build structured text of search results."""
+        return SearchResultProcessor.build_results_text(reranked_results, has_next_page)
 
     @staticmethod
     def _parse_metadata_json(md: dict) -> dict:
-        """
-        Safely parse (if needed) any JSON‐encoded strings under the
-        keys: "file", "framework", "architecture", "dataset", "training_config".
-        If parsing fails or the value is missing, replace with {}.
-        """
-        import json
-
-        for key in ["file", "framework", "architecture", "dataset", "training_config"]:
-            val = md.get(key)
-            if isinstance(val, str):
-                try:
-                    md[key] = json.loads(val)
-                except json.JSONDecodeError:
-                    md[key] = {}
-            else:
-                # If it wasn’t a string, ensure at least an empty dict
-                md[key] = val or {}
-        return md
+        """Safely parse JSON encoded metadata."""
+        return SearchResultProcessor.parse_metadata_json(md)
 
     @staticmethod
     def _extract_description(model: dict, md: dict) -> str:
-        """
-        Return a single “description” value.  Fallback order:
-        1) model["merged_description"]
-        2) model["description"]
-        3) md["description"]
-        4) md["merged_description"]
-        5) "N/A"
-        """
-        desc = model.get("merged_description") or model.get("description")
-        if desc:
-            return desc
-        return md.get("description") or md.get("merged_description") or "N/A"
+        """Return a single description value with fallbacks."""
+        return SearchResultProcessor.extract_description(model, md)
 
     @staticmethod
     def _format_training_config(training: dict) -> list:
-        """
-        Given the training_config dict, return a list of lines
-        like:
-          - Training Configuration:
-            - Batch Size: 32
-            - Learning Rate: 0.001
-            ...
-        If training is empty or none, return an empty list.
-        """
-        lines = []
-        if training:
-            lines.append("- Training Configuration:")
-            for field in ["batch_size", "learning_rate", "optimizer", "epochs", "hardware_used"]:
-                pretty = field.replace("_", " ").title()
-                lines.append(f"  - {pretty}: {training.get(field, 'missing')}")
-        return lines
+        """Format training configuration details."""
+        return SearchResultProcessor.format_training_config(training)
 
     @staticmethod
     def _format_single_model(
@@ -1079,40 +999,14 @@ class RAGSystem:
             description: str,
             has_next_page: bool
     ) -> list:
-        """
-        Build a list of lines for exactly one “Model #idx” block.
-        Uses the already‐parsed md dict and the computed description.
-        """
-        lines = []
-        model_id = model.get("model_id") or model.get("id") or "missing"
-        rerank_score = model.get("rerank_score", "N/A")
-
-        file_md = md.get("file", {})
-        fw = md.get("framework", {})
-        arch = md.get("architecture", {})
-        ds = md.get("dataset", {})
-        training = md.get("training_config", {})
-
-        lines.append(f"Model #{idx}:")
-        lines.append(f"- Model ID: {model_id}")
-        lines.append(f"- Rerank Score: {rerank_score}")
-        lines.append(f"- File Size: {file_md.get('size_bytes', 'missing')}")
-        lines.append(f"- Created On: {file_md.get('creation_date', 'missing')}")
-        lines.append(f"- Last Modified: {file_md.get('last_modified_date', 'missing')}")
-        # “rstrip()” just to avoid trailing space if a version is empty
-        lines.append(f"- Framework: {fw.get('name', 'missing')} {fw.get('version', '')}".rstrip())
-        lines.append(f"- Architecture: {arch.get('type', 'missing')}")
-        lines.append(arch.get("reason", "missing"))
-        lines.append(f"- Dataset: {ds.get('name', 'missing')}")
-
-        # Insert any training lines
-        lines.extend(RAGSystem._format_training_config(training))
-
-        lines.append(f"- Description: {description}")
-        lines.append(f"Has More Models: {has_next_page}")
-        lines.append("")  # blank line after each model block
-
-        return lines
+        """Build a list of lines for exactly one model block."""
+        return SearchResultProcessor.format_single_model(
+            idx=idx,
+            model=model,
+            md=md,
+            description=description,
+            has_next_page=has_next_page,
+        )
 
     # Internal helper methods
 
